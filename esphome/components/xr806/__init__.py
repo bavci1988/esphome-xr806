@@ -116,7 +116,7 @@ def run_compile(args, config) -> bool:
                 ignore=shutil.ignore_patterns(".git"),
             )
             (staging / revision_file.name).write_text(
-                sdk_revision + "\\n"
+                sdk_revision + "\n"
             )
             staging.rename(sdk_root)
         except (OSError, shutil.Error) as err:
