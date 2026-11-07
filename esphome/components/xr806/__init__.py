@@ -54,16 +54,85 @@ def run_compile(args, config) -> bool:
     from pathlib import Path
 
     from esphome.core import EsphomeError
+    from .build_support.dependencies import DEPENDENCIES, resolve_dependencies
 
-    home = Path.home()
+    # Locate the ESPHome checkout from this platform module.
+    repo_root = Path(__file__).resolve().parents[3]
     build = Path(CORE.build_path)
     source = build / "src"
     xr_build = build / "xr806"
     obj = xr_build / "obj"
     fw_dir = xr_build / "firmware"
 
-    sdk = home / "OpenXR806/project/demo/trv16_port/gcc"
-    adapter = home / "xr806-work/xr806_esphome.mk"
+    # XR806_AUTO_DEPENDENCIES_V1
+    # Resolve pinned Git dependencies from the local cache.
+    try:
+        sdk_cache, arduinojson_src = resolve_dependencies()
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as err:
+        raise EsphomeError(
+            f"XR806 dependency resolution failed: {err}"
+        ) from err
+
+    adapter = (
+        repo_root
+        / "esphome/components/xr806/build_support/xr806_esphome.mk"
+    )
+
+    if not adapter.is_file():
+        raise EsphomeError(f"XR806 Make adapter not found: {adapter}")
+
+    # The vendor Makefiles generate files inside their SDK tree.
+    # Never compile directly inside the shared dependency cache.
+    sdk_root = xr_build / "sdk-work"
+    sdk_revision = DEPENDENCIES["xr806_sdk"]["commit"]
+    revision_file = sdk_root / ".esphome-xr806-sdk-revision"
+
+    if sdk_root.exists():
+        if (
+            not sdk_root.is_dir()
+            or not revision_file.is_file()
+            or revision_file.read_text().strip() != sdk_revision
+        ):
+            raise EsphomeError(
+                f"XR806 SDK work directory has an unexpected revision: "
+                f"{sdk_root}. Inspect it before removing or rebuilding it."
+            )
+        print("[XR806] Reusing SDK build workspace", flush=True)
+    else:
+        import tempfile
+
+        xr_build.mkdir(parents=True, exist_ok=True)
+        staging = Path(
+            tempfile.mkdtemp(prefix=".sdk-stage-", dir=xr_build)
+        )
+
+        try:
+            print("[XR806] Creating isolated SDK workspace", flush=True)
+            shutil.copytree(
+                sdk_cache,
+                staging,
+                dirs_exist_ok=True,
+                symlinks=True,
+                ignore=shutil.ignore_patterns(".git"),
+            )
+            (staging / revision_file.name).write_text(
+                sdk_revision + "\\n"
+            )
+            staging.rename(sdk_root)
+        except (OSError, shutil.Error) as err:
+            raise EsphomeError(
+                f"Could not prepare XR806 SDK workspace: {err}"
+            ) from err
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
+
+    sdk = sdk_root / "project/demo/trv16_port/gcc"
+
+    if not sdk.is_dir():
+        raise EsphomeError(
+            f"XR806 vendor Makefile directory missing: {sdk}"
+        )
 
     elf = xr_build / "app.elf"
     image = fw_dir / "firmware.img"
@@ -75,6 +144,8 @@ def run_compile(args, config) -> bool:
         raise EsphomeError("XR806 generated main.cpp is missing")
 
     variables = {
+        "XR806_REPO_ROOT": str(repo_root),
+        "XR806_ARDUINOJSON_SRC": str(arduinojson_src),
         "XR806_SKIP_CODEGEN": "1",
         "XR806_YAML": str(CORE.config_path),
         "XR806_SRC": str(source),
