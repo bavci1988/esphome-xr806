@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import shutil
 import subprocess
 import tempfile
@@ -64,7 +65,7 @@ def _verify(path: Path, name: str) -> None:
     changes = _git(
         "status",
         "--porcelain",
-        "--untracked-files=no",
+        "--untracked-files=all",
         cwd=path,
     )
 
@@ -81,62 +82,87 @@ def _verify(path: Path, name: str) -> None:
 
 
 def ensure_dependency(name: str) -> Path:
-    """Download a pinned dependency only when absent from the cache."""
+    """Ensure a pinned dependency is present in the shared cache."""
     if name not in DEPENDENCIES:
         raise ValueError(f"Unknown XR806 dependency: {name}")
 
     info = DEPENDENCIES[name]
+    parent = CACHE_ROOT / name
+    destination = parent / info["commit"]
 
-    destination = CACHE_ROOT / name / info["commit"]
+    parent.mkdir(parents=True, exist_ok=True)
 
-    if destination.exists():
-        _verify(destination, name)
-        print(f"[XR806] Cache hit: {name}")
-        return destination
+    # XR806_DEPENDENCY_LOCK_V1
+    # A permanent lock file coordinates independent build processes.
+    # Do not unlink this file: waiters may still hold its inode.
+    lock_path = parent / ".download.lock"
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
 
-    temporary = Path(
-        tempfile.mkdtemp(
-            prefix=f".{name}-",
-            dir=destination.parent,
-        )
-    )
+        try:
+            # Check again after obtaining the lock: another process
+            # might have completed the download while we waited.
+            if destination.exists() or destination.is_symlink():
+                try:
+                    _verify(destination, name)
+                except (
+                    OSError,
+                    RuntimeError,
+                    subprocess.CalledProcessError,
+                ) as err:
+                    raise RuntimeError(
+                        f"Invalid XR806 dependency cache: {destination}. "
+                        "Move the damaged directory aside before retrying."
+                    ) from err
 
-    try:
-        print(f"[XR806] Downloading: {name}", flush=True)
+                print(f"[XR806] Cache hit: {name}", flush=True)
+                return destination
 
-        subprocess.run(
-            [
-                "git",
-                "clone",
-                "--quiet",
-                "--no-checkout",
-                info["url"],
-                str(temporary),
-            ],
-            check=True,
-        )
+            temporary = Path(
+                tempfile.mkdtemp(
+                    prefix=f".{name}-",
+                    dir=parent,
+                )
+            )
 
-        _git(
-            "checkout",
-            "--detach",
-            "--quiet",
-            info["commit"],
-            cwd=temporary,
-        )
+            try:
+                print(f"[XR806] Downloading: {name}", flush=True)
 
-        _verify(temporary, name)
+                subprocess.run(
+                    [
+                        "git",
+                        "clone",
+                        "--quiet",
+                        "--no-checkout",
+                        info["url"],
+                        str(temporary),
+                    ],
+                    check=True,
+                )
 
-        temporary.rename(destination)
+                _git(
+                    "checkout",
+                    "--detach",
+                    "--quiet",
+                    info["commit"],
+                    cwd=temporary,
+                )
 
-    finally:
-        if temporary.exists():
-            shutil.rmtree(temporary)
+                _verify(temporary, name)
 
-    print(f"[XR806] Cached: {name}", flush=True)
+                # Atomic publication of a fully verified checkout.
+                temporary.rename(destination)
 
-    return destination
+            finally:
+                if temporary.exists():
+                    shutil.rmtree(temporary)
+
+            print(f"[XR806] Cached: {name}", flush=True)
+            return destination
+
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def resolve_dependencies() -> tuple[Path, Path]:
