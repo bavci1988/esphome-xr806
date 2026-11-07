@@ -137,7 +137,7 @@ void Application::setup() {
   clear_setup_priority_overrides();
 #endif
 
-#if defined(USE_ESP32) || defined(USE_LIBRETINY)
+#if defined(USE_ESP32) || defined(USE_LIBRETINY) || defined(USE_XR806)
   // Save main loop task handle for wake_loop_*() / fast select FreeRTOS notifications.
   esphome_main_task_handle = xTaskGetCurrentTaskHandle();
 #endif

@@ -1,6 +1,6 @@
 #include "esphome/core/defines.h"
 
-#if defined(USE_ESP32) || defined(USE_LIBRETINY)
+#if defined(USE_ESP32) || defined(USE_LIBRETINY) || defined(USE_XR806)
 
 #include "esphome/core/hal.h"
 #include "esphome/core/wake.h"
