@@ -48,12 +48,10 @@ void XR806StandbyTrial::setup() {
 
 void XR806StandbyTrial::dump_config() {
   ESP_LOGCONFIG(TAG, "XR806 physical standby trial (offline only):");
-  ESP_LOGCONFIG(TAG, "  Enter after: %u ms; wake timer: %u ms",
-                static_cast<unsigned>(this->entry_delay_ms_),
+  ESP_LOGCONFIG(TAG, "  Enter after: %u ms; wake timer: %u ms", static_cast<unsigned>(this->entry_delay_ms_),
                 static_cast<unsigned>(this->wake_after_ms_));
   if (this->has_wake_pin_) {
-    ESP_LOGCONFIG(TAG, "  Wake PA%u / IO%u: %s edge",
-                  static_cast<unsigned>(this->wake_pin_),
+    ESP_LOGCONFIG(TAG, "  Wake PA%u / IO%u: %s edge", static_cast<unsigned>(this->wake_pin_),
                   static_cast<unsigned>(this->wake_pin_ - 10),
                   this->wake_falling_ ? LOG_STR_LITERAL("falling") : LOG_STR_LITERAL("rising"));
   }
@@ -100,9 +98,7 @@ void XR806StandbyTrial::attempt_standby_() {
     const auto pin = static_cast<GPIO_Pin>(this->wake_pin_);
     HAL_GPIO_Init(GPIO_PORT_A, pin, &gpio);
     HAL_Wakeup_SetIO(static_cast<uint32_t>(wake_index),
-                     this->wake_falling_ ? WKUPIO_WK_MODE_FALLING_EDGE
-                                         : WKUPIO_WK_MODE_RISING_EDGE,
-                     gpio.pull);
+                     this->wake_falling_ ? WKUPIO_WK_MODE_FALLING_EDGE : WKUPIO_WK_MODE_RISING_EDGE, gpio.pull);
     pin_armed = true;
     HAL_PRCM_SetWakeupDebClk0(0);
     HAL_PRCM_SetWakeupIOxDebSrc(static_cast<uint32_t>(wake_index), 0);
@@ -115,16 +111,14 @@ void XR806StandbyTrial::attempt_standby_() {
   }
   p.set_wake_source_ready(true);
   if (!p.can_enter_standby()) {
-    ESP_LOGW(TAG, "Stage 7b standby refused: blockers=0x%08lx",
-             static_cast<unsigned long>(p.blockers()));
+    ESP_LOGW(TAG, "Stage 7b standby refused: blockers=0x%08lx", static_cast<unsigned long>(p.blockers()));
     goto cleanup;
   }
 
   // Calling pm_enter_mode() with OS_WAIT_FOREVER can hang indefinitely on an
   // SDK wakelock, despite a configured hardware wake timer. Bound the wait.
   HAL_Wakeup_SetEvent(0);
-  ESP_LOGI(TAG, "Entering PM_MODE_STANDBY (2), timer=%u ms",
-           static_cast<unsigned>(this->wake_after_ms_));
+  ESP_LOGI(TAG, "Entering PM_MODE_STANDBY (2), timer=%u ms", static_cast<unsigned>(this->wake_after_ms_));
   {
     const int result = pm_enter_mode_timeout(PM_MODE_STANDBY, 500);
     const uint32_t event = HAL_Wakeup_GetEvent();
@@ -139,12 +133,10 @@ void XR806StandbyTrial::attempt_standby_() {
         // Visible on a high-impedance analyzer without UART0/HC32 pollution.
         HAL_GPIO_WritePin(GPIO_PORT_B, GPIO_PIN_5, GPIO_PIN_HIGH);
       }
-      ESP_LOGI(TAG, "Standby resumed: event=0x%08lx, PM result=%d",
-               static_cast<unsigned long>(event), result);
+      ESP_LOGI(TAG, "Standby resumed: event=0x%08lx, PM result=%d", static_cast<unsigned long>(event), result);
     } else {
       // A return value alone is NOT proof the chip physically entered standby.
-      ESP_LOGW(TAG, "Standby not confirmed: event=0x%08lx, PM result=%d",
-               static_cast<unsigned long>(event), result);
+      ESP_LOGW(TAG, "Standby not confirmed: event=0x%08lx, PM result=%d", static_cast<unsigned long>(event), result);
     }
   }
 
