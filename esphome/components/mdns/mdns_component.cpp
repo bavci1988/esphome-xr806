@@ -158,10 +158,11 @@ void MDNSComponent::compile_records_(StaticVector<MDNSService, MDNS_SERVICE_COUN
     if (!friendly_name_empty) {
       txt_count++;  // friendly_name
     }
-#if defined(USE_ESP8266) || defined(USE_ESP32) || defined(USE_RP2) || defined(USE_LIBRETINY) || defined(USE_NRF52)
+#if defined(USE_ESP8266) || defined(USE_ESP32) || defined(USE_RP2) || defined(USE_LIBRETINY) || defined(USE_NRF52) || \
+    defined(USE_XR806)
     txt_count++;  // platform
 #endif
-#if defined(USE_WIFI) || defined(USE_ETHERNET) || defined(USE_OPENTHREAD)
+#if defined(USE_WIFI) || defined(USE_ETHERNET) || defined(USE_OPENTHREAD) || defined(USE_XR806_NETWORK_BRIDGE)
     txt_count++;  // network
 #endif
 #ifdef USE_API_NOISE
@@ -211,6 +212,9 @@ void MDNSComponent::compile_records_(StaticVector<MDNSService, MDNS_SERVICE_COUN
 #elif defined(USE_NRF52)
     MDNS_STATIC_CONST_CHAR(PLATFORM_NRF52, "nRF52");
     txt_records.push_back({MDNS_STR(TXT_PLATFORM), MDNS_STR(PLATFORM_NRF52)});
+#elif defined(USE_XR806)
+    MDNS_STATIC_CONST_CHAR(PLATFORM_XR806, "XR806");
+    txt_records.push_back({MDNS_STR(TXT_PLATFORM), MDNS_STR(PLATFORM_XR806)});
 #endif
 
     txt_records.push_back({MDNS_STR(TXT_BOARD), MDNS_STR(VALUE_BOARD)});
@@ -229,6 +233,9 @@ void MDNSComponent::compile_records_(StaticVector<MDNSService, MDNS_SERVICE_COUN
 #elif defined(USE_ETHERNET)
     MDNS_STATIC_CONST_CHAR(NETWORK_ETHERNET, "ethernet");
     txt_records.push_back({MDNS_STR(TXT_NETWORK), MDNS_STR(NETWORK_ETHERNET)});
+#elif defined(USE_XR806_NETWORK_BRIDGE)
+    MDNS_STATIC_CONST_CHAR(NETWORK_XR806_WIFI, "wifi");
+    txt_records.push_back({MDNS_STR(TXT_NETWORK), MDNS_STR(NETWORK_XR806_WIFI)});
 #elif defined(USE_OPENTHREAD)
     MDNS_STATIC_CONST_CHAR(NETWORK_THREAD, "thread");
     txt_records.push_back({MDNS_STR(TXT_NETWORK), MDNS_STR(NETWORK_THREAD)});
