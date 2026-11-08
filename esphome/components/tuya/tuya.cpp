@@ -49,8 +49,13 @@ void Tuya::setup() {
     esphome::xr806::lowpower_policy().require_external_mcu(true);
     this->update_low_power_sleep_lock_();
 #endif
-    // Original WXU initiates CMD01 directly, without a heartbeat probe.
-    this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
+    // The original WXU probes CMD01 at each candidate baud, without a heartbeat.
+    // With a fixed rate the existing queued CMD01 request is sufficient.
+    if (this->auto_baud_) {
+      this->lp_autobaud_.start(this->parent_->get_baud_rate());
+    } else {
+      this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
+    }
     this->set_interval(WIFI_STATUS_INTERVAL_ID, 1000, [this] { this->send_low_power_network_(); });
   } else {
     this->set_interval(HEARTBEAT_INTERVAL_ID, 15000, [this] { this->send_empty_command_(TuyaCommandType::HEARTBEAT); });
@@ -70,6 +75,12 @@ void Tuya::setup() {
 void Tuya::loop() {
   this->read_available([this](uint8_t b) { this->handle_char_(b); });
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    if (this->auto_baud_) {
+      if (this->lp_autobaud_.searching())
+        this->poll_low_power_autobaud_();
+      if (!this->lp_autobaud_.locked())
+        return;  // Never send queued MCU writes/status before CMD01 lock.
+    }
     if (this->lp_v0_.expire(millis(), 12000)) {
       ESP_LOGW(TAG, "Low-power MCU transaction timed out; sleep remains blocked");
       this->lp_network_status_ = 0xFF;
@@ -82,6 +93,11 @@ void Tuya::loop() {
 void Tuya::dump_config() {
   ESP_LOGCONFIG(TAG, "Tuya:");
   ESP_LOGCONFIG(TAG, "  Protocol: %s", this->protocol_ == TuyaProtocol::LOW_POWER_V0 ? "low_power_v0" : "standard");
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    ESP_LOGCONFIG(TAG, "  Auto baud: %s", YESNO(this->auto_baud_));
+    if (this->auto_baud_ && this->lp_autobaud_.locked())
+      ESP_LOGCONFIG(TAG, "  Detected baud: %u", static_cast<unsigned>(this->lp_autobaud_.baud()));
+  }
   if (this->init_state_ != TuyaInitState::INIT_DONE) {
     if (this->init_failed_) {
       ESP_LOGCONFIG(TAG, "  Initialization failed. Current init_state: %u", static_cast<uint8_t>(this->init_state_));
@@ -193,6 +209,14 @@ void Tuya::handle_char_(uint8_t c) {
 }
 
 void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len) {
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->auto_baud_ && this->lp_autobaud_.searching()) {
+    // validate_message_ already checked the full checksum. Keep the scanner
+    // independent so bad/wrong frames cannot unlock the boot state machine.
+    if (!this->lp_autobaud_.accept_frame(this->rx_message_.data(), this->rx_message_.size(), millis()))
+      return;
+    ESP_LOGI(TAG, "Tuya low_power_v0 baud locked: %u", static_cast<unsigned>(this->lp_autobaud_.baud()));
+  }
+
   TuyaCommandType command_type = (TuyaCommandType) command;
 
   if (this->expected_response_.has_value() && this->expected_response_ == command_type) {
