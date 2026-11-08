@@ -20,6 +20,27 @@ static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
 static constexpr uint32_t LP_COMMAND_DELAY_MS = 10;
 static constexpr int LP_MAX_RETRIES = 5;
 
+void Tuya::send_low_power_product_query_(bool direct_probe) {
+  // The original WXU calls its MCU-wake helper *before* CMD01. We pulse
+  // only when a wake GPIO is explicitly configured and its polarity verified.
+  // The GPIO configuration supports inverted pins for active-low wiring.
+  if (this->mcu_wake_pin_ != nullptr) {
+    this->mcu_wake_pin_->digital_write(true);
+    this->set_timeout("tuya_mcu_preprobe_wake", 10, [this, direct_probe]() {
+      this->mcu_wake_pin_->digital_write(false);
+      if (direct_probe)
+        this->send_low_power_direct_(0x01, {});
+      else
+        this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
+    });
+    return;
+  }
+  if (direct_probe)
+    this->send_low_power_direct_(0x01, {});
+  else
+    this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
+}
+
 void Tuya::poll_low_power_autobaud_() {
   const uint32_t now = millis();
   if (!this->lp_autobaud_.probe_due(now))
@@ -38,7 +59,7 @@ void Tuya::poll_low_power_autobaud_() {
   }
   this->rx_message_.clear();  // Drop a partial frame from the previous rate.
   this->lp_autobaud_.probe_sent(millis());
-  this->send_low_power_direct_(0x01, {});
+  this->send_low_power_product_query_(true);
   if (this->lp_autobaud_.attempts() % 8 == 0)
     ESP_LOGW(LP_TAG, "Still scanning MCU UART (9600/115200), %u probes",
              static_cast<unsigned>(this->lp_autobaud_.attempts()));
