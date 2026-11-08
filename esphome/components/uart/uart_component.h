@@ -185,6 +185,13 @@ class UARTComponent {
   // @return Parity option.
   UARTParityOptions get_parity() const { return this->parity_; }
 
+#ifdef USE_XR806
+  // XR806: apply a new baud rate to UART0 at runtime. Unlike set_baud_rate(),
+  // this changes the hardware divider and clears stale RX bytes.
+  // Not used by the generic Tuya protocol or by other target platforms.
+  virtual bool reconfigure_baud_rate(uint32_t baud_rate) { return false; }
+#endif
+
   // Set the baud rate for UART communication.
   // @param baud_rate Baud rate in bits per second.
   void set_baud_rate(uint32_t baud_rate) { baud_rate_ = baud_rate; }
