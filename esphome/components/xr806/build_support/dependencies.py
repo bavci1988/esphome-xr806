@@ -33,6 +33,22 @@ DEPENDENCIES = {
             "LICENSE.txt",
         ),
     },
+    # Version-pinned native ESPHome API Noise crypto dependencies.
+    "noise_c": {
+        "url": "https://github.com/esphome-libs/noise-c.git",
+        "commit": "62c2fdca7a874ea898761147bb062ca1cde9f36d",  # v0.1.31
+        "required": ("CMakeLists.txt", "include/noise/protocol.h"),
+    },
+    "libsodium": {
+        "url": "https://github.com/esphome-libs/libsodium.git",
+        "commit": "95c5e60d991b3f735619da8a307951c0483ef567",  # 1.10021.12
+        "submodules": True,
+        "required": (
+            "CMakeLists.txt",
+            "patches/apply.sh",
+            "libsodium/src/libsodium/include/sodium.h",
+        ),
+    },
 }
 
 
@@ -171,6 +187,13 @@ def ensure_dependency(name: str) -> Path:
                     info["commit"],
                     cwd=temporary,
                 )
+
+                if info.get("submodules"):
+                    subprocess.run(
+                        ["git", "submodule", "update", "--init", "--recursive"],
+                        cwd=temporary,
+                        check=True,
+                    )
 
                 _verify(temporary, name)
 
