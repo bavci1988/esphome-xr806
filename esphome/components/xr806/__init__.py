@@ -362,4 +362,4 @@ def run_compile(args, config) -> bool:
 
 # XR806_GPIO_REGISTRATION_V1
 # Register the platform's native GPIO schema during platform import.
-from . import gpio as _xr806_gpio  # noqa: F401
+from . import gpio as _xr806_gpio  # noqa: F401  # pylint: disable=wrong-import-position
