@@ -1,5 +1,5 @@
 // XR806 WLAN station backend (legacy smoke probes remain optional).
-// Not yet backed by ESPHome top-level wifi:; CPU standby remains blocked.
+// Supports ESPHome top-level wifi:; CPU standby remains blocked in Stage 7a.
 #include "esphome/core/defines.h"
 
 #ifdef USE_XR806_WLAN_SMOKE
@@ -81,7 +81,7 @@ void XR806WiFiComponent::setup() {
 }
 
 void XR806WiFiComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "XR806 WLAN station smoke test:");
+  ESP_LOGCONFIG(TAG, "XR806 WLAN station:");
   ESP_LOGCONFIG(TAG, "  SSID: %s", this->ssid_.c_str());
   ESP_LOGCONFIG(TAG, "  Power save requested: %s", this->power_save_ ? "yes" : "no");
   if (this->power_save_) {
@@ -89,7 +89,7 @@ void XR806WiFiComponent::dump_config() {
                   static_cast<unsigned>(this->dtim_),
                   static_cast<unsigned>(this->listen_interval_));
   }
-  ESP_LOGCONFIG(TAG, "  ESPHome Native API: not implemented");
+  ESP_LOGCONFIG(TAG, "  Native API: available when api: is configured");
   ESP_LOGCONFIG(TAG, "  CPU standby: not enabled");
   ESP_LOGCONFIG(TAG, "  TCP socket probe: %s",
                 this->socket_probe_enabled_ ? "enabled" : "disabled");
@@ -218,27 +218,31 @@ void XR806WiFiComponent::probe_socket_facade_() {
 }
 #endif
 
-void XR806WiFiComponent::apply_power_save_(void *opaque_netif) {
+void XR806WiFiComponent::apply_power_save_(void *opaque_netif, uint32_t now) {
   auto *nif = static_cast<struct netif *>(opaque_netif);
-  // Avoid reconfiguring PS on each loop; retry only after a new association.
-  this->power_save_attempted_ = true;
 
-  // Do not enable power saving until association AND a DHCP address exist.
-  // Vendor example project/example/wlan_low_power/main.c uses these commands.
+  // Driver power save is distinct from CPU standby. Only configure it after
+  // DHCP; on failure, throttle retries rather than hammering the radio or
+  // permanently giving up for this association.
   if (wlan_ext_request(nif, WLAN_EXT_CMD_SET_PM_DTIM, this->dtim_) != 0) {
-    ESP_LOGW(TAG, "Failed to set WLAN DTIM");
+    this->power_save_retry_.record(now, false);
+    ESP_LOGW(TAG, "Failed to set WLAN DTIM (will retry)");
     return;
   }
 
   if (wlan_ext_request(nif, WLAN_EXT_CMD_SET_LISTEN_INTERVAL, this->listen_interval_) != 0) {
-    ESP_LOGW(TAG, "Failed to set WLAN listen interval");
+    this->power_save_retry_.record(now, false);
+    ESP_LOGW(TAG, "Failed to set WLAN listen interval (will retry)");
     return;
   }
 
   if (wlan_set_ps_mode(nif, 1) != 0) {
-    ESP_LOGW(TAG, "Failed to enable WLAN power save");
+    this->power_save_retry_.record(now, false);
+    ESP_LOGW(TAG, "Failed to enable WLAN power save (will retry)");
     return;
   }
+
+  this->power_save_retry_.record(now, true);
   ESP_LOGI(TAG, "WLAN power save configured: DTIM=%u, listen interval=%u",
            static_cast<unsigned>(this->dtim_),
            static_cast<unsigned>(this->listen_interval_));
@@ -258,7 +262,7 @@ void XR806WiFiComponent::loop() {
 
   if (ready != this->connected_) {
     this->connected_ = ready;
-    this->power_save_attempted_ = false;
+    this->power_save_retry_.reset();
     this->socket_probe_done_ = false;
     this->socket_facade_probe_done_ = false;
 
@@ -298,8 +302,8 @@ void XR806WiFiComponent::loop() {
       }
     }
 
-    if (this->power_save_ && !this->power_save_attempted_)
-      this->apply_power_save_(nif);
+    if (this->power_save_ && this->power_save_retry_.due(now))
+      this->apply_power_save_(nif, now);
 
     if (this->socket_probe_enabled_ && !this->socket_probe_done_) {
       this->socket_probe_done_ = true;
@@ -325,8 +329,9 @@ void XR806WiFiComponent::loop() {
       ESP_LOGW(TAG, "wlan_sta_enable returned an error");
   }
 
-  // Intentionally do not set lowpower_policy().set_network_idle(true):
-  // network/API/OTA work is not yet tracked and CPU standby must remain blocked.
+  // Do not release system-standby blockers here:
+  // API/OTA/mDNS and optional MCU activity are not yet fully tracked.
+  // WLAN radio power save can operate independently of CPU standby.
 }
 
 }  // namespace esphome::xr806

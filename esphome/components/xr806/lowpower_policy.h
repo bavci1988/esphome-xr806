@@ -15,12 +15,14 @@ class XR806LowPowerPolicy {
     WAKE_NOT_READY   = 1u << 4,
     SCHEDULER_BUSY   = 1u << 5,
     NOT_REQUESTED    = 1u << 6,
+    API_BUSY         = 1u << 7,
+    MDNS_BUSY        = 1u << 8,
   };
 
   static constexpr uint32_t ALL_REQUIREMENTS =
       UART_BUSY | NETWORK_BUSY | OTA_BUSY |
       MCU_UNSYNCED | WAKE_NOT_READY |
-      SCHEDULER_BUSY;
+      SCHEDULER_BUSY | API_BUSY | MDNS_BUSY;
 
   // Fail closed: initially all subsystems block standby.
   // This policy never enters standby by itself.
@@ -40,8 +42,25 @@ class XR806LowPowerPolicy {
     update_(OTA_BUSY, ready);
   }
 
+  // No external MCU is required on a standalone WXU.
+  // A separate, optional MCU driver must explicitly request this gate.
+  // Each transition from absent to present resets the synchronization gate.
+  void require_external_mcu(bool required) {
+    const bool was_required = external_mcu_required_.exchange(required, std::memory_order_acq_rel);
+    if (required && !was_required)
+      blockers_.fetch_or(MCU_UNSYNCED, std::memory_order_acq_rel);
+  }
+
   void set_mcu_synchronized(bool ready) {
     update_(MCU_UNSYNCED, ready);
+  }
+
+  void set_api_idle(bool ready) {
+    update_(API_BUSY, ready);
+  }
+
+  void set_mdns_idle(bool ready) {
+    update_(MDNS_BUSY, ready);
   }
 
   void set_wake_source_ready(bool ready) {
@@ -53,9 +72,12 @@ class XR806LowPowerPolicy {
   }
 
   uint32_t blockers() const {
-    return blockers_.load(std::memory_order_acquire) |
-           (requested_.load(std::memory_order_acquire)
-                ? 0u : NOT_REQUESTED);
+    uint32_t blockers = blockers_.load(std::memory_order_acquire);
+    // An optional MCU may be completely absent, or may speak any protocol.
+    // No HC32L136/Tuya assumption is allowed in the platform policy.
+    if (!external_mcu_required_.load(std::memory_order_acquire))
+      blockers &= ~MCU_UNSYNCED;
+    return blockers | (requested_.load(std::memory_order_acquire) ? 0u : NOT_REQUESTED);
   }
 
   bool can_enter_standby() const {
@@ -72,6 +94,7 @@ class XR806LowPowerPolicy {
 
   std::atomic<uint32_t> blockers_{ALL_REQUIREMENTS};
   std::atomic<bool> requested_{false};
+  std::atomic<bool> external_mcu_required_{false};
 };
 
 #ifdef USE_XR806_LOWPOWER
