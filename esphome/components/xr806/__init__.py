@@ -26,6 +26,11 @@ CONF_POWER_SAVE = "power_save"
 CONF_SOCKET_PROBE = "socket_probe"
 CONF_SOCKET_FACADE_PROBE = "socket_facade_probe"
 CONF_STANDBY_TRIAL = "standby_trial"
+CONF_STANDBY = "standby"
+CONF_STANDBY_ENABLED = "enabled"
+CONF_STANDBY_QUIET_MS = "quiet_ms"
+CONF_STANDBY_MIN_AWAKE_MS = "min_awake_ms"
+CONF_STANDBY_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
 CONF_ENTRY_AFTER_MS = "entry_after_ms"
 CONF_WAKE_AFTER_MS = "wake_after_ms"
 CONF_WAKE_PIN = "wake_pin"
@@ -36,6 +41,7 @@ xr806_ns = cg.esphome_ns.namespace("xr806")
 XR806WLANSmoke = xr806_ns.class_("XR806WLANSmoke", cg.Component)
 XR806WiFiComponent = xr806_ns.class_("XR806WiFiComponent", cg.Component)
 XR806StandbyTrial = xr806_ns.class_("XR806StandbyTrial", cg.Component)
+XR806StandbyController = xr806_ns.class_("XR806StandbyController", cg.Component)
 
 
 def validate_wlan_smoke_password(value):
@@ -105,6 +111,36 @@ STANDBY_TRIAL_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 
 
+# Stage 7b production-side coordinator: deliberately does NOT implement any
+# Tuya/HC32 commands, UART autobaud, or transport-specific idle voting.
+# A firmware with active transports must register lifecycle participants
+# and its owners must actually clear their fail-closed PM blockers.
+STANDBY_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(XR806StandbyController),
+        cv.Required(CONF_STANDBY_ENABLED): cv.boolean,
+        cv.Optional(CONF_WAKE_AFTER_MS, default=3000): cv.int_range(
+            min=500, max=60000
+        ),
+        cv.Optional(CONF_STANDBY_QUIET_MS, default=250): cv.int_range(
+            min=200, max=30000
+        ),
+        cv.Optional(CONF_STANDBY_MIN_AWAKE_MS, default=5000): cv.int_range(
+            min=1000, max=60000
+        ),
+        cv.Optional(CONF_WAKE_PIN): cv.one_of(
+            "PA11", "PA12", "PA13", "PA19", "PA20", upper=True
+        ),
+        cv.Optional(CONF_WAKE_EDGE, default="falling"): cv.one_of(
+            "falling", "rising", lower=True
+        ),
+        cv.Optional(
+            CONF_STANDBY_REQUIRE_EXTERNAL_SYNC, default=False
+        ): cv.boolean,
+    }
+).extend(cv.COMPONENT_SCHEMA)
+
+
 def _update_core_data(config):
     if CONF_XR806_WLAN_SETTINGS in config and (
         CONF_XR806_WIFI in config or CONF_WLAN_SMOKE in config
@@ -114,6 +150,13 @@ def _update_core_data(config):
         raise cv.Invalid(
             "Choose either xr806.wifi or legacy xr806.wlan_smoke, not both"
         )
+    if CONF_STANDBY in config:
+        if not config["lowpower"]:
+            raise cv.Invalid("xr806.standby requires xr806.lowpower: true")
+        if not config[CONF_STANDBY][CONF_STANDBY_ENABLED]:
+            raise cv.Invalid("Remove xr806.standby when disabled")
+        if CONF_STANDBY_TRIAL in config:
+            raise cv.Invalid("Choose standby or standby_trial, not both")
     if CONF_STANDBY_TRIAL in config:
         trial = config[CONF_STANDBY_TRIAL]
         if not config["lowpower"]:
@@ -143,6 +186,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_XR806_WIFI): XR806_WIFI_SCHEMA,
             cv.Optional(CONF_XR806_WLAN_SETTINGS): XR806_WLAN_SETTINGS_SCHEMA,
             cv.Optional(CONF_STANDBY_TRIAL): STANDBY_TRIAL_SCHEMA,
+            cv.Optional(CONF_STANDBY): STANDBY_SCHEMA,
         }
     ),
     _update_core_data,
@@ -153,6 +197,42 @@ async def to_code(config):
     # XR806_LOWPOWER_FLAG_V1: activate future XR806 PM policy
     if config["lowpower"]:
         cg.add_define("USE_XR806_LOWPOWER")
+    if CONF_STANDBY in config:
+        cfg = config[CONF_STANDBY]
+        cg.add_define("USE_XR806_STANDBY_CONTROLLER")
+        cg.add_global(
+            cg.RawStatement('#include "esphome/components/xr806/standby_controller.h"')
+        )
+        controller = cg.new_Pvariable(cfg["id"])
+        cg.add(controller.set_wake_after_ms(cfg[CONF_WAKE_AFTER_MS]))
+        cg.add(controller.set_quiet_ms(cfg[CONF_STANDBY_QUIET_MS]))
+        cg.add(controller.set_min_awake_ms(cfg[CONF_STANDBY_MIN_AWAKE_MS]))
+        if CONF_WAKE_PIN in cfg:
+            cg.add(controller.set_wake_pin(int(cfg[CONF_WAKE_PIN][2:])))
+        cg.add(controller.set_wake_falling(cfg[CONF_WAKE_EDGE] == "falling"))
+        # Transports which are absent can never have work in flight. Present
+        # transports retain their initial busy vote until their own driver
+        # explicitly votes idle; no hardcoded MCU or Tuya protocol assumption.
+        cg.add(controller.set_no_uart("uart" not in CORE.config))
+        wlan = (
+            "wifi" in CORE.config
+            or "network" in CORE.config
+            or CONF_XR806_WIFI in config
+            or CONF_WLAN_SMOKE in config
+            or CONF_XR806_WLAN_SETTINGS in config
+        )
+        cg.add(controller.set_no_network(not wlan))
+        cg.add(controller.set_no_api("api" not in CORE.config))
+        cg.add(controller.set_no_ota("ota" not in CORE.config))
+        cg.add(controller.set_no_mdns("mdns" not in CORE.config))
+        cg.add(
+            controller.set_external_sync_required(
+                cfg[CONF_STANDBY_REQUIRE_EXTERNAL_SYNC]
+            )
+        )
+        cg.add(controller.set_require_uart_participant("uart" in CORE.config))
+        await cg.register_component(controller, cfg)
+
     if CONF_STANDBY_TRIAL in config:
         forbidden = (
             "wifi",
