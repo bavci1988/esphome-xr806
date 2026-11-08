@@ -185,6 +185,12 @@ class UARTComponent {
   // @return Parity option.
   UARTParityOptions get_parity() const { return this->parity_; }
 
+#ifdef USE_XR806
+  // Apply a new physical UART speed without recreating the pinmux.
+  // Probing policy (CMD01/autobaud) remains in the MCU protocol layer.
+  virtual bool reconfigure_baud_rate(uint32_t) { return false; }
+#endif
+
   // Set the baud rate for UART communication.
   // @param baud_rate Baud rate in bits per second.
   void set_baud_rate(uint32_t baud_rate) { baud_rate_ = baud_rate; }
