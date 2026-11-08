@@ -118,9 +118,7 @@ size_t XR806GPIOPin::dump_summary(
 // XR806_NATIVE_INTERRUPT_V1
 
 ISRInternalGPIOPin XR806GPIOPin::to_isr() const {
-  return ISRInternalGPIOPin(
-      const_cast<XR806GPIOPin *>(this)
-  );
+  return ISRInternalGPIOPin(this);
 }
 
 void XR806GPIOPin::detach_interrupt() const {
