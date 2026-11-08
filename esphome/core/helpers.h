@@ -1,4 +1,8 @@
 #pragma once
+#ifdef USE_XR806
+#include <FreeRTOS.h>
+#include <semphr.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -1301,11 +1305,11 @@ inline bool str_contains_ignore_case(const char *haystack, const char *needle) {
 // strcasestr is a GNU extension: newlib only declares it when _GNU_SOURCE is set.
 // ESP32/host builds get it from their framework or from g++ on Linux;
 // LibreTiny, RP2 and Zephyr do not, so they use the hand-rolled fallback.
-#if defined(USE_LIBRETINY) || defined(USE_RP2) || defined(USE_ZEPHYR)
+#if defined(USE_LIBRETINY) || defined(USE_RP2) || defined(USE_ZEPHYR) || defined(USE_XR806)
   return str_contains_ignore_case_fallback(haystack, needle);
-#else   // defined(USE_LIBRETINY) || defined(USE_RP2) || defined(USE_ZEPHYR)
+#else   // defined(USE_LIBRETINY) || defined(USE_RP2) || defined(USE_ZEPHYR) || defined(USE_XR806)
   return strcasestr(haystack, needle) != nullptr;
-#endif  // defined(USE_LIBRETINY) || defined(USE_RP2) || defined(USE_ZEPHYR)
+#endif  // defined(USE_LIBRETINY) || defined(USE_RP2) || defined(USE_ZEPHYR) || defined(USE_XR806)
 }
 #endif  // USE_ESP8266
 
@@ -2244,7 +2248,7 @@ class Mutex {
   void lock() {}
   bool try_lock() { return true; }
   void unlock() {}
-#elif defined(USE_ESP32) || defined(USE_LIBRETINY)
+#elif defined(USE_ESP32) || defined(USE_LIBRETINY) || defined(USE_XR806)
   // FreeRTOS platforms: inline to avoid out-of-line call overhead.
   Mutex() { handle_ = xSemaphoreCreateMutex(); }
   ~Mutex() = default;
