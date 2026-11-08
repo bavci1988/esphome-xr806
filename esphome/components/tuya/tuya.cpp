@@ -45,6 +45,8 @@ static bool network_is_connected() {
 void Tuya::setup() {
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
     this->init_state_ = TuyaInitState::INIT_PRODUCT;
+    if (this->mcu_wake_pin_ != nullptr)
+      this->mcu_wake_pin_->digital_write(false);  // Inactive logical level.
 #ifdef USE_XR806_LOWPOWER
     esphome::xr806::lowpower_policy().require_external_mcu(true);
     this->update_low_power_sleep_lock_();
@@ -54,7 +56,7 @@ void Tuya::setup() {
     if (this->auto_baud_) {
       this->lp_autobaud_.start(this->parent_->get_baud_rate());
     } else {
-      this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
+      this->send_low_power_product_query_(false);
     }
     this->set_interval(WIFI_STATUS_INTERVAL_ID, 1000, [this] { this->send_low_power_network_(); });
   } else {
