@@ -2,12 +2,17 @@ name: XR806 Low-Power Policy (MCU-independent)
 
 on:
   push:
-    branches: [dev, test/xr806-lowpower-stage7a]
+    branches: [dev, test/xr806-lowpower-stage7a, "stage7b/standby-wakeup"]
   pull_request:
     branches: [dev]
     paths:
       - "esphome/components/xr806/lowpower_policy.h"
       - "esphome/components/xr806/wifi_power_save_retry.h"
+      - "esphome/components/xr806/standby_trial_state.h"
+      - "esphome/components/xr806/standby_trial.cpp"
+      - "esphome/components/xr806/standby_trial.h"
+      - "esphome/components/xr806/__init__.py"
+      - "tests/xr806/standby_trial_state_test.cpp"
       - "tests/xr806/lowpower_stage7a_test.cpp"
       - ".github/workflows/xr806-lowpower-ci.yml"
 
@@ -27,4 +32,8 @@ jobs:
             tests/xr806/lowpower_stage7a_test.cpp \
             -o /tmp/xr806-lowpower-policy-test
           /tmp/xr806-lowpower-policy-test
-          echo "PASS MCU-independent WXU policy and radio PS retries"
+          g++ -std=gnu++20 -Wall -Wextra -Werror -pthread -I. \\
+            tests/xr806/standby_trial_state_test.cpp \\
+            -o /tmp/xr806-stage7b-trial-test
+          /tmp/xr806-stage7b-trial-test
+          echo "PASS MCU-independent WXU policy, WLAN retries and Stage 7b one-shot gate"
