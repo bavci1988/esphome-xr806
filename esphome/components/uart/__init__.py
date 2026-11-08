@@ -79,6 +79,10 @@ LibreTinyUARTComponent = uart_ns.class_(
 )
 HostUartComponent = uart_ns.class_("HostUartComponent", UARTComponent, cg.Component)
 
+# XR806_UART_PYTHON_V1
+XR806UARTComponent = uart_ns.class_(
+    "XR806UARTComponent", UARTComponent, cg.Component
+)
 
 NATIVE_UART_CLASSES = (
     str(IDFUARTComponent),
@@ -156,6 +160,47 @@ def validate_rx_pin(value):
     return value
 
 
+
+# TRV16 UART0 uses PB0/PB1; UART2 is reserved for the SDK console.
+# Do not weaken the normal GPIO reserved-pin validation.
+def _validate_xr806_uart_tx(value):
+    if CORE.target_platform != "xr806":
+        return pins.internal_gpio_output_pin_schema(value)
+
+    if not isinstance(value, str) or value.strip().upper() != "PB0":
+        raise cv.Invalid(
+            "XR806 UART0 TX requires PB0 (WXU pad 15)"
+        )
+    return "PB0"
+
+
+def _validate_xr806_uart_rx(value):
+    if CORE.target_platform != "xr806":
+        return validate_rx_pin(value)
+
+    if not isinstance(value, str) or value.strip().upper() != "PB1":
+        raise cv.Invalid(
+            "XR806 UART0 RX requires PB1 (WXU pad 16)"
+        )
+    return "PB1"
+
+
+def _validate_xr806_uart_settings(config):
+    if CORE.target_platform != "xr806":
+        return config
+
+    if (
+        config[CONF_DATA_BITS] != 8
+        or config[CONF_STOP_BITS] != 1
+        or str(config[CONF_PARITY]) != "NONE"
+    ):
+        raise cv.Invalid(
+            "XR806 UART V1 currently supports only 8N1"
+        )
+
+    return config
+
+
 def validate_host_config(config):
     if CORE.is_host:
         if CONF_TX_PIN in config or CONF_RX_PIN in config:
@@ -196,6 +241,8 @@ def _uart_declare_type(value):
         return cv.declare_id(LibreTinyUARTComponent)(value)
     if CORE.is_host:
         return cv.declare_id(HostUartComponent)(value)
+    if CORE.target_platform == "xr806":
+        return cv.declare_id(XR806UARTComponent)(value)
     raise NotImplementedError
 
 
@@ -296,8 +343,8 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): _uart_declare_type,
             cv.Required(CONF_BAUD_RATE): cv.int_range(min=1),
-            cv.Optional(CONF_TX_PIN): pins.internal_gpio_output_pin_schema,
-            cv.Optional(CONF_RX_PIN): validate_rx_pin,
+            cv.Optional(CONF_TX_PIN): _validate_xr806_uart_tx,
+            cv.Optional(CONF_RX_PIN): _validate_xr806_uart_rx,
             cv.Optional(CONF_FLOW_CONTROL_PIN): cv.All(
                 cv.only_on_esp32, pins.internal_gpio_output_pin_schema
             ),
@@ -330,6 +377,7 @@ CONFIG_SCHEMA = cv.All(
     cv.has_at_least_one_key(CONF_TX_PIN, CONF_RX_PIN, CONF_PORT),
     validate_host_config,
     validate_rx_buffer_size,
+    _validate_xr806_uart_settings,
 )
 
 
@@ -370,8 +418,13 @@ async def to_code(config):
 
     cg.add(var.set_baud_rate(config[CONF_BAUD_RATE]))
 
-    await cg.add_pin(var.set_tx_pin, config.get(CONF_TX_PIN))
-    await cg.add_pin(var.set_rx_pin, config.get(CONF_RX_PIN))
+    if CORE.target_platform == "xr806":
+        # Pins are configured by the WXU board HAL pinmux.
+        # Do not create GPIO objects for the reserved UART pins.
+        cg.add(var.set_uart_id(0))
+    else:
+        await cg.add_pin(var.set_tx_pin, config.get(CONF_TX_PIN))
+        await cg.add_pin(var.set_rx_pin, config.get(CONF_RX_PIN))
     await cg.add_pin(var.set_flow_control_pin, config.get(CONF_FLOW_CONTROL_PIN))
     cg.add_optional(var.set_name, config.get(CONF_PORT))
     cg.add(var.set_rx_buffer_size(config[CONF_RX_BUFFER_SIZE]))

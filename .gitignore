@@ -154,3 +154,26 @@ sdkconfig.*
 /dependencies.lock
 
 api-docs/
+
+# BEGIN XR806 LOCAL BUILD ARTIFACTS
+# Temporary source backups from port development.
+*.bak
+
+# Local XR806 build outputs.
+/.xr806-build/
+
+# Generated objects and dependency files in the vendor SDK.
+/third_party/xr806_sdk/**/*.o
+/third_party/xr806_sdk/**/*.d
+/third_party/xr806_sdk/**/*.elf
+/third_party/xr806_sdk/**/*.map
+/third_party/xr806_sdk/**/*.log
+
+# Do not globally ignore *.a or *.bin:
+# the vendor SDK ships required prebuilt libraries and firmware.
+# Allow the SDK's own .gitignore to distinguish shipped
+# vendor libraries from libraries generated during builds.
+# Downloaded framework dependencies are not part of ESPHome Git.
+/third_party/xr806_sdk/
+/third_party/ArduinoJson/
+# END XR806 LOCAL BUILD ARTIFACTS
