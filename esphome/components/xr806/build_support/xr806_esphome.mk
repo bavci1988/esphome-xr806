@@ -53,7 +53,7 @@ XR806_DEFINES := $(XR806_SRC)/esphome/core/defines.h
 XR806_CXX ?= arm-none-eabi-g++
 
 XR806_CXXFLAGS := \
-    -std=gnu++2a \
+    -std=gnu++20 \
     -mcpu=cortex-m33 -mthumb \
     -mfpu=fpv5-sp-d16 -mfloat-abi=softfp -mcmse \
     -fno-exceptions -fno-rtti \
