@@ -25,7 +25,7 @@ jobs:
       - name: Install ARM cross compiler
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi cmake
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-dev libnewlib-arm-none-eabi cmake
       - name: Install ESPHome Python dependencies
         run: python -m pip install -e .
       - name: Cold cross-build from pinned source
@@ -74,7 +74,7 @@ jobs:
       - name: Install ARM cross compiler
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi cmake
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-dev libnewlib-arm-none-eabi cmake
       - name: Install ESPHome Python dependencies
         run: python -m pip install -e .
       - name: Generate ephemeral encrypted and plaintext test configurations
@@ -84,19 +84,20 @@ jobs:
           from pathlib import Path
           import base64, secrets
           folder = Path(".xr806-actions-tests")
-          common = """xr806:
-            board: wxu
-          wifi:
-            ssid: ci-only
-            password: ci-password1234
-          socket:
-            implementation: lwip_sockets
-          api:
-            reboot_timeout: 0s
-            max_connections: 1
-            listen_backlog: 1
-            max_send_queue: 4
-          """
+          common = (
+              "xr806:\n"
+              "  board: wxu\n"
+              "wifi:\n"
+              "  ssid: ci-only\n"
+              "  password: ci-password1234\n"
+              "socket:\n"
+              "  implementation: lwip_sockets\n"
+              "api:\n"
+              "  reboot_timeout: 0s\n"
+              "  max_connections: 1\n"
+              "  listen_backlog: 1\n"
+              "  max_send_queue: 4\n"
+          )
           for encrypted in (False, True):
               name = "xr806-stage6c-noise" if encrypted else "xr806-stage6b-api"
               content = "esphome:\n  name: " + name + "\n" + common
