@@ -34,7 +34,10 @@ class XR806StandbyController final : public Component {
   void set_wake_after_ms(uint32_t value) { wake_after_ms_ = value; }
   void set_quiet_ms(uint32_t value) { quiet_ms_ = value; }
   void set_min_awake_ms(uint32_t value) { min_awake_ms_ = value; }
-  void set_wake_pin(uint8_t pin) { wake_pin_ = pin; has_wake_pin_ = true; }
+  void set_wake_pin(uint8_t pin) {
+    wake_pin_ = pin;
+    has_wake_pin_ = true;
+  }
   void set_wake_falling(bool value) { wake_falling_ = value; }
   void set_no_uart(bool value) { no_uart_ = value; }
   void set_no_network(bool value) { no_network_ = value; }
