@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import os
 import shutil
 import subprocess
 import tempfile
@@ -87,6 +88,17 @@ def ensure_dependency(name: str) -> Path:
         raise ValueError(f"Unknown XR806 dependency: {name}")
 
     info = DEPENDENCIES[name]
+
+    # HA Device Builder: allow a read-only, pre-provisioned SDK checkout.
+    # Keep revision, required-file and clean-worktree verification enabled.
+    if name == "xr806_sdk":
+        override = os.environ.get("XR806_SDK_SOURCE_DIR", "").strip()
+        if override:
+            source = Path(override).expanduser().resolve(strict=True)
+            _verify(source, name)
+            print(f"[XR806] Verified external SDK checkout: {source}", flush=True)
+            return source
+
     parent = CACHE_ROOT / name
     destination = parent / info["commit"]
 
