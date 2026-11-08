@@ -13,6 +13,10 @@ on:
       - "esphome/components/xr806/standby_trial.h"
       - "esphome/components/xr806/__init__.py"
       - "tests/xr806/standby_trial_state_test.cpp"
+      - "tests/xr806/standby_coordinator_state_test.cpp"
+      - "esphome/components/xr806/standby_coordinator_state.h"
+      - "esphome/components/xr806/standby_controller.h"
+      - "esphome/components/xr806/standby_controller.cpp"
       - "tests/xr806/lowpower_stage7a_test.cpp"
       - ".github/workflows/xr806-lowpower-ci.yml"
 
@@ -36,4 +40,8 @@ jobs:
             tests/xr806/standby_trial_state_test.cpp \
             -o /tmp/xr806-stage7b-trial-test
           /tmp/xr806-stage7b-trial-test
-          echo "PASS MCU-independent WXU policy, WLAN retries and Stage 7b one-shot gate"
+          g++ -std=gnu++20 -Wall -Wextra -Werror -pthread -I. \
+            tests/xr806/standby_coordinator_state_test.cpp \
+            -o /tmp/xr806-stage7b-production-state-test
+          /tmp/xr806-stage7b-production-state-test
+          echo "PASS MCU-independent low-power policy, one-shot trial and production coordinator state"
