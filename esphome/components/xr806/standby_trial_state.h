@@ -32,7 +32,8 @@ class XR806StandbyTrialState {
     uint32_t expected = wake_timer;
     if (wake_io_index >= 0 && wake_io_index <= 13)
       expected |= 1u << wake_io_index;
-    return (event & expected) != 0;
+    constexpr uint32_t software_or_internal = (1u << 27) | 0xf0000000u;
+    return (event & software_or_internal) == 0 && (event & expected) != 0;
   }
 
  private:
