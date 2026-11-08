@@ -17,6 +17,38 @@ namespace esphome::tuya {
 
 static const char *const LP_TAG = "tuya.low_power_v0";
 
+void Tuya::poll_low_power_autobaud_() {
+  const uint32_t now = millis();
+  if (!this->lp_autobaud_.probe_due(now))
+    return;
+
+#ifdef USE_XR806
+  const uint32_t baud = this->lp_autobaud_.baud();
+  // This is a synchronous, bounded HAL reconfiguration, not a busy-wait
+  // through the 500 ms window. The UART backend drains TX and clears stale RX.
+  if (this->parent_ == nullptr || !this->parent_->reconfigure_baud_rate(baud)) {
+    ESP_LOGE(LP_TAG, "Unable to configure MCU UART for %u baud", static_cast<unsigned>(baud));
+    this->lp_autobaud_.stop();
+    this->init_failed_ = true;
+    this->mark_failed();
+    return;
+  }
+  this->rx_message_.clear();  // Drop a partial frame from the previous rate.
+  this->lp_autobaud_.probe_sent(millis());
+  this->send_low_power_direct_(0x01, {});
+  if (this->lp_autobaud_.attempts() % 8 == 0)
+    ESP_LOGW(LP_TAG, "Still scanning MCU UART (9600/115200), %u probes",
+             static_cast<unsigned>(this->lp_autobaud_.attempts()));
+  else
+    ESP_LOGD(LP_TAG, "Autobaud CMD01 probe at %u", static_cast<unsigned>(baud));
+#else
+  // Schema validation rejects auto_baud on non-XR806 targets.
+  this->lp_autobaud_.stop();
+  this->init_failed_ = true;
+  this->mark_failed();
+#endif
+}
+
 void Tuya::update_low_power_sleep_lock_() {
 #ifdef USE_XR806_LOWPOWER
   // The generic XR806 PM gate remains closed during incomplete MCU sync.
