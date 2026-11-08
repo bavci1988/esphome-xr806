@@ -16,6 +16,9 @@
 namespace esphome::tuya {
 
 static const char *const LP_TAG = "tuya.low_power_v0";
+static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
+static constexpr uint32_t LP_COMMAND_DELAY_MS = 10;
+static constexpr int LP_MAX_RETRIES = 5;
 
 void Tuya::poll_low_power_autobaud_() {
   const uint32_t now = millis();
@@ -103,7 +106,7 @@ bool Tuya::notify_low_power_transition(bool sleeping) {
 
 void Tuya::process_low_power_queue_() {
   const uint32_t now = millis();
-  if (static_cast<uint32_t>(now - this->last_rx_char_timestamp_) > RECEIVE_TIMEOUT)
+  if (static_cast<uint32_t>(now - this->last_rx_char_timestamp_) > LP_RX_TIMEOUT_MS)
     this->rx_message_.clear();
 
   // Standard Tuya's 300 ms retry logic is incompatible with the HC32's
@@ -118,7 +121,7 @@ void Tuya::process_low_power_queue_() {
     this->lp_network_status_ = 0xFF;
     ESP_LOGW(LP_TAG, "MCU command ACK timeout (product=%s); scheduling resync", YESNO(product_query));
     if (product_query && !this->auto_baud_) {
-      if (++this->init_retries_ >= MAX_RETRIES) {
+      if (++this->init_retries_ >= LP_MAX_RETRIES) {
         this->init_failed_ = true;
         ESP_LOGE(LP_TAG, "MCU product query failed after %d attempts", this->init_retries_);
       } else {
@@ -130,7 +133,7 @@ void Tuya::process_low_power_queue_() {
 
   if (this->lp_v0_.busy() || this->expected_response_.has_value() ||
       !this->rx_message_.empty() || this->command_queue_.empty() ||
-      static_cast<uint32_t>(now - this->last_command_timestamp_) <= COMMAND_DELAY)
+      static_cast<uint32_t>(now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS)
     return;
   if (!this->lp_v0_.has_product() &&
       this->command_queue_.front().cmd != TuyaCommandType::PRODUCT_QUERY)
