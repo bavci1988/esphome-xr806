@@ -23,6 +23,11 @@ using InternalGPIOPin = libretiny::ArduinoInternalGPIOPin;
 namespace esphome {
 using InternalGPIOPin = rp2::RP2GPIOPin;
 }
+#elif defined(USE_XR806)
+#include "esphome/components/xr806/gpio.h"
+namespace esphome {
+using InternalGPIOPin = xr806::XR806GPIOPin;
+}
 #elif defined(USE_HOST)
 #include "esphome/components/host/gpio.h"
 namespace esphome {
