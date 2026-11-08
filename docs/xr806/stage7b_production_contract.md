@@ -114,6 +114,32 @@ Suggested interaction *inside the optional MCU driver*, not inside
    retained callback. An MCU reset during a retained WXU session
    also follows its distinct CMD00 handling.
 
+### Current parallel Tuya branch compatibility notes
+
+As of the live `feature/tuya-low-power-v0` branch on 2026-11-08,
+`Tuya::notify_low_power_transition(bool)` is **present but not connected**
+to the coordinator's `XR806StandbyParticipant` hooks. Its current
+`notify_low_power_transition(true)` calls
+`lowpower_policy().can_enter_standby()` before transmitting CMD12/01.
+That call would fail inside `prepare_for_standby()` because the
+coordinator intentionally keeps `WAKE_NOT_READY` and
+`SCHEDULER_BUSY` set during preparation. **Do not force these gates
+open** to satisfy that check: the MCU callback must instead check
+its own transaction/UART readiness and defer actual standby approval
+to the XR806 coordinator *after* hardware wake sources are armed.
+The MCU sleep notification must be sent and physically drained
+before the final PM call; if a later owner vetoes, the protocol
+driver must explicitly reconcile its logical sleep notification.
+
+Likewise the current Tuya CMD38 handler intentionally replies with
+`00 01` (busy) until the actual bridge is complete. This is the
+correct fail-safe behavior. Replacing that with `00 00` solely
+because the generic coordinator compiled would be unsafe.
+
+The latest Tuya branch has since added product-info validation and
+the eight-response DP106 refresh tracker. Both remain the
+responsibility of the MCU driver, not the XR806 platform.
+
 ### Technical blockers intentionally kept
 
 - The old `pm_enter_mode_timeout(..., 500)` is **not globally bounded**
