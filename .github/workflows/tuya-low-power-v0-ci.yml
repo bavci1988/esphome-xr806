@@ -48,3 +48,12 @@ jobs:
         run: python -m esphome config tests/yaml/tuya_low_power_v0_xr806.yaml
       - name: Generate XR806 C++ without a hardware SDK build
         run: python -m esphome compile tests/yaml/tuya_low_power_v0_xr806.yaml --only-generate
+      - name: Syntax-check Tuya C++ against generated ESPHome headers (SDK neutral)
+        run: |
+          set -euo pipefail
+          ROOT=".esphome/build/xr806-trv16-low-power/src"
+          test -s "$ROOT/esphome/core/defines.h"
+          mkdir -p /tmp/tuya-host-syntax/esphome/core
+          sed '/^#define USE_XR806/d' "$ROOT/esphome/core/defines.h"             > /tmp/tuya-host-syntax/esphome/core/defines.h
+          g++ -std=gnu++20 -fsyntax-only -Wall -Wextra             -I/tmp/tuya-host-syntax -I"$ROOT" -I.             esphome/components/tuya/tuya.cpp             esphome/components/tuya/tuya_low_power_v0.cpp
+
