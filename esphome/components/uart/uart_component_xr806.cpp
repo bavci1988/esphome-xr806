@@ -73,8 +73,7 @@ void XR806UARTComponent::setup() {
 bool XR806UARTComponent::tx_hardware_idle_() const {
   return this->initialized_ && this->uart_ != nullptr &&
          HAL_UART_IsTxEmpty(this->uart_) &&
-         (this->uart_->LINE_STATUS & UART_TX_EMPTY_BIT) != 0 &&
-         (this->uart_->STATUS & UART_BUSY_BIT) == 0;
+         (this->uart_->LINE_STATUS & UART_TX_EMPTY_BIT) != 0;
 }
 
 bool XR806UARTComponent::reconfigure_baud_rate(uint32_t baud_rate) {
@@ -145,6 +144,7 @@ void XR806UARTComponent::update_uart_idle_() {
   const bool buffer_empty = this->rx_count_ == 0;
   const bool rx_fifo_empty = !HAL_UART_IsRxReady(this->uart_);
   const bool tx_completed_on_wire = this->tx_hardware_idle_();
+  const bool peripheral_idle = (this->uart_->STATUS & UART_BUSY_BIT) == 0;
 
   const uint32_t elapsed =
       static_cast<uint32_t>(
@@ -154,6 +154,7 @@ void XR806UARTComponent::update_uart_idle_() {
       buffer_empty &&
       rx_fifo_empty &&
       tx_completed_on_wire &&
+      peripheral_idle &&
       !this->tx_fault_ && !this->rx_overflow_fault_ &&
       elapsed >= UART_IDLE_GUARD_MS;
 
