@@ -67,6 +67,53 @@ void XR806UARTComponent::setup() {
            static_cast<unsigned>(this->baud_rate_));
 }
 
+// The vendor HAL's HAL_UART_IsTxEmpty() checks only the FIFO. A shift
+// register may still be emitting the final UART frame on the physical line.
+// XR806 has a 16550-compatible LSR transmitter-empty flag and BUSY status.
+bool XR806UARTComponent::tx_hardware_idle_() const {
+  return this->initialized_ && this->uart_ != nullptr &&
+         HAL_UART_IsTxEmpty(this->uart_) &&
+         (this->uart_->LINE_STATUS & UART_TX_EMPTY_BIT) != 0 &&
+         (this->uart_->STATUS & UART_BUSY_BIT) == 0;
+}
+
+bool XR806UARTComponent::reconfigure_baud_rate(uint32_t baud_rate) {
+  if (!this->initialized_ || this->uart_ == nullptr || this->uart_id_ != 0 ||
+      this->tx_fault_ || this->rx_overflow_fault_)
+    return false;
+  if (baud_rate != 9600 && baud_rate != 115200)
+    return false;
+  if (this->flush() != UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
+    ESP_LOGE(TAG, "UART0 baud change refused: untransmitted TX data");
+    return false;
+  }
+  if (baud_rate != this->baud_rate_) {
+    UART_InitParam cfg{};
+    cfg.baudRate = baud_rate;
+    cfg.parity = UART_PARITY_NONE;
+    cfg.stopBits = UART_STOP_BITS_1;
+    cfg.dataBits = UART_DATA_BITS_8;
+    cfg.isAutoHwFlowCtrl = 0;
+    if (HAL_UART_SetConfig(static_cast<UART_ID>(this->uart_id_), &cfg) != HAL_OK) {
+      this->tx_fault_ = true;
+#ifdef USE_XR806_LOWPOWER
+      esphome::xr806::lowpower_policy().set_uart_idle(false);
+#endif
+      ESP_LOGE(TAG, "UART0 baud reconfiguration failed at %u", static_cast<unsigned>(baud_rate));
+      return false;
+    }
+    this->baud_rate_ = baud_rate;
+  }
+  // A wrong-rate CMD01 probe can have left partial hardware/software RX.
+  this->rx_head_ = this->rx_tail_ = this->rx_count_ = 0;
+  for (size_t i = 0; i < 512 && HAL_UART_IsRxReady(this->uart_); ++i)
+    (void) HAL_UART_GetRxData(this->uart_);
+#ifdef USE_XR806_LOWPOWER
+  this->note_uart_activity_();
+#endif
+  return true;
+}
+
 void XR806UARTComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "XR806 UART0:");
   ESP_LOGCONFIG(TAG, "  Baud rate: %u",
@@ -97,7 +144,7 @@ void XR806UARTComponent::update_uart_idle_() {
 
   const bool buffer_empty = this->rx_count_ == 0;
   const bool rx_fifo_empty = !HAL_UART_IsRxReady(this->uart_);
-  const bool tx_fifo_empty = HAL_UART_IsTxEmpty(this->uart_);
+  const bool tx_completed_on_wire = this->tx_hardware_idle_();
 
   const uint32_t elapsed =
       static_cast<uint32_t>(
@@ -106,7 +153,8 @@ void XR806UARTComponent::update_uart_idle_() {
   const bool idle =
       buffer_empty &&
       rx_fifo_empty &&
-      tx_fifo_empty &&
+      tx_completed_on_wire &&
+      !this->tx_fault_ && !this->rx_overflow_fault_ &&
       elapsed >= UART_IDLE_GUARD_MS;
 
   esphome::xr806::lowpower_policy().set_uart_idle(idle);
@@ -136,6 +184,12 @@ void XR806UARTComponent::fill_rx_() {
 
     if (this->rx_count_ == this->rx_buffer_.size()) {
       ++this->rx_overflows_;
+      this->rx_overflow_fault_ = true;
+      // A truncated packet must never be treated as a synchronized MCU.
+      this->rx_head_ = this->rx_tail_ = this->rx_count_ = 0;
+#ifdef USE_XR806_LOWPOWER
+      this->note_uart_activity_();  // Sticky fault will keep PM blocked.
+#endif
       continue;
     }
 
@@ -202,10 +256,17 @@ bool XR806UARTComponent::read_array(uint8_t *data, size_t len) {
 
 void XR806UARTComponent::write_array(
     const uint8_t *data, size_t len) {
-  if (!this->initialized_ || this->uart_ == nullptr ||
-      data == nullptr) {
+  if (len == 0)
+    return;
+  if (!this->initialized_ || this->uart_ == nullptr || data == nullptr) {
+    this->tx_fault_ = true;
+#ifdef USE_XR806_LOWPOWER
+    esphome::xr806::lowpower_policy().set_uart_idle(false);
+#endif
     return;
   }
+  if (this->tx_fault_)
+    return;
 
 #ifdef USE_XR806_LOWPOWER
   if (len != 0)
@@ -217,7 +278,11 @@ void XR806UARTComponent::write_array(
 
     while (!HAL_UART_IsTxReady(this->uart_)) {
       if (static_cast<uint32_t>(millis() - start) >= 20) {
-        ESP_LOGE(TAG, "UART0 TX FIFO timeout");
+        this->tx_fault_ = true;
+#ifdef USE_XR806_LOWPOWER
+        esphome::xr806::lowpower_policy().set_uart_idle(false);
+#endif
+        ESP_LOGE(TAG, "UART0 TX FIFO timeout (transport unhealthy, PM blocked)");
         return;
       }
     }
@@ -227,16 +292,20 @@ void XR806UARTComponent::write_array(
 }
 
 UARTFlushResult XR806UARTComponent::flush() {
-  if (!this->initialized_ || this->uart_ == nullptr)
+  if (!this->initialized_ || this->uart_ == nullptr || this->tx_fault_ || this->rx_overflow_fault_)
     return UARTFlushResult::UART_FLUSH_RESULT_FAILED;
 
   const uint32_t start = millis();
-
-  while (!HAL_UART_IsTxEmpty(this->uart_)) {
-    if (static_cast<uint32_t>(millis() - start) >= 100)
+  while (!this->tx_hardware_idle_()) {
+    if (static_cast<uint32_t>(millis() - start) >= 100) {
+      this->tx_fault_ = true;
+#ifdef USE_XR806_LOWPOWER
+      esphome::xr806::lowpower_policy().set_uart_idle(false);
+#endif
+      ESP_LOGE(TAG, "UART0 flush timed out before TX shifter was empty; PM blocked");
       return UARTFlushResult::UART_FLUSH_RESULT_TIMEOUT;
+    }
   }
-
   return UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
 }
 
