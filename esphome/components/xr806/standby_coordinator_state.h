@@ -46,6 +46,9 @@ class XR806StandbyCoordinatorState {
            static_cast<uint32_t>(now - stable_since_ms_) >= quiet_ms_;
   }
 
+  // Restart the quiet interval after any failed lifecycle preparation.
+  void postpone() { stable_ = false; }
+
   // Consume one request, even when SDK returns immediately or fails.
   // A later attempt requires a new external request plus a quiet interval.
   void finished(uint32_t now, bool expected_resume) {
