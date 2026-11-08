@@ -81,8 +81,8 @@ void Tuya::loop() {
       if (!this->lp_autobaud_.locked())
         return;  // Never send queued MCU writes/status before CMD01 lock.
     }
-    if (this->lp_v0_.expire(millis(), 12000)) {
-      ESP_LOGW(TAG, "Low-power MCU transaction timed out; sleep remains blocked");
+    if (this->lp_v0_.expire(millis())) {
+      ESP_LOGW(TAG, "Low-power status/write report timeout; requesting state resynchronization");
       this->lp_network_status_ = 0xFF;
     }
     this->update_low_power_sleep_lock_();
@@ -219,15 +219,27 @@ void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buff
 
   TuyaCommandType command_type = (TuyaCommandType) command;
 
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    // CMD02/CMD09 are only acknowledged by an *empty* reply. CMD05 reports
+    // never consume a queued command, and any unsolicited matching command ID
+    // must not release an unrelated transaction.
+    const bool valid_reply = (command == 0x01 && len > 0) ||
+                             ((command == 0x02 || command == 0x09) && len == 0);
+    if (valid_reply && this->expected_response_.has_value() &&
+        this->expected_response_ == command_type) {
+      this->expected_response_.reset();
+      if (!this->command_queue_.empty())
+        this->command_queue_.erase(this->command_queue_.begin());
+      this->init_retries_ = 0;
+    }
+    this->handle_low_power_command_(command, version, buffer, len);
+    return;
+  }
+
   if (this->expected_response_.has_value() && this->expected_response_ == command_type) {
     this->expected_response_.reset();
     this->command_queue_.erase(command_queue_.begin());
     this->init_retries_ = 0;
-  }
-
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
-    this->handle_low_power_command_(command, version, buffer, len);
-    return;
   }
 
   switch (command_type) {
@@ -591,6 +603,10 @@ void Tuya::send_raw_command_(TuyaCommand command) {
 }
 
 void Tuya::process_command_queue_() {
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    this->process_low_power_queue_();
+    return;
+  }
   uint32_t now = millis();
   uint32_t delay = now - this->last_command_timestamp_;
 
@@ -611,10 +627,6 @@ void Tuya::process_command_queue_() {
       this->command_queue_.erase(command_queue_.begin());
     }
   }
-
-  // CMD09 empty ACK is not write confirmation: await the matching CMD05 report.
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_v0_.busy())
-    return;
 
   // Left check of delay since last command in case there's ever a command sent by calling send_raw_command_ directly
   if (delay > COMMAND_DELAY && !this->command_queue_.empty() && this->rx_message_.empty() &&
