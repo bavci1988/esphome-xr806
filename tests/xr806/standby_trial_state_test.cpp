@@ -19,7 +19,7 @@ int main() {
   assert(XR806StandbyTrialState::expected_wake_event(1u << 16, -1));
   assert(XR806StandbyTrialState::expected_wake_event(1u << 10, 10));
   assert(!XR806StandbyTrialState::expected_wake_event(1u << 10, -1));
-  assert(!XR806StandbyTrialState::expected_wake_event(1u << 27, 10)); // software PM abort
+  assert(!XR806StandbyTrialState::expected_wake_event(1u << 27, 10));  // software PM abort
   assert(!XR806StandbyTrialState::expected_wake_event(0, 10));
   assert(XR806StandbyTrialState::resumed_from_expected_source(0, 1u << 10, 10));
   assert(!XR806StandbyTrialState::resumed_from_expected_source(-1, 1u << 10, 10));
@@ -33,14 +33,14 @@ int main() {
   p.set_api_idle(true);
   p.set_mdns_idle(true);
   p.set_scheduler_idle(true);
-  assert(!p.can_enter_standby()); // Wake source not armed.
+  assert(!p.can_enter_standby());  // Wake source not armed.
   p.set_wake_source_ready(true);
   assert(p.can_enter_standby());
   p.require_external_mcu(true);
-  assert(!p.can_enter_standby()); // The optional MCU gate is respected.
+  assert(!p.can_enter_standby());  // The optional MCU gate is respected.
   p.set_mcu_synchronized(true);
   assert(p.can_enter_standby());
   p.request_standby(false);
-  assert(!p.can_enter_standby()); // A one-shot does not repeat.
+  assert(!p.can_enter_standby());  // A one-shot does not repeat.
   return 0;
 }
