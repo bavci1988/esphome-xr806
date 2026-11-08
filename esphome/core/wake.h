@@ -61,7 +61,7 @@ __attribute__((always_inline)) inline bool wake_request_take() {
 // Per-platform implementations. Each header re-enters namespace esphome {} and
 // guards its body with the matching USE_* check, so only one contributes code
 // for the active target.
-#if defined(USE_ESP32) || defined(USE_LIBRETINY)
+#if defined(USE_ESP32) || defined(USE_LIBRETINY) || defined(USE_XR806)
 #include "esphome/core/wake/wake_freertos.h"
 #elif defined(USE_ESP8266)
 #include "esphome/core/wake/wake_esp8266.h"

@@ -29,6 +29,8 @@
 #include "esphome/components/libretiny/hal.h"
 #elif defined(USE_RP2)
 #include "esphome/components/rp2/hal.h"
+#elif defined(USE_XR806)
+#include "esphome/components/xr806/hal.h"
 #elif defined(USE_HOST)
 #include "esphome/components/host/hal.h"
 #elif defined(USE_ZEPHYR)
