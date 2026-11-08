@@ -57,6 +57,23 @@ climate:
   MCU is synchronized because no physical PM entry exists yet. OTA status
   from the generic XR806 policy can add bit1, yielding `[00,03]`.
 
+## Explicit status refresh from ESPHome
+
+The verified eight-report DP106 request is exposed as an automation action:
+
+```yaml
+button:
+  - platform: template
+    name: "Refresh TRV16 Status"
+    on_press:
+      - tuya.refresh:
+          tuya_id: tuya_mcu
+```
+
+The action is ignored until the MCU product handshake completes and the
+current status/write transaction has finished. It does **not** emit DP106
+unconditionally on cold boot or every GPIO wake.
+
 ## Hardware and safety limitations
 
 This implementation is not flash-ready for battery-powered operation. The
