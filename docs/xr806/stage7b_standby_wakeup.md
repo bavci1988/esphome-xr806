@@ -44,6 +44,7 @@ xr806:
     # Optional PA wake source; omit for timer-only test.
     wake_pin: PA20
     wake_edge: falling
+    resume_marker_pb05: true  # optional; WXU module pad 20, scope only
 
 # No logger: yet. The XR806 ESPHome logger backend is not implemented.
 # Capture power/GPIO externally on the spare bench WXU.
@@ -76,7 +77,8 @@ a binary sensor or another component while the trial runs.
    (`0x00000400`). A return code of zero with one of these
    event bits is an encouraging **runtime indication**, not
    current-draw proof. Timeout/software bit 27 is **not** success.
-5. Clear the timer and the `HAL_Wakeup_ClrIO()` hardware wake
+5. If `resume_marker_pb05` is enabled, PB05 (WXU module pad 20) is driven low at setup, and changes high **only** if the PM call returned 0 with the expected GPIO/timer event. Observe with a high-impedance logic analyzer, no LED load. This is a software indication and does not replace a current measurement.
+6. Clear the timer and the `HAL_Wakeup_ClrIO()` hardware wake
    registration, release EINT setup and revoke the one-shot request.
    Do not enter standby again before reboot.
 
@@ -167,6 +169,6 @@ backend. Adding `logger:` caused the generic ESPHome code generator to
 fail in `logger.uart_selection()`; it also risks corrupting HC32 UART0.
 Therefore this offline test **rejects logger explicitly** until a
 dedicated, non-HC32 debugging transport is implemented. Verify standby
-by retained execution markers/current/wakeup pin under bench conditions.
+by the optional PB05 resume marker, current draw and the dedicated wake pin under bench conditions.
 The private `xr806-sdk` repository has a separate cross-build workflow
 which checks out the pinned SDK and the Stage 7b ESPHome branch.
