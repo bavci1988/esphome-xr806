@@ -30,37 +30,52 @@ climate:
     current_temperature_multiplier: 0.1
 ```
 
-## Initial implementation
+## Implemented in the feature branch
 
-- `standard` is the implicit default. Existing `tuya.climate`, `tuya.sensor`
-  and other consumers continue to use the same `Tuya` parent class.
-- On WXU startup, `low_power_v0` sends CMD01 product query directly.
-- With `auto_baud: true` (opt-in, XR806 only), scan 9600/115200 Baud at
-  500 ms per probe. The configured UART speed is tried first if supported;
-  otherwise scanning begins at 9600 Baud. Only a full checksum-valid CMD01
-  JSON product reply locks the rate; the same response initializes the MCU.
-  Every change uses `HAL_UART_SetConfig` and discards stale receive bytes.
-  This is protocol probing, not an automatic hardware baud detector.
-- Handles CMD02 network status, CMD05 reports and immediate `[00, DPID]` ACK,
-  CMD06 local time query, CMD09 writes and empty ACK, and CMD00 MCU-reset heartbeat.
-- Tracks the 17-DP CMD02/status04 report series and checks write confirmation
-  separately from the empty CMD09 ACK; a mismatched value does not confirm a write.
-- Integrates with the existing optional XR806 MCU synchronization sleep gate.
-- **CMD38 always replies busy (00 01)** until physical standby / wake integration
-  is verified. CMD12 sleep/wake signaling and actual CPU standby are not implemented.
+- `standard` remains the default; existing Tuya climate/sensor classes reuse
+  the same Tuya parent class with protocol-dependent UART dispatch.
+- `auto_baud: true` on XR806 probes 9600/115200 with CMD01 at 500 ms per
+  candidate, retaining only a checksum-valid expected product reply.
+- CMD01 product metadata is parsed and restricted to the verified TRV16 PID,
+  `wk=20`, `mwk=28` and `sm=0/1`.
+- CMD02 network-status reports, CMD05 single/multi-DP reports with a
+  `[00, DPID]` acknowledgement for each DP, CMD06 local-time response,
+  CMD09 writes, and CMD00 MCU-reset heartbeat.
+- The 17-DP status04 report set is tracked independently. CMD09/DP106
+  requests an eight-DP refresh set (no DP106 echo). Empty CMD09 ACK,
+  actual reported value, missing/clamped report and timeout are distinct
+  outcomes. Errors trigger controlled full-status resynchronization.
+- MCU synchronization is an XR806 optional sleep blocker; product `sm`
+  selects 5000 ms or 10000 ms connected wake-margin.
+- `mcu_wake_pin` optionally pulses an explicitly configured output for
+  10 ms before CMD01 probes. Pulse polarity is controlled by the pin's
+  `inverted` setting. **Do not enable on hardware until pinout and
+  polarity are verified.**
+- A CMD12/01 and CMD12/00 transition hook is exposed for the future XR806
+  PM bridge, but it is **not** invoked by the current platform.
+- CMD38 remains fail-closed: the network-blocker bit is set even when the
+  MCU is synchronized because no physical PM entry exists yet. OTA status
+  from the generic XR806 policy can add bit1, yielding `[00,03]`.
 
-## Not finished / hardware safety
+## Hardware and safety limitations
 
-This commit is **not** a flash-ready, production-quality TRV16 driver.
-It does not implement automatic baud selection on other platforms, complete
-error recovery, RTC retention, GPIO-wake delivery,
-or XR806 standby. The original WXU's pre-probe MCU wake pulse and persistence
-of the previously detected baud are not yet implemented. Autobaud here
-dispatches the validated first CMD01 reply directly after locking, rather
-than using the vendor's temporary packet storage mechanism.
-The current protocol implementation requires separate
-hardware testing of UART, timing, status bursts, Wi-Fi, Home Assistant API and
-power measurement before any original TRV16 is reflashed.
+This implementation is not flash-ready for battery-powered operation. The
+XR806 PM driver still does not enter verified standby/hibernation, and GPIO
+resume, persisted baud, real power consumption and the original RTOS wake
+sequencing remain untested. The original physical MCU-wake pulse timing
+cannot be inferred just from software disassembly. The safe-sleep hook must
+be connected to an actual suspend/resume boundary, with TX completely
+drained and wake sources verified.
+
+**Do not assume product field `mwk=28` means `PB4` in ESPHome.** The
+WXU/XR806 board schema deliberately reserves PB2..PB7 for Flash/XIP,
+including PB4. Attempting to configure PB4 as an output is rejected.
+The CI YAML uses PA19 **only as a configuration fixture**, not as a
+confirmed MCU-wake GPIO. Use a scope/pin trace to establish electrical wiring
+before assigning a real wake output.
+
+The optional `mcu_wake_pin` is absent in the sample above by design.
+If the hardware mapping is established, its YAML pin can be set explicitly.
 
 Time is supplied as **local time** by the ESPHome time source, without a second
 timezone/DST conversion. Without valid time the eight-byte CMD06 reply is zero.
