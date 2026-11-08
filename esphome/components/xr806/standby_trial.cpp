@@ -133,8 +133,15 @@ void XR806StandbyTrial::attempt_standby_() {
     const uint32_t event = HAL_Wakeup_GetEvent();
     if (XR806StandbyTrialState::resumed_from_expected_source(result, event, wake_index)) {
       if (this->resume_marker_pb05_) {
-        // Visible on a high-impedance analyzer without UART0/HC32 pollution.
-        HAL_GPIO_WritePin(GPIO_PORT_B, GPIO_PIN_5, GPIO_PIN_HIGH);
+        // Standby can alter pin muxing; re-establish output mode after resume.
+        GPIO_InitParam marker{};
+        marker.mode = GPIOx_Pn_F1_OUTPUT;
+        marker.driving = GPIO_DRIVING_LEVEL_1;
+        marker.pull = GPIO_PULL_NONE;
+        if (HAL_GPIO_Init(GPIO_PORT_B, GPIO_PIN_5, &marker) == HAL_OK) {
+          // Visible on a high-impedance analyzer without UART0/HC32 pollution.
+          HAL_GPIO_WritePin(GPIO_PORT_B, GPIO_PIN_5, GPIO_PIN_HIGH);
+        }
       }
       ESP_LOGI(TAG, "Standby resumed: event=0x%08lx, PM result=%d",
                static_cast<unsigned long>(event), result);
