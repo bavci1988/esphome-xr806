@@ -115,8 +115,10 @@ void XR806StandbyTrial::attempt_standby_() {
     goto cleanup;
   }
 
-  // Calling pm_enter_mode() with OS_WAIT_FOREVER can hang indefinitely on an
-  // SDK wakelock, despite a configured hardware wake timer. Bound the wait.
+  // The 500-ms argument bounds the SDK's wakelock-touch phase only.
+  // pm_enter_mode_timeout() subsequently waits on a PM semaphore with
+  // OS_WAIT_FOREVER; it does NOT provide a global execution deadline.
+  // A physical wake/rollback test is mandatory before production use.
   HAL_Wakeup_SetEvent(0);
   ESP_LOGI(TAG, "Entering PM_MODE_STANDBY (2), timer=%u ms", static_cast<unsigned>(this->wake_after_ms_));
   {
