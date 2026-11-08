@@ -42,7 +42,7 @@ int main() {
   assert(!state.due(300, 4, true, false));  // One busy owner is enough.
   assert(!state.due(400, 4, true, true));   // Begin stable quiet interval.
   assert(!state.due(649, 4, true, true));
-  assert(!state.due(900, 5, true, true));   // Any vote transition resets quiet.
+  assert(!state.due(900, 5, true, true));  // Any vote transition resets quiet.
   assert(!state.due(1149, 5, true, true));
   assert(!state.due(1500, 5, true, true));  // Still inside initial awake guard.
   assert(state.due(5100, 5, true, true));   // After boot awake guard and quiet.
