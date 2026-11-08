@@ -24,7 +24,15 @@ class XR806LowPowerPolicy {
 
   // Fail closed: initially all subsystems block standby.
   // This policy never enters standby by itself.
-  void request_standby(bool requested) { requested_.store(requested, std::memory_order_release); }
+  void request_standby(bool requested) {
+    if (requested_.exchange(requested, std::memory_order_acq_rel) != requested)
+      generation_.fetch_add(1, std::memory_order_acq_rel);
+  }
+
+  bool standby_requested() const { return requested_.load(std::memory_order_acquire); }
+
+  // Changes in owner votes invalidate an in-progress quiet interval.
+  uint32_t generation() const { return generation_.load(std::memory_order_acquire); }
 
   void set_uart_idle(bool ready) { update_(UART_BUSY, ready); }
 
@@ -42,9 +50,11 @@ class XR806LowPowerPolicy {
       if (!external_mcu_required_.load(std::memory_order_acquire)) {
         blockers_.fetch_or(MCU_UNSYNCED, std::memory_order_acq_rel);
         external_mcu_required_.store(true, std::memory_order_release);
+        generation_.fetch_add(1, std::memory_order_acq_rel);
       }
     } else {
-      external_mcu_required_.store(false, std::memory_order_release);
+      if (external_mcu_required_.exchange(false, std::memory_order_acq_rel))
+        generation_.fetch_add(1, std::memory_order_acq_rel);
     }
   }
 
@@ -72,16 +82,16 @@ class XR806LowPowerPolicy {
 
  private:
   void update_(uint32_t blocker, bool ready) {
-    if (ready) {
-      blockers_.fetch_and(~blocker, std::memory_order_acq_rel);
-    } else {
-      blockers_.fetch_or(blocker, std::memory_order_acq_rel);
-    }
+    const uint32_t previous = ready ? blockers_.fetch_and(~blocker, std::memory_order_acq_rel)
+                                    : blockers_.fetch_or(blocker, std::memory_order_acq_rel);
+    if (((previous & blocker) == 0u) != ready)
+      generation_.fetch_add(1, std::memory_order_acq_rel);
   }
 
   std::atomic<uint32_t> blockers_{ALL_REQUIREMENTS};
   std::atomic<bool> requested_{false};
   std::atomic<bool> external_mcu_required_{false};
+  std::atomic<uint32_t> generation_{0};
 };
 
 #ifdef USE_XR806_LOWPOWER
