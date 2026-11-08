@@ -176,6 +176,13 @@ bool Tuya::validate_message_() {
   }
 
   uint16_t length = encode_uint16(data[4], data[5]);
+  // Keep the low-power MCU parser bounded. Corrupted length bytes on a
+  // sleeping UART must not accumulate a 64-KiB heap buffer.
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 &&
+      (length > 512 || version != 0)) {
+    ESP_LOGW(TAG, "Invalid low-power MCU frame length/version: %u/%u", length, version);
+    return false;
+  }
 
   // wait until all data is read
   if (at - 6 < length)
