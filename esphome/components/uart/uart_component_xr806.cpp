@@ -67,6 +67,43 @@ void XR806UARTComponent::setup() {
            static_cast<unsigned>(this->baud_rate_));
 }
 
+bool XR806UARTComponent::reconfigure_baud_rate(uint32_t baud_rate) {
+  if (!this->initialized_ || this->uart_ == nullptr || this->uart_id_ != 0)
+    return false;
+  // This UART is currently shared only with the TRV16 MCU. 8N1 is fixed.
+  // Use HAL_SetConfig instead of DeInit/Init, retaining pinmux and PM hooks.
+  if (baud_rate != 9600 && baud_rate != 115200)
+    return false;
+  if (this->flush() != UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
+    ESP_LOGE(TAG, "UART0 baud change rejected: pending TX");
+    return false;
+  }
+
+  if (baud_rate != this->baud_rate_) {
+    UART_InitParam cfg{};
+    cfg.baudRate = baud_rate;
+    cfg.parity = UART_PARITY_NONE;
+    cfg.stopBits = UART_STOP_BITS_1;
+    cfg.dataBits = UART_DATA_BITS_8;
+    cfg.isAutoHwFlowCtrl = 0;
+    if (HAL_UART_SetConfig(static_cast<UART_ID>(this->uart_id_), &cfg) != HAL_OK) {
+      ESP_LOGE(TAG, "HAL_UART_SetConfig failed for %u baud", static_cast<unsigned>(baud_rate));
+      return false;
+    }
+    this->baud_rate_ = baud_rate;
+  }
+
+  // A probe at the previous rate can leave undecodable or partial RX data.
+  this->rx_head_ = this->rx_tail_ = this->rx_count_ = 0;
+  for (size_t i = 0; i < 512 && HAL_UART_IsRxReady(this->uart_); ++i)
+    (void) HAL_UART_GetRxData(this->uart_);
+#ifdef USE_XR806_LOWPOWER
+  this->note_uart_activity_();
+#endif
+  ESP_LOGD(TAG, "UART0 configured for %u baud", static_cast<unsigned>(baud_rate));
+  return true;
+}
+
 void XR806UARTComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "XR806 UART0:");
   ESP_LOGCONFIG(TAG, "  Baud rate: %u",
