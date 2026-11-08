@@ -2,12 +2,17 @@ from esphome import pins
 import esphome.codegen as cg
 from esphome.components import switch
 import esphome.config_validation as cv
-from esphome.const import CONF_INTERLOCK, CONF_PIN
+from esphome.const import (
+    CONF_INTERLOCK,
+    CONF_PIN,
+    CONF_RESTORE_MODE,
+    CONF_RESTORE_STATE,
+    CONF_STATE,
+)
+from esphome.core import CORE
 from esphome.types import ConfigType
 
 from .. import gpio_ns
-from esphome.core import CORE
-from esphome.const import CONF_RESTORE_MODE, CONF_RESTORE_STATE, CONF_STATE
 
 GPIOSwitch = gpio_ns.class_("GPIOSwitch", switch.Switch, cg.Component)
 
