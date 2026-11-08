@@ -1,0 +1,119 @@
+name: XR806 Noise ARM and encrypted API
+
+on:
+  push:
+    branches: [test/xr806-noise-stage6c]
+  pull_request:
+    branches: [dev]
+    paths:
+      - "esphome/components/xr806/**"
+      - ".github/workflows/xr806-noise-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  crypto-arm:
+    name: Pinned noise-c/libsodium for Cortex-M33
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ARM cross compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi cmake
+      - name: Install ESPHome Python dependencies
+        run: python -m pip install -e .
+      - name: Cold cross-build from pinned source
+        run: |
+          python - <<'PY'
+          from esphome.components.xr806.build_support.noise_build import prepare_noise_build
+          from pathlib import Path
+          d = prepare_noise_build()
+          for key in ("XR806_NOISE_C_ARCHIVE", "XR806_SODIUM_ARCHIVE"):
+              assert Path(d[key]).is_file(), key
+              print(key, Path(d[key]).stat().st_size, "bytes")
+          PY
+      - name: Incremental re-build
+        run: |
+          python - <<'PY'
+          from esphome.components.xr806.build_support.noise_build import prepare_noise_build
+          prepare_noise_build()
+          PY
+
+  firmware:
+    name: Encrypted Native API ARM firmware (private SDK required)
+    runs-on: ubuntu-24.04
+    needs: crypto-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Require explicit access to private XR806 SDK
+        env:
+          SDK_TOKEN: ${{ secrets.XR806_SDK_TOKEN }}
+        run: |
+          if [ -z "$SDK_TOKEN" ]; then
+            echo "::error::Private SDK unavailable. Configure repository Actions secret XR806_SDK_TOKEN (read-only access to bavci1988/xr806-sdk)."
+            exit 1
+          fi
+      - name: Checkout pinned XR806 SDK (private)
+        uses: actions/checkout@v4
+        with:
+          repository: bavci1988/xr806-sdk
+          ref: 963f6f74030bc2fdbf430e66092ca96f6a0c7a6c
+          token: ${{ secrets.XR806_SDK_TOKEN }}
+          path: xr806-sdk
+          persist-credentials: false
+      - name: Install ARM cross compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi cmake
+      - name: Install ESPHome Python dependencies
+        run: python -m pip install -e .
+      - name: Generate ephemeral encrypted and plaintext test configurations
+        run: |
+          mkdir -p .xr806-actions-tests
+          python - <<'PY'
+          from pathlib import Path
+          import base64, secrets
+          folder = Path(".xr806-actions-tests")
+          common = """xr806:
+            board: wxu
+          wifi:
+            ssid: ci-only
+            password: ci-password1234
+          socket:
+            implementation: lwip_sockets
+          api:
+            reboot_timeout: 0s
+            max_connections: 1
+            listen_backlog: 1
+            max_send_queue: 4
+          """
+          for encrypted in (False, True):
+              name = "xr806-stage6c-noise" if encrypted else "xr806-stage6b-api"
+              content = "esphome:\n  name: " + name + "\n" + common
+              if encrypted:
+                  key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
+                  content += "  encryption:\n    key: " + key + "\n"
+              (folder / (name + ".yaml")).write_text(content)
+          PY
+      - name: Compile plaintext API regression
+        env:
+          XR806_SDK_SOURCE_DIR: ${{ github.workspace }}/xr806-sdk
+          XR806_SDK_EXPECTED_COMMIT: 963f6f74030bc2fdbf430e66092ca96f6a0c7a6c
+        run: python -m esphome compile .xr806-actions-tests/xr806-stage6b-api.yaml
+      - name: Compile encrypted Native API
+        env:
+          XR806_SDK_SOURCE_DIR: ${{ github.workspace }}/xr806-sdk
+          XR806_SDK_EXPECTED_COMMIT: 963f6f74030bc2fdbf430e66092ca96f6a0c7a6c
+        run: |
+          python -m esphome compile .xr806-actions-tests/xr806-stage6c-noise.yaml
+          test -s .xr806-actions-tests/.esphome/build/xr806-stage6c-noise/xr806/app.elf
