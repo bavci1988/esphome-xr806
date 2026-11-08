@@ -31,6 +31,7 @@ CONF_ENTRY_AFTER_MS = "entry_after_ms"
 CONF_WAKE_AFTER_MS = "wake_after_ms"
 CONF_WAKE_PIN = "wake_pin"
 CONF_WAKE_EDGE = "wake_edge"
+CONF_RESUME_MARKER_PB05 = "resume_marker_pb05"
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
 XR806WLANSmoke = xr806_ns.class_("XR806WLANSmoke", cg.Component)
@@ -95,6 +96,7 @@ STANDBY_TRIAL_SCHEMA = cv.Schema(
         cv.Required(CONF_WAKE_AFTER_MS): cv.int_range(min=100, max=5000),
         cv.Optional(CONF_WAKE_PIN): cv.one_of("PA11", "PA12", "PA13", "PA19", "PA20", upper=True),
         cv.Optional(CONF_WAKE_EDGE, default="falling"): cv.one_of("falling", "rising", lower=True),
+        cv.Optional(CONF_RESUME_MARKER_PB05, default=False): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -157,6 +159,7 @@ async def to_code(config):
         if CONF_WAKE_PIN in trial:
             cg.add(standby.set_wake_pin(int(trial[CONF_WAKE_PIN][2:])))
         cg.add(standby.set_wake_falling(trial[CONF_WAKE_EDGE] == "falling"))
+        cg.add(standby.set_resume_marker_pb05(trial[CONF_RESUME_MARKER_PB05]))
         await cg.register_component(standby, trial)
     if CONF_XR806_WLAN_SETTINGS in config and "wifi" not in CORE.config:
         raise cv.Invalid("xr806.wlan requires top-level wifi:")
