@@ -45,8 +45,8 @@ xr806:
     wake_pin: PA20
     wake_edge: falling
 
-logger:
-  level: DEBUG
+# No logger: yet. The XR806 ESPHome logger backend is not implemented.
+# Capture power/GPIO externally on the spare bench WXU.
 ```
 
 Do **not** combine this trial with top-level `wifi:`, `api:`,
