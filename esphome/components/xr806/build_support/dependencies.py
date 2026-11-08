@@ -47,7 +47,9 @@ def _git(*args: str, cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
-def _verify(path: Path, name: str) -> None:
+def _verify(
+    path: Path, name: str, expected_commit: str | None = None
+) -> None:
     """Verify the cached Git revision and required files."""
     info = DEPENDENCIES[name]
 
@@ -58,7 +60,7 @@ def _verify(path: Path, name: str) -> None:
 
     revision = _git("rev-parse", "HEAD", cwd=path)
 
-    if revision != info["commit"]:
+    if revision != (expected_commit or info["commit"]):
         raise RuntimeError(
             f"Unexpected {name} revision: {revision}"
         )
@@ -95,7 +97,16 @@ def ensure_dependency(name: str) -> Path:
         override = os.environ.get("XR806_SDK_SOURCE_DIR", "").strip()
         if override:
             source = Path(override).expanduser().resolve(strict=True)
-            _verify(source, name)
+            # Only explicitly pre-provisioned SDKs may use a non-default SHA.
+            # CI supplies its checked-out GitHub event SHA, preserving exact
+            # revision and clean-worktree verification for each build.
+            expected_commit = os.environ.get("XR806_SDK_EXPECTED_COMMIT", "").strip()
+            if expected_commit and (
+                len(expected_commit) != 40
+                or any(c not in "0123456789abcdef" for c in expected_commit)
+            ):
+                raise RuntimeError("Invalid XR806_SDK_EXPECTED_COMMIT: expected full lowercase Git SHA")
+            _verify(source, name, expected_commit or None)
             print(f"[XR806] Verified external SDK checkout: {source}", flush=True)
             return source
 
