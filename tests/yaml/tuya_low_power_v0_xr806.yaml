@@ -1,0 +1,32 @@
+esphome:
+  name: xr806-trv16-low-power
+
+xr806:
+  board: wxu
+  lowpower: true
+
+uart:
+  id: trv16_uart
+  tx_pin: PB0
+  rx_pin: PB1
+  baud_rate: 115200
+  rx_buffer_size: 256
+  data_bits: 8
+  stop_bits: 1
+  parity: NONE
+
+tuya:
+  id: trv16_mcu
+  uart_id: trv16_uart
+  protocol: low_power_v0
+  auto_baud: true
+
+climate:
+  - platform: tuya
+    name: TRV16 Climate
+    tuya_id: trv16_mcu
+    switch_datapoint: 1
+    target_temperature_datapoint: 3
+    current_temperature_datapoint: 4
+    target_temperature_multiplier: 0.1
+    current_temperature_multiplier: 0.1
