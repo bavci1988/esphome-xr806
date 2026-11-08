@@ -15,9 +15,11 @@ CONF_ON_DATAPOINT_UPDATE = "on_datapoint_update"
 CONF_DATAPOINT_TYPE = "datapoint_type"
 CONF_STATUS_PIN = "status_pin"
 CONF_FORCE_TIME_SYNC = "force_time_sync"
+CONF_PROTOCOL = "protocol"
 
 tuya_ns = cg.esphome_ns.namespace("tuya")
 TuyaDatapointType = tuya_ns.enum("TuyaDatapointType", is_class=True)
+TuyaProtocol = tuya_ns.enum("TuyaProtocol", is_class=True)
 Tuya = tuya_ns.class_("Tuya", cg.Component, uart.UARTDevice)
 
 TuyaDatapoint = tuya_ns.struct("TuyaDatapoint")
@@ -53,6 +55,10 @@ def _validate_time_options(config: ConfigType) -> ConfigType:
             f"{CONF_FORCE_TIME_SYNC} requires {CONF_TIME_ID}",
             path=[CONF_FORCE_TIME_SYNC],
         )
+    if config[CONF_PROTOCOL] == "low_power_v0" and config[CONF_FORCE_TIME_SYNC]:
+        raise cv.Invalid("force_time_sync is unsupported for low_power_v0; CMD06 is MCU initiated", path=[CONF_FORCE_TIME_SYNC])
+    if config[CONF_PROTOCOL] == "low_power_v0" and CONF_STATUS_PIN in config:
+        raise cv.Invalid("status_pin is unsupported for low_power_v0; wake is configured separately", path=[CONF_STATUS_PIN])
     return config
 
 
@@ -60,6 +66,7 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(Tuya),
+            cv.Optional(CONF_PROTOCOL, default="standard"): cv.one_of("standard", "low_power_v0", lower=True),
             cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
             cv.Optional(CONF_FORCE_TIME_SYNC, default=False): cv.boolean,
             cv.Optional(CONF_IGNORE_MCU_UPDATE_ON_DATAPOINTS): cv.ensure_list(
@@ -84,6 +91,7 @@ CONFIG_SCHEMA = cv.All(
 
 async def to_code(config):
     var = await uart.new_uart_component(config)
+    cg.add(var.set_protocol(TuyaProtocol.LOW_POWER_V0 if config[CONF_PROTOCOL] == "low_power_v0" else TuyaProtocol.STANDARD))
     if (time_id := config.get(CONF_TIME_ID)) is not None:
         await cg.add_variable(var.set_time_id, time_id)
         if config[CONF_FORCE_TIME_SYNC]:
