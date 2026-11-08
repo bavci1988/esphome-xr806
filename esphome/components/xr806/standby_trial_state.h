@@ -15,8 +15,7 @@ class XR806StandbyTrialState {
   }
 
   bool claim(uint32_t now_ms, uint32_t delay_ms) {
-    if (!armed_ || attempted_ ||
-        static_cast<uint32_t>(now_ms - armed_at_ms_) < delay_ms)
+    if (!armed_ || attempted_ || static_cast<uint32_t>(now_ms - armed_at_ms_) < delay_ms)
       return false;
     attempted_ = true;  // Never loop on a failed PM entry.
     return true;
