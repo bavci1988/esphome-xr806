@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "esphome/core/component.h"
+#include "esphome/core/automation.h"
 #include "esphome/core/defines.h"
 #include "esphome/core/helpers.h"
 #include "esphome/components/uart/uart.h"
@@ -208,6 +209,17 @@ class Tuya final : public Component, public uart::UARTDevice {
   uint8_t wifi_status_ = -1;
   bool product_invalid_{false};
   CallbackManager<void()> initialized_callback_{};
+};
+
+// Explicit DP106 refresh for automation; no unsolicited boot refresh.
+class TuyaRefreshAction : public Action<> {
+ public:
+  explicit TuyaRefreshAction(Tuya *parent) : parent_(parent) {}
+
+ protected:
+  void play() override { (void) this->parent_->request_low_power_refresh(); }
+
+  Tuya *parent_;
 };
 
 }  // namespace esphome::tuya
