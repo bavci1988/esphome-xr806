@@ -31,6 +31,9 @@ class XR806UARTComponent final : public UARTComponent, public Component {
     return setup_priority::BUS;
   }
 
+  bool reconfigure_baud_rate(uint32_t baud_rate) override;
+  bool is_connected() override { return initialized_ && !tx_fault_ && !rx_overflow_fault_; }
+
   void write_array(const uint8_t *data, size_t len) override;
   bool peek_byte(uint8_t *data) override;
   bool read_array(uint8_t *data, size_t len) override;
