@@ -332,3 +332,10 @@ XR806_CXXFLAGS += -MMD -MP
 
 # GCC writes one .d file alongside each compiled .o file.
 -include $(XR806_ESPHOME_OBJECTS:.o=.d)
+
+# XR806_STAGE7B_STANDBY_V1
+# Builds to an empty object unless explicitly enabled in xr806.standby_trial.
+XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_standby_trial.o
+$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_standby_trial.o
+$(eval $(call XR806_COMPILE_CPP,xr_standby_trial,$(XR806_REPO_ROOT)/esphome/components/xr806/standby_trial.cpp))
+-include $(XR806_OBJDIR)/xr_standby_trial.d
