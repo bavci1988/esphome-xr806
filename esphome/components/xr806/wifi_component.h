@@ -7,10 +7,11 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/xr806/wlan_reconnect.h"
+#include "esphome/components/xr806/wifi_power_save_retry.h"
 
 namespace esphome::xr806 {
 
-// XR806 STA/DTIM backend, not an ESPHome wifi:/Native-API backend.
+// XR806 STA/DTIM backend for standard ESPHome wifi: and legacy probes.
 // WLAN is initialized by the vendor platform_init() before ESPHome setup().
 class XR806WiFiComponent final : public Component {
  public:
@@ -34,7 +35,7 @@ class XR806WiFiComponent final : public Component {
   uint32_t reconnect_attempts() const { return this->reconnect_.attempts(); }
 
  protected:
-  void apply_power_save_(void *netif);
+  void apply_power_save_(void *netif, uint32_t now);
   void probe_socket_();
   void probe_socket_facade_();
 
@@ -45,7 +46,7 @@ class XR806WiFiComponent final : public Component {
   uint8_t listen_interval_{0};
   bool power_save_{false};
   bool connected_{false};
-  bool power_save_attempted_{false};
+  XR806WiFiPowerSaveRetry power_save_retry_{};
   bool socket_probe_enabled_{false};
   bool socket_probe_done_{false};
   bool socket_facade_probe_enabled_{false};
