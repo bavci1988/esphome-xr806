@@ -51,7 +51,7 @@ jobs:
       - name: Syntax-check Tuya C++ against generated ESPHome headers (SDK neutral)
         run: |
           set -euo pipefail
-          DEFINES="$(find . -path "*/esphome/core/defines.h" -type f -print -quit)"
+          DEFINES="$(find tests/yaml/.esphome -path "*/esphome/core/defines.h" -type f -print -quit)"
           test -n "$DEFINES" && test -s "$DEFINES"
           ROOT="${DEFINES%/esphome/core/defines.h}"
           {
