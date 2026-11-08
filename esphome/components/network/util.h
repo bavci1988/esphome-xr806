@@ -24,6 +24,11 @@
 
 namespace esphome::network {
 
+#if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
+bool xr806_platform_is_connected();
+IPAddresses xr806_platform_get_ip_addresses();
+#endif
+
 #if defined(USE_ESP32) && USE_NETWORK_IPV6
 /// Copies the IPv6 addresses of an esp_netif into `addresses[1..]`, warning once when some do not fit.
 void fill_ip6_addresses(esp_netif_t *netif, IPAddresses &addresses);
@@ -55,6 +60,11 @@ ESPHOME_ALWAYS_INLINE inline bool is_connected() {
 #if defined(USE_OPENTHREAD) && !defined(USE_OPENTHREAD_BORDER_ROUTER)
   // A border router is reached over its Wi-Fi backbone, so the Thread link alone does not count
   if (openthread::global_openthread_component != nullptr && openthread::global_openthread_component->is_connected())
+    return true;
+#endif
+
+#if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
+  if (xr806_platform_is_connected())
     return true;
 #endif
 
