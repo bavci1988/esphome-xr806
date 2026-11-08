@@ -39,10 +39,7 @@ void XR806StandbyTrial::setup() {
     marker.mode = GPIOx_Pn_F1_OUTPUT;
     marker.driving = GPIO_DRIVING_LEVEL_1;
     marker.pull = GPIO_PULL_NONE;
-    if (HAL_GPIO_Init(GPIO_PORT_B, GPIO_PIN_5, &marker) != HAL_OK) {
-      this->mark_failed();
-      return;
-    }
+    HAL_GPIO_Init(GPIO_PORT_B, GPIO_PIN_5, &marker);  // XR806 HAL returns void.
     HAL_GPIO_WritePin(GPIO_PORT_B, GPIO_PIN_5, GPIO_PIN_LOW);
   }
   this->state_.arm(millis());
@@ -138,10 +135,9 @@ void XR806StandbyTrial::attempt_standby_() {
         marker.mode = GPIOx_Pn_F1_OUTPUT;
         marker.driving = GPIO_DRIVING_LEVEL_1;
         marker.pull = GPIO_PULL_NONE;
-        if (HAL_GPIO_Init(GPIO_PORT_B, GPIO_PIN_5, &marker) == HAL_OK) {
-          // Visible on a high-impedance analyzer without UART0/HC32 pollution.
-          HAL_GPIO_WritePin(GPIO_PORT_B, GPIO_PIN_5, GPIO_PIN_HIGH);
-        }
+        HAL_GPIO_Init(GPIO_PORT_B, GPIO_PIN_5, &marker);
+        // Visible on a high-impedance analyzer without UART0/HC32 pollution.
+        HAL_GPIO_WritePin(GPIO_PORT_B, GPIO_PIN_5, GPIO_PIN_HIGH);
       }
       ESP_LOGI(TAG, "Standby resumed: event=0x%08lx, PM result=%d",
                static_cast<unsigned long>(event), result);
