@@ -168,6 +168,13 @@ def _update_core_data(config):
             raise cv.Invalid("xr806.standby_trial requires xr806.lowpower: true")
         if not trial["confirm_offline"]:
             raise cv.Invalid("xr806.standby_trial requires confirm_offline: true")
+        # PB05 is in the WXU board's conservative Flash/XIP reservation.
+        # No electrical pin-ownership proof exists for the live TRV16.
+        if trial[CONF_RESUME_MARKER_PB05]:
+            raise cv.Invalid(
+                "resume_marker_pb05 is unsafe on the current WXU pin map; "
+                "use timer/current measurements instead"
+            )
         if (
             CONF_WLAN_SMOKE in config
             or CONF_XR806_WIFI in config
