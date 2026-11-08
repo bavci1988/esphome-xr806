@@ -112,6 +112,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   void set_status_pin(InternalGPIOPin *status_pin) { this->status_pin_ = status_pin; }
   void set_protocol(TuyaProtocol protocol) { this->protocol_ = protocol; }
   void set_auto_baud(bool auto_baud) { this->auto_baud_ = auto_baud; }
+  void set_mcu_wake_pin(InternalGPIOPin *pin) { this->mcu_wake_pin_ = pin; }
   bool request_low_power_refresh();
   // Called by an actual XR806 PM bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
@@ -150,6 +151,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   void send_low_power_network_();
   void update_low_power_sleep_lock_();
   void poll_low_power_autobaud_();
+  void send_low_power_product_query_(bool direct_probe);
   void process_low_power_queue_();
   bool low_power_ready_for_sleep_() const;
   void send_raw_command_(TuyaCommand command);
@@ -179,6 +181,7 @@ class Tuya final : public Component, public uart::UARTDevice {
 #endif
   TuyaProtocol protocol_{TuyaProtocol::STANDARD};
   bool auto_baud_{false};
+  InternalGPIOPin *mcu_wake_pin_{nullptr};
   TuyaLowPowerAutoBaud lp_autobaud_{};
   TuyaLowPowerV0Session lp_v0_{};
   TuyaLowPowerProductInfo lp_product_{};
