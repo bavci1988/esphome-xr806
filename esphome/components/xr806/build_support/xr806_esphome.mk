@@ -22,7 +22,8 @@ XR806_ESPHOME_OBJECTS := $(addprefix $(XR806_OBJDIR)/, \
     hal.o \
     wake_freertos.o \
     main.o \
-    runtime.o)
+    runtime.o \
+    wlan_smoke.o)
 
 XR806_ESPHOME_MAIN := $(XR806_OBJDIR)/sdk_main_esphome.o
 
@@ -87,6 +88,7 @@ $(eval $(call XR806_COMPILE_CPP,hal,$(XR806_SRC)/esphome/components/xr806/hal.cp
 $(eval $(call XR806_COMPILE_CPP,wake_freertos,$(XR806_SRC)/esphome/core/wake/wake_freertos.cpp))
 $(eval $(call XR806_COMPILE_CPP,main,$(XR806_SRC)/main.cpp))
 $(eval $(call XR806_COMPILE_CPP,runtime,$(XR806_REPO_ROOT)/esphome/components/xr806/runtime.cpp))
+$(eval $(call XR806_COMPILE_CPP,wlan_smoke,$(XR806_REPO_ROOT)/esphome/components/xr806/wlan_smoke.cpp))
 
 # ESPHOME_SDK_MAIN_RULE_V1
 # Build a separate SDK main.o with ESPHome enabled.
