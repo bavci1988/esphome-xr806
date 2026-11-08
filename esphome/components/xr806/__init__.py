@@ -26,10 +26,16 @@ CONF_LISTEN_INTERVAL = "listen_interval"
 CONF_POWER_SAVE = "power_save"
 CONF_SOCKET_PROBE = "socket_probe"
 CONF_SOCKET_FACADE_PROBE = "socket_facade_probe"
+CONF_STANDBY_TRIAL = "standby_trial"
+CONF_ENTRY_AFTER_MS = "entry_after_ms"
+CONF_WAKE_AFTER_MS = "wake_after_ms"
+CONF_WAKE_PIN = "wake_pin"
+CONF_WAKE_EDGE = "wake_edge"
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
 XR806WLANSmoke = xr806_ns.class_("XR806WLANSmoke", cg.Component)
 XR806WiFiComponent = xr806_ns.class_("XR806WiFiComponent", cg.Component)
+XR806StandbyTrial = xr806_ns.class_("XR806StandbyTrial", cg.Component)
 
 
 def validate_wlan_smoke_password(value):
@@ -79,11 +85,33 @@ XR806_WIFI_SCHEMA = cv.Schema(
 
 
 
+# Stage 7b is an OFFLINE, bounded one-shot for an isolated WXU test board.
+# Exposed PA wake pins only; PA21..23 are reserved for UART2/boot.
+STANDBY_TRIAL_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(XR806StandbyTrial),
+        cv.Required("confirm_offline"): cv.boolean,
+        cv.Optional(CONF_ENTRY_AFTER_MS, default=10000): cv.int_range(min=1000, max=60000),
+        cv.Required(CONF_WAKE_AFTER_MS): cv.int_range(min=100, max=5000),
+        cv.Optional(CONF_WAKE_PIN): cv.one_of("PA11", "PA12", "PA13", "PA19", "PA20", upper=True),
+        cv.Optional(CONF_WAKE_EDGE, default="falling"): cv.one_of("falling", "rising", lower=True),
+    }
+).extend(cv.COMPONENT_SCHEMA)
+
+
 def _update_core_data(config):
     if CONF_XR806_WLAN_SETTINGS in config and (CONF_XR806_WIFI in config or CONF_WLAN_SMOKE in config):
         raise cv.Invalid("xr806.wlan cannot be combined with xr806.wifi/wlan_smoke")
     if CONF_WLAN_SMOKE in config and CONF_XR806_WIFI in config:
         raise cv.Invalid("Choose either xr806.wifi or legacy xr806.wlan_smoke, not both")
+    if CONF_STANDBY_TRIAL in config:
+        trial = config[CONF_STANDBY_TRIAL]
+        if not config["lowpower"]:
+            raise cv.Invalid("xr806.standby_trial requires xr806.lowpower: true")
+        if not trial["confirm_offline"]:
+            raise cv.Invalid("xr806.standby_trial requires confirm_offline: true")
+        if CONF_WLAN_SMOKE in config or CONF_XR806_WIFI in config or CONF_XR806_WLAN_SETTINGS in config:
+            raise cv.Invalid("Stage 7b offline standby_trial cannot be combined with XR806 WLAN")
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = DOMAIN
     CORE.data[KEY_CORE][KEY_TARGET_FRAMEWORK] = "xradio"
     return config
@@ -98,6 +126,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_WLAN_SMOKE): WLAN_SMOKE_SCHEMA,
             cv.Optional(CONF_XR806_WIFI): XR806_WIFI_SCHEMA,
             cv.Optional(CONF_XR806_WLAN_SETTINGS): XR806_WLAN_SETTINGS_SCHEMA,
+            cv.Optional(CONF_STANDBY_TRIAL): STANDBY_TRIAL_SCHEMA,
         }
     ),
     _update_core_data,
@@ -108,6 +137,27 @@ async def to_code(config):
     # XR806_LOWPOWER_FLAG_V1: activate future XR806 PM policy
     if config["lowpower"]:
         cg.add_define("USE_XR806_LOWPOWER")
+    if CONF_STANDBY_TRIAL in config:
+        forbidden = (
+            "wifi", "api", "ota", "mqtt", "mdns", "network",
+            "web_server", "uart", "captive_portal", "improv_serial",
+        )
+        present = [domain for domain in forbidden if domain in CORE.config]
+        if present:
+            raise cv.Invalid(
+                "Stage 7b offline standby_trial forbids active transports: "
+                + ", ".join(present)
+            )
+        trial = config[CONF_STANDBY_TRIAL]
+        cg.add_define("USE_XR806_STANDBY_TRIAL")
+        cg.add_global(cg.RawStatement('#include "esphome/components/xr806/standby_trial.h"'))
+        standby = cg.new_Pvariable(trial["id"])
+        cg.add(standby.set_entry_delay_ms(trial[CONF_ENTRY_AFTER_MS]))
+        cg.add(standby.set_wake_after_ms(trial[CONF_WAKE_AFTER_MS]))
+        if CONF_WAKE_PIN in trial:
+            cg.add(standby.set_wake_pin(int(trial[CONF_WAKE_PIN][2:])))
+        cg.add(standby.set_wake_falling(trial[CONF_WAKE_EDGE] == "falling"))
+        await cg.register_component(standby, trial)
     if CONF_XR806_WLAN_SETTINGS in config and "wifi" not in CORE.config:
         raise cv.Invalid("xr806.wlan requires top-level wifi:")
     cg.add_define("USE_XR806")
