@@ -4,7 +4,7 @@
 
 #include <cstdint>
 #include "esphome/core/component.h"
-#include "esphome/components/xr806/standby_trial_state.h"
+#include "standby_trial_state.h"
 
 namespace esphome::xr806 {
 
