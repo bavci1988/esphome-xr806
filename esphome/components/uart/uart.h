@@ -135,3 +135,8 @@ class UARTDevice {
 };
 
 }  // namespace esphome::uart
+
+// XR806_UART_CPP_V1
+#ifdef USE_XR806
+#include "esphome/components/uart/uart_component_xr806.h"
+#endif
