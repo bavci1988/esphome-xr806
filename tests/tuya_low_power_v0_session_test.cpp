@@ -5,6 +5,7 @@
 #include <cstdint>
 #include "esphome/components/tuya/tuya_low_power_v0.h"
 #include "esphome/components/tuya/tuya_low_power_autobaud.h"
+#include "esphome/components/tuya/tuya_low_power_product.h"
 #include <vector>
 #include <string>
 
@@ -92,5 +93,60 @@ int main() {
   assert(!scan.probe_due(0x00000010u));  // millis() wraparound safe.
   assert(scan.probe_due(static_cast<uint32_t>(0xFFFFFFF0u + 500u)));
   assert(scan.baud() == 115200);
+  // The refresh request DP106 never echoes DP106; it returns exactly
+  // eight other DPs. An empty CMD09 ACK alone must not release the write.
+  state.begin_full_status(15000);
+  for (uint8_t id : TuyaLowPowerV0Session::FULL_STATUS_DPS)
+    state.observe_dp(id, 1, &id, 1);
+  assert(state.ready());
+  const uint8_t one = 1;
+  state.begin_write(106, 1, &one, 1, 16000);
+  state.write_ack();
+  assert(state.refresh_pending() && !state.ready());
+  for (size_t i = 0; i + 1 < TuyaLowPowerV0Session::REFRESH_DPS.size(); ++i) {
+    uint8_t dp = TuyaLowPowerV0Session::REFRESH_DPS[i];
+    state.observe_dp(dp, 1, &dp, 1);
+  }
+  assert(state.write_pending());
+  uint8_t end_dp = TuyaLowPowerV0Session::REFRESH_DPS.back();
+  state.observe_dp(end_dp, 1, &end_dp, 1);
+  assert(state.ready());
+  assert(state.last_write_result() == TuyaLowPowerV0Session::WriteResult::CONFIRMED);
+
+  // Report-before-ACK also works for the eight-DP refresh.
+  state.begin_write(106, 1, &one, 1, 17000);
+  for (uint8_t dp : TuyaLowPowerV0Session::REFRESH_DPS)
+    state.observe_dp(dp, 1, &dp, 1);
+  assert(state.write_pending());
+  state.write_ack();
+  assert(state.ready());
+
+  // Missing reports are a fault, not an implicit ACK success.
+  state.begin_write(106, 1, &one, 1, 18000);
+  state.write_ack();
+  state.observe_dp(1, 1, &one, 1);
+  assert(state.expire(30000));
+  assert(state.last_write_result() == TuyaLowPowerV0Session::WriteResult::TIMED_OUT);
+  assert(!state.ready());
+  state.begin_full_status(31000);
+  for (uint8_t dp : TuyaLowPowerV0Session::FULL_STATUS_DPS)
+    state.observe_dp(dp, 1, &dp, 1);
+  assert(state.ready());
+
+  // The verified TRV16 product controls wake pins and standby-vs-hibernation.
+  using esphome::tuya::TuyaLowPowerProductInfo;
+  TuyaLowPowerProductInfo info;
+  const std::string product_json = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":1})";
+  assert(info.parse(reinterpret_cast<const uint8_t *>(product_json.data()), product_json.size()));
+  assert(info.is_verified_trv16());
+  assert(info.wake_gpio == 20 && info.mcu_wake_gpio == 28 && info.sleep_mode == 1);
+  const std::string hib_json = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":0})";
+  assert(info.parse(reinterpret_cast<const uint8_t *>(hib_json.data()), hib_json.size()));
+  assert(info.is_verified_trv16() && info.sleep_mode == 0);
+  const std::string wrong_pid = R"({"p":"another_product","v":"1.3.1","wk":20,"mwk":28,"sm":1})";
+  assert(info.parse(reinterpret_cast<const uint8_t *>(wrong_pid.data()), wrong_pid.size()));
+  assert(!info.is_verified_trv16());
+  const std::string missing_pin = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"sm":1})";
+  assert(!info.parse(reinterpret_cast<const uint8_t *>(missing_pin.data()), missing_pin.size()));
   return 0;
 }
