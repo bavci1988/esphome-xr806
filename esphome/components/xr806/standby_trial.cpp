@@ -34,6 +34,17 @@ namespace esphome::xr806 {
 ESPHOME_LOG_TAG(TAG, "xr806.standby");
 
 void XR806StandbyTrial::setup() {
+  if (this->resume_marker_pb05_) {
+    GPIO_InitParam marker{};
+    marker.mode = GPIOx_Pn_F1_OUTPUT;
+    marker.driving = GPIO_DRIVING_LEVEL_1;
+    marker.pull = GPIO_PULL_NONE;
+    if (HAL_GPIO_Init(GPIO_PORT_B, GPIO_PIN_5, &marker) != HAL_OK) {
+      this->mark_failed();
+      return;
+    }
+    HAL_GPIO_WritePin(GPIO_PORT_B, GPIO_PIN_5, GPIO_PIN_LOW);
+  }
   this->state_.arm(millis());
   ESP_LOGW(TAG, "Stage 7b ONE-SHOT bench trial armed: no WiFi/API/OTA/UART clients");
 }
@@ -50,6 +61,8 @@ void XR806StandbyTrial::dump_config() {
                   this->wake_falling_ ? LOG_STR_LITERAL("falling") : LOG_STR_LITERAL("rising"));
   }
   ESP_LOGCONFIG(TAG, "  Mode: PM_MODE_STANDBY (SRAM retention), NOT hibernation");
+  ESP_LOGCONFIG(TAG, "  PB05 wake marker: %s",
+                this->resume_marker_pb05_ ? LOG_STR_LITERAL("enabled") : LOG_STR_LITERAL("disabled"));
 }
 
 void XR806StandbyTrial::loop() {
@@ -118,7 +131,11 @@ void XR806StandbyTrial::attempt_standby_() {
   {
     const int result = pm_enter_mode_timeout(PM_MODE_STANDBY, 500);
     const uint32_t event = HAL_Wakeup_GetEvent();
-    if (result == 0 && XR806StandbyTrialState::expected_wake_event(event, wake_index)) {
+    if (XR806StandbyTrialState::resumed_from_expected_source(result, event, wake_index)) {
+      if (this->resume_marker_pb05_) {
+        // Visible on a high-impedance analyzer without UART0/HC32 pollution.
+        HAL_GPIO_WritePin(GPIO_PORT_B, GPIO_PIN_5, GPIO_PIN_HIGH);
+      }
       ESP_LOGI(TAG, "Standby resumed: event=0x%08lx, PM result=%d",
                static_cast<unsigned long>(event), result);
     } else {
