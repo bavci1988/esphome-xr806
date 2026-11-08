@@ -1,6 +1,6 @@
 #include "esphome/core/defines.h"
 
-#ifdef USE_XR806_SOCKET_FACADE_PROBE
+#if defined(USE_XR806) && defined(USE_SOCKET_IMPL_LWIP_SOCKETS)
 
 #include "esphome/components/xr806/socket_compat.h"
 #include "esphome/components/socket/headers.h"
