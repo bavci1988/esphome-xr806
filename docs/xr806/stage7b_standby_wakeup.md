@@ -102,3 +102,71 @@ a binary sensor or another component while the trial runs.
 
 **Do not merge into a production profile** until physical standby
 current and wake reliability have been measured.
+
+## Reverse-engineering alignment (xr806-lab, 2026-11-08)
+
+The current `xr806-lab` reconstruction is based on the actual HC32 1.3.1
+and WXU 1.1.4 binaries; the normal boot and GPIO-wake paths have been
+executed in isolated Unicorn tests. These are **application-protocol
+findings**, not evidence that the physical board already reaches its
+requested PM state.
+
+- **Separate cold boot, retained standby resume and hibernation restart.**
+  A fresh WXU probes CMD01 (not a mandatory CMD00 heartbeat) at 9600 or
+  115200 baud, caches and replays the first valid CMD01 product reply,
+  initializes LP before IoT, then reacts to network status. A GPIO-wake
+  from retained standby does **not** automatically repeat autobaud,
+  CMD01, IoT initialization or DP106. Hibernation, if reached, boots anew.
+- **`sm` is MCU-specific and not a platform sleep enum.** In the
+  supplied HC32 build, `sm=0` iff both RAM byte `0x2000003B` and the
+  time-valid flag `0x2000003C` are nonzero; otherwise `sm=1`.
+  The original WXU maps `sm=1` to standby request, `sm=0` to
+  hibernation request; SDK mode constants remain 2/3 respectively.
+  This offline generic WXU trial intentionally selects standby **without
+  inspecting any MCU**.
+- **Physical roles:** the TRV16 productinfo `wk=20` is **PA20 /
+  WXU module pad 9 / MCU-to-WXU input** (hardware wake index 10).
+  `mwk=28` is **PB04 / pad 2 / WXU-to-MCU output**; it cannot be used
+  as an XR806 hardware wake IO. The actual electrical edge/pulse
+  polarity is not established by firmware-only evidence. The trial's
+  `falling` value is an explicit laboratory configuration, not a
+  device-specific confirmed property.
+- **CMD12 and CMD38:** CMD12/01 is an application sleep-transition
+  notification, not proof of physical sleep. The GPIO LP-task emits
+  CMD12/00 only if a logical sleeping flag was previously set, then
+  clears that flag and extends its *software* awake interval by at
+  least 5000 ms. The supplied HC32 dispatcher ignores incoming
+  CMD12/38 and issues no ACK. CMD38/00 can cause a low-power request
+  on the original WXU when its particular network/MCU-OTA flags are
+  clear; this is **not sufficient** to show that UART writes and
+  report bursts have drained.
+- **TRV16 driver responsibilities (NOT implemented by this MCU-neutral
+  bench backend):** serialize write/refresh transactions; distinguish
+  empty CMD09 ACK from eventual CMD05 state adoption; keep a sleep
+  blocker for UART TX completion, RX processing and pending DP series
+  (17 reports after CMD02/04; eight reports on DP106 refresh); guard
+  200 ms of stable idle before suspend; honor at least 5000 ms
+  software awake after MCU GPIO wake; explicitly classify wake cause
+  and cold start versus resume. When connected, CMD02/04 can trigger
+  the 17-DP series and a later, conditional CMD06 time request; DP106
+  is not a mandatory bootstrap command.
+- **Firmware/hash evidence:** HC32 SHA256
+  `2e86346a530266770ada2397e5abdabc6c5bf0c31153021a6b3e46567e3d9be4`,
+  WXU SHA256 `16b7a9a3dbb722fd51194de04551d38f127b574568453abc7289a0397e86be39`.
+  These exact hashes match the working analysis binaries.
+
+Source-of-truth details live in the private lab:
+`reverse-engineering/uart-protocol/trv16-boot-wake/README.md`,
+`reverse-engineering/uart-protocol/cmd12-cmd38/README.md` and
+`reverse-engineering/xr806/deep-sleep-disassembly/README.md`.
+
+## CI and debug restrictions
+
+The ESPHome XR806 platform currently lacks a native `logger:` UART
+backend. Adding `logger:` caused the generic ESPHome code generator to
+fail in `logger.uart_selection()`; it also risks corrupting HC32 UART0.
+Therefore this offline test **rejects logger explicitly** until a
+dedicated, non-HC32 debugging transport is implemented. Verify standby
+by retained execution markers/current/wakeup pin under bench conditions.
+The private `xr806-sdk` repository has a separate cross-build workflow
+which checks out the pinned SDK and the Stage 7b ESPHome branch.
