@@ -5,6 +5,11 @@
 
 #ifdef USE_XR806_STANDBY_TRIAL
 
+// CONFIG_PM is emitted by the SDK's generated xr_config.h (not defines.h).
+extern "C" {
+#include "xr_config.h"
+}
+
 #if !defined(CONFIG_PM) || !defined(CONFIG_PM_WAKELOCKS) || !defined(CONFIG_STANDBY_RET_SRAM_ALL)
 #error "XR806 Stage 7b requires PM, PM wakelocks and full standby SRAM retention"
 #endif
