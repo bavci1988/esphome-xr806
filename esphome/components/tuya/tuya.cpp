@@ -3,6 +3,9 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
+#ifdef USE_XR806_LOWPOWER
+#include "esphome/components/xr806/lowpower_policy.h"
+#endif
 
 #ifdef USE_NETWORK
 #include "esphome/components/network/util.h"
@@ -40,9 +43,20 @@ static bool network_is_connected() {
 }
 
 void Tuya::setup() {
-  this->set_interval(HEARTBEAT_INTERVAL_ID, 15000, [this] { this->send_empty_command_(TuyaCommandType::HEARTBEAT); });
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    this->init_state_ = TuyaInitState::INIT_PRODUCT;
+#ifdef USE_XR806_LOWPOWER
+    esphome::xr806::lowpower_policy().require_external_mcu(true);
+    this->update_low_power_sleep_lock_();
+#endif
+    // Original WXU initiates CMD01 directly, without a heartbeat probe.
+    this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
+    this->set_interval(WIFI_STATUS_INTERVAL_ID, 1000, [this] { this->send_low_power_network_(); });
+  } else {
+    this->set_interval(HEARTBEAT_INTERVAL_ID, 15000, [this] { this->send_empty_command_(TuyaCommandType::HEARTBEAT); });
+  }
 #ifdef USE_TIME
-  if (this->force_time_sync_) {
+  if (this->force_time_sync_ && this->protocol_ == TuyaProtocol::STANDARD) {
     this->register_local_time_sync_callback_();
     this->set_interval(FORCE_TIME_SYNC_INTERVAL_ID, FORCE_TIME_SYNC_CHECK_INTERVAL,
                        [this] { this->check_force_time_sync_(); });
@@ -55,11 +69,19 @@ void Tuya::setup() {
 
 void Tuya::loop() {
   this->read_available([this](uint8_t b) { this->handle_char_(b); });
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    if (this->lp_v0_.expire(millis(), 12000)) {
+      ESP_LOGW(TAG, "Low-power MCU transaction timed out; sleep remains blocked");
+      this->lp_network_status_ = 0xFF;
+    }
+    this->update_low_power_sleep_lock_();
+  }
   process_command_queue_();
 }
 
 void Tuya::dump_config() {
   ESP_LOGCONFIG(TAG, "Tuya:");
+  ESP_LOGCONFIG(TAG, "  Protocol: %s", this->protocol_ == TuyaProtocol::LOW_POWER_V0 ? "low_power_v0" : "standard");
   if (this->init_state_ != TuyaInitState::INIT_DONE) {
     if (this->init_failed_) {
       ESP_LOGCONFIG(TAG, "  Initialization failed. Current init_state: %u", static_cast<uint8_t>(this->init_state_));
@@ -177,6 +199,11 @@ void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buff
     this->expected_response_.reset();
     this->command_queue_.erase(command_queue_.begin());
     this->init_retries_ = 0;
+  }
+
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    this->handle_low_power_command_(command, version, buffer, len);
+    return;
   }
 
   switch (command_type) {
@@ -491,7 +518,21 @@ void Tuya::send_raw_command_(TuyaCommand command) {
   uint8_t version = 0;
 
   this->last_command_timestamp_ = millis();
-  switch (command.cmd) {
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    const auto cmd = static_cast<uint8_t>(command.cmd);
+    if (cmd == 0x01 || cmd == 0x02 || cmd == 0x09)
+      this->expected_response_ = command.cmd;
+    if (cmd == 0x02 && command.payload.size() == 1 && command.payload[0] == 0x04)
+      this->lp_v0_.begin_full_status(millis());
+    if (cmd == 0x09 && command.payload.size() >= 4) {
+      const auto &p = command.payload;
+      const size_t size = (static_cast<size_t>(p[2]) << 8) | p[3];
+      if (p.size() == size + 4)
+        this->lp_v0_.begin_write(p[0], p[1], p.data() + 4, size, millis());
+    }
+    this->update_low_power_sleep_lock_();
+  } else {
+    switch (command.cmd) {
     case TuyaCommandType::HEARTBEAT:
       this->expected_response_ = TuyaCommandType::HEARTBEAT;
       break;
@@ -507,6 +548,7 @@ void Tuya::send_raw_command_(TuyaCommand command) {
       break;
     default:
       break;
+    }
   }
 
 #if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
@@ -545,6 +587,10 @@ void Tuya::process_command_queue_() {
       this->command_queue_.erase(command_queue_.begin());
     }
   }
+
+  // CMD09 empty ACK is not write confirmation: await the matching CMD05 report.
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_v0_.busy())
+    return;
 
   // Left check of delay since last command in case there's ever a command sent by calling send_raw_command_ directly
   if (delay > COMMAND_DELAY && !this->command_queue_.empty() && this->rx_message_.empty() &&
@@ -810,7 +856,10 @@ void Tuya::send_datapoint_command_(uint8_t datapoint_id, TuyaDatapointType datap
   buffer.push_back(data.size() >> 0);
   buffer.insert(buffer.end(), data.begin(), data.end());
 
-  this->send_command_(TuyaCommand{.cmd = TuyaCommandType::DATAPOINT_DELIVER, .payload = buffer});
+  const auto cmd = this->protocol_ == TuyaProtocol::LOW_POWER_V0
+                       ? static_cast<TuyaCommandType>(0x09)
+                       : TuyaCommandType::DATAPOINT_DELIVER;
+  this->send_command_(TuyaCommand{.cmd = cmd, .payload = buffer});
 }
 
 void Tuya::register_listener_(uint8_t datapoint_id, Callback<void(const TuyaDatapoint &)> func) {
