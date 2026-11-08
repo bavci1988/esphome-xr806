@@ -14,7 +14,10 @@ class XR806StandbyTrial final : public Component {
  public:
   void set_entry_delay_ms(uint32_t ms) { entry_delay_ms_ = ms; }
   void set_wake_after_ms(uint32_t ms) { wake_after_ms_ = ms; }
-  void set_wake_pin(uint8_t pa_pin) { wake_pin_ = pa_pin; has_wake_pin_ = true; }
+  void set_wake_pin(uint8_t pa_pin) {
+    wake_pin_ = pa_pin;
+    has_wake_pin_ = true;
+  }
   void set_wake_falling(bool falling) { wake_falling_ = falling; }
   void set_resume_marker_pb05(bool enabled) { resume_marker_pb05_ = enabled; }
 
