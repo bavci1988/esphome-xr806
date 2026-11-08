@@ -32,8 +32,8 @@ jobs:
             tests/xr806/lowpower_stage7a_test.cpp \
             -o /tmp/xr806-lowpower-policy-test
           /tmp/xr806-lowpower-policy-test
-          g++ -std=gnu++20 -Wall -Wextra -Werror -pthread -I. \\
-            tests/xr806/standby_trial_state_test.cpp \\
+          g++ -std=gnu++20 -Wall -Wextra -Werror -pthread -I. \
+            tests/xr806/standby_trial_state_test.cpp \
             -o /tmp/xr806-stage7b-trial-test
           /tmp/xr806-stage7b-trial-test
           echo "PASS MCU-independent WXU policy, WLAN retries and Stage 7b one-shot gate"
