@@ -135,6 +135,7 @@ void XR806StandbyController::attempt_standby_() {
     ++prepared;
     if (!this->participants_[i]->prepare_for_standby()) {
       this->cancel_prepared_(prepared);
+      this->state_.postpone();
       this->busy_ = false;
       return;
     }
@@ -144,6 +145,7 @@ void XR806StandbyController::attempt_standby_() {
   // give the buses another full quiet interval, rather than racing PM entry.
   if (before_clients != p.generation() || !p.standby_requested()) {
     this->cancel_prepared_(prepared);
+    this->state_.postpone();
     this->busy_ = false;
     return;
   }
