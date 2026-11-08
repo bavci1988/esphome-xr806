@@ -45,8 +45,10 @@ static bool network_is_connected() {
 void Tuya::setup() {
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
     this->init_state_ = TuyaInitState::INIT_PRODUCT;
-    if (this->mcu_wake_pin_ != nullptr)
+    if (this->mcu_wake_pin_ != nullptr) {
+      this->mcu_wake_pin_->setup();
       this->mcu_wake_pin_->digital_write(false);  // Inactive logical level.
+    }
 #ifdef USE_XR806_LOWPOWER
     esphome::xr806::lowpower_policy().require_external_mcu(true);
     this->update_low_power_sleep_lock_();
