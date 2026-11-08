@@ -1,0 +1,34 @@
+name: Tuya MCU Low-Power v0 (host tests)
+
+on:
+  push:
+    branches: [feature/tuya-low-power-v0]
+    paths:
+      - "esphome/components/tuya/**"
+      - "tests/tuya_low_power_v0_session_test.cpp"
+      - ".github/workflows/tuya-low-power-v0-ci.yml"
+  pull_request:
+    branches: [dev]
+    paths:
+      - "esphome/components/tuya/**"
+      - "tests/tuya_low_power_v0_session_test.cpp"
+      - ".github/workflows/tuya-low-power-v0-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-session:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run Tuya low-power v0 state regression tests
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -Wall -Wextra -Werror -I. \
+            tests/tuya_low_power_v0_session_test.cpp \
+            -o /tmp/tuya-low-power-v0-test
+          /tmp/tuya-low-power-v0-test
+          echo "PASS Tuya Low-Power v0 host transaction state"
