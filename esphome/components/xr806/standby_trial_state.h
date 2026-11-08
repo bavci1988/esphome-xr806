@@ -25,8 +25,8 @@ class XR806StandbyTrialState {
   bool attempted() const { return attempted_; }
 
   static bool expected_wake_event(uint32_t event, int wake_io_index) {
-    constexpr uint32_t WAKE_TIMER = 1u << 16;
-    uint32_t expected = WAKE_TIMER;
+    constexpr uint32_t wake_timer = 1u << 16;
+    uint32_t expected = wake_timer;
     if (wake_io_index >= 0 && wake_io_index <= 13)
       expected |= 1u << wake_io_index;
     return (event & expected) != 0;
