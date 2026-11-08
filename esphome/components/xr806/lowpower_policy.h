@@ -46,9 +46,16 @@ class XR806LowPowerPolicy {
   // A separate, optional MCU driver must explicitly request this gate.
   // Each transition from absent to present resets the synchronization gate.
   void require_external_mcu(bool required) {
-    const bool was_required = external_mcu_required_.exchange(required, std::memory_order_acq_rel);
-    if (required && !was_required)
-      blockers_.fetch_or(MCU_UNSYNCED, std::memory_order_acq_rel);
+    if (required) {
+      // Set the blocker BEFORE publishing the external-MCU requirement.
+      // This avoids a transient unblocked window for a concurrent sleep voter.
+      if (!external_mcu_required_.load(std::memory_order_acquire)) {
+        blockers_.fetch_or(MCU_UNSYNCED, std::memory_order_acq_rel);
+        external_mcu_required_.store(true, std::memory_order_release);
+      }
+    } else {
+      external_mcu_required_.store(false, std::memory_order_release);
+    }
   }
 
   void set_mcu_synchronized(bool ready) {

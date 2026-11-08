@@ -318,12 +318,6 @@ $(eval $(call XR806_COMPILE_CPP,xr_core_build_info,$(XR806_SRC)/esphome/core/bui
 $(eval $(call XR806_COMPILE_CPP,xr_core_component_iterator,$(XR806_SRC)/esphome/core/component_iterator.cpp))
 $(eval $(call XR806_COMPILE_CPP,xr_mac_address,$(XR806_REPO_ROOT)/esphome/components/xr806/mac_address.cpp))
 
-# XR806_LOWPOWER_POLICY_V1
-# Instantiated only with xr806.lowpower: true; never enters standby here.
-XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_lowpower_policy.o
-$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_lowpower_policy.o
-$(eval $(call XR806_COMPILE_CPP,xr_lowpower_policy,$(XR806_REPO_ROOT)/esphome/components/xr806/lowpower_policy.cpp))
-
 # XR806_MDNS_PLATFORM_V1
 # Wire the SDK's native lwIP mDNS responder to ESPHome's generated
 # MDNSComponent service/TXT records. The object is inert without USE_MDNS.
