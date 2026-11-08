@@ -82,8 +82,9 @@ class XR806LowPowerPolicy {
     uint32_t blockers = blockers_.load(std::memory_order_acquire);
     // An optional MCU may be completely absent, or may speak any protocol.
     // No HC32L136/Tuya assumption is allowed in the platform policy.
-    if (!external_mcu_required_.load(std::memory_order_acquire))
+    if (!external_mcu_required_.load(std::memory_order_acquire)) {
       blockers &= ~MCU_UNSYNCED;
+    }
     return blockers | (requested_.load(std::memory_order_acquire) ? 0u : NOT_REQUESTED);
   }
 
