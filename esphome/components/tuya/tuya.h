@@ -8,6 +8,7 @@
 #include "esphome/core/defines.h"
 #include "esphome/core/helpers.h"
 #include "esphome/components/uart/uart.h"
+#include "tuya_low_power_v0.h"
 
 #ifdef USE_TIME
 #include "esphome/components/time/real_time_clock.h"
@@ -46,6 +47,11 @@ struct TuyaDatapoint {
 struct TuyaDatapointListener {
   uint8_t datapoint_id;
   Callback<void(const TuyaDatapoint &)> on_datapoint;
+};
+
+enum class TuyaProtocol : uint8_t {
+  STANDARD = 0,
+  LOW_POWER_V0 = 1,
 };
 
 enum class TuyaCommandType : uint8_t {
@@ -102,6 +108,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   void set_boolean_datapoint_value(uint8_t datapoint_id, bool value);
   void set_integer_datapoint_value(uint8_t datapoint_id, uint32_t value);
   void set_status_pin(InternalGPIOPin *status_pin) { this->status_pin_ = status_pin; }
+  void set_protocol(TuyaProtocol protocol) { this->protocol_ = protocol; }
   void set_string_datapoint_value(uint8_t datapoint_id, const std::string &value);
   void set_enum_datapoint_value(uint8_t datapoint_id, uint8_t value);
   void set_bitmask_datapoint_value(uint8_t datapoint_id, uint32_t value, uint8_t length);
@@ -131,6 +138,11 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool validate_message_();
 
   void handle_command_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len);
+  void handle_low_power_command_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len);
+  void send_low_power_direct_(uint8_t command, const std::vector<uint8_t> &payload);
+  void send_low_power_time_();
+  void send_low_power_network_();
+  void update_low_power_sleep_lock_();
   void send_raw_command_(TuyaCommand command);
   void process_command_queue_();
   void send_command_(const TuyaCommand &command);
@@ -156,6 +168,9 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool time_sync_callback_registered_{false};
   bool gmt_time_sync_callback_registered_{false};
 #endif
+  TuyaProtocol protocol_{TuyaProtocol::STANDARD};
+  TuyaLowPowerV0Session lp_v0_{};
+  uint8_t lp_network_status_{0xFF};
   TuyaInitState init_state_ = TuyaInitState::INIT_HEARTBEAT;
   bool init_failed_{false};
   int init_retries_{0};
