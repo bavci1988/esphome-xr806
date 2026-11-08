@@ -83,6 +83,17 @@ XR806_CXXFLAGS := \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1/portable/GCC/ARM_CM33_NTZ \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1/portable/GCC/ARM_CM33_NTZ/non_secure
 
+# XR806_NOISE_INTEGRATED_V1: archives supplied by ESPHome run_compile.
+ifneq ($(strip $(XR806_NOISE_C_ARCHIVE)),)
+XR806_CXXFLAGS += \
+    -I$(XR806_NOISE_C_INCLUDE) \
+    -I$(XR806_NOISE_SRC_INCLUDE) \
+    -I$(XR806_SODIUM_INCLUDE) \
+    -I$(XR806_SODIUM_PORT_INCLUDE)
+$(XR806_OUTPUT): $(XR806_NOISE_C_ARCHIVE) $(XR806_SODIUM_ARCHIVE)
+LIBRARIES += $(XR806_NOISE_C_ARCHIVE) $(XR806_SODIUM_ARCHIVE) -lm -lc -lgcc
+endif
+
 define XR806_COMPILE_CPP
 $(XR806_OBJDIR)/$(1).o: $(2) $(XR806_DEFINES)
 	@mkdir -p $$(@D)

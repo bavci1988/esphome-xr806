@@ -153,6 +153,7 @@ def run_compile(args, config) -> bool:
 
     from esphome.core import EsphomeError
     from .build_support.dependencies import DEPENDENCIES, resolve_dependencies
+    from .build_support.noise_build import prepare_noise_build
 
     # Locate the ESPHome checkout from this platform module.
     repo_root = Path(__file__).resolve().parents[3]
@@ -254,6 +255,15 @@ def run_compile(args, config) -> bool:
         "XR806_IMAGE_CFG": str(fw_dir / "image.cfg"),
         "XR806_AWIH": str(image),
     }
+
+    # XR806_NOISE_INTEGRATED_V1: plain esphome compile owns crypto builds.
+    import re
+    defines = (source / "esphome/core/defines.h").read_text()
+    if re.search(r"(?m)^\s*#define\s+USE_NOISE(?:\s|$)", defines):
+        try:
+            variables.update(prepare_noise_build())
+        except (OSError, RuntimeError, subprocess.CalledProcessError) as err:
+            raise EsphomeError(f"XR806 Noise ARM build failed: {err}") from err
 
     command = [
         "make",
