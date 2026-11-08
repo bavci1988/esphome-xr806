@@ -68,6 +68,8 @@ XR806_CXXFLAGS := \
     -include $(XR806_DEFINES) \
     -I$(XR806_ARDUINOJSON_SRC) \
     -I$(ROOT_PATH)/include \
+    -I$(ROOT_PATH)/project \
+    -I$(ROOT_PATH)/project/common/framework \
     -I$(ROOT_PATH)/include/driver/cmsis \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1 \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1/portable/GCC/ARM_CM33_NTZ \
