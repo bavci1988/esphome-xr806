@@ -27,10 +27,10 @@ CONF_SOCKET_PROBE = "socket_probe"
 CONF_SOCKET_FACADE_PROBE = "socket_facade_probe"
 CONF_STANDBY_TRIAL = "standby_trial"
 CONF_STANDBY = "standby"
-CONF_STANDBY_ENABLED = "enabled"
-CONF_STANDBY_QUIET_MS = "quiet_ms"
-CONF_STANDBY_MIN_AWAKE_MS = "min_awake_ms"
-CONF_STANDBY_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
+CONF_ENABLED = "enabled"
+CONF_QUIET_MS = "quiet_ms"
+CONF_MIN_AWAKE_MS = "min_awake_ms"
+CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
 CONF_ENTRY_AFTER_MS = "entry_after_ms"
 CONF_WAKE_AFTER_MS = "wake_after_ms"
 CONF_WAKE_PIN = "wake_pin"
@@ -118,14 +118,14 @@ STANDBY_TRIAL_SCHEMA = cv.Schema(
 STANDBY_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(XR806StandbyController),
-        cv.Required(CONF_STANDBY_ENABLED): cv.boolean,
+        cv.Required(CONF_ENABLED): cv.boolean,
         cv.Optional(CONF_WAKE_AFTER_MS, default=3000): cv.int_range(
             min=500, max=60000
         ),
-        cv.Optional(CONF_STANDBY_QUIET_MS, default=250): cv.int_range(
+        cv.Optional(CONF_QUIET_MS, default=250): cv.int_range(
             min=200, max=30000
         ),
-        cv.Optional(CONF_STANDBY_MIN_AWAKE_MS, default=5000): cv.int_range(
+        cv.Optional(CONF_MIN_AWAKE_MS, default=5000): cv.int_range(
             min=1000, max=60000
         ),
         cv.Optional(CONF_WAKE_PIN): cv.one_of(
@@ -135,7 +135,7 @@ STANDBY_SCHEMA = cv.Schema(
             "falling", "rising", lower=True
         ),
         cv.Optional(
-            CONF_STANDBY_REQUIRE_EXTERNAL_SYNC, default=False
+            CONF_REQUIRE_EXTERNAL_SYNC, default=False
         ): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -153,7 +153,7 @@ def _update_core_data(config):
     if CONF_STANDBY in config:
         if not config["lowpower"]:
             raise cv.Invalid("xr806.standby requires xr806.lowpower: true")
-        if not config[CONF_STANDBY][CONF_STANDBY_ENABLED]:
+        if not config[CONF_STANDBY][CONF_ENABLED]:
             raise cv.Invalid("Remove xr806.standby when disabled")
         if CONF_STANDBY_TRIAL in config:
             raise cv.Invalid("Choose standby or standby_trial, not both")
@@ -205,8 +205,8 @@ async def to_code(config):
         )
         controller = cg.new_Pvariable(cfg["id"])
         cg.add(controller.set_wake_after_ms(cfg[CONF_WAKE_AFTER_MS]))
-        cg.add(controller.set_quiet_ms(cfg[CONF_STANDBY_QUIET_MS]))
-        cg.add(controller.set_min_awake_ms(cfg[CONF_STANDBY_MIN_AWAKE_MS]))
+        cg.add(controller.set_quiet_ms(cfg[CONF_QUIET_MS]))
+        cg.add(controller.set_min_awake_ms(cfg[CONF_MIN_AWAKE_MS]))
         if CONF_WAKE_PIN in cfg:
             cg.add(controller.set_wake_pin(int(cfg[CONF_WAKE_PIN][2:])))
         cg.add(controller.set_wake_falling(cfg[CONF_WAKE_EDGE] == "falling"))
@@ -227,7 +227,7 @@ async def to_code(config):
         cg.add(controller.set_no_mdns("mdns" not in CORE.config))
         cg.add(
             controller.set_external_sync_required(
-                cfg[CONF_STANDBY_REQUIRE_EXTERNAL_SYNC]
+                cfg[CONF_REQUIRE_EXTERNAL_SYNC]
             )
         )
         cg.add(controller.set_require_uart_participant("uart" in CORE.config))
