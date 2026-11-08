@@ -2,7 +2,6 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-
 from esphome.const import (
     CONF_BOARD,
     KEY_CORE,
@@ -85,35 +84,50 @@ XR806_WIFI_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 
 
-
 # Stage 7b is an OFFLINE, bounded one-shot for an isolated WXU test board.
 # Exposed PA wake pins only; PA21..23 are reserved for UART2/boot.
 STANDBY_TRIAL_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(XR806StandbyTrial),
         cv.Required("confirm_offline"): cv.boolean,
-        cv.Optional(CONF_ENTRY_AFTER_MS, default=10000): cv.int_range(min=1000, max=60000),
+        cv.Optional(CONF_ENTRY_AFTER_MS, default=10000): cv.int_range(
+            min=1000, max=60000
+        ),
         cv.Required(CONF_WAKE_AFTER_MS): cv.int_range(min=100, max=5000),
-        cv.Optional(CONF_WAKE_PIN): cv.one_of("PA11", "PA12", "PA13", "PA19", "PA20", upper=True),
-        cv.Optional(CONF_WAKE_EDGE, default="falling"): cv.one_of("falling", "rising", lower=True),
+        cv.Optional(CONF_WAKE_PIN): cv.one_of(
+            "PA11", "PA12", "PA13", "PA19", "PA20", upper=True
+        ),
+        cv.Optional(CONF_WAKE_EDGE, default="falling"): cv.one_of(
+            "falling", "rising", lower=True
+        ),
         cv.Optional(CONF_RESUME_MARKER_PB05, default=False): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
 
 def _update_core_data(config):
-    if CONF_XR806_WLAN_SETTINGS in config and (CONF_XR806_WIFI in config or CONF_WLAN_SMOKE in config):
+    if CONF_XR806_WLAN_SETTINGS in config and (
+        CONF_XR806_WIFI in config or CONF_WLAN_SMOKE in config
+    ):
         raise cv.Invalid("xr806.wlan cannot be combined with xr806.wifi/wlan_smoke")
     if CONF_WLAN_SMOKE in config and CONF_XR806_WIFI in config:
-        raise cv.Invalid("Choose either xr806.wifi or legacy xr806.wlan_smoke, not both")
+        raise cv.Invalid(
+            "Choose either xr806.wifi or legacy xr806.wlan_smoke, not both"
+        )
     if CONF_STANDBY_TRIAL in config:
         trial = config[CONF_STANDBY_TRIAL]
         if not config["lowpower"]:
             raise cv.Invalid("xr806.standby_trial requires xr806.lowpower: true")
         if not trial["confirm_offline"]:
             raise cv.Invalid("xr806.standby_trial requires confirm_offline: true")
-        if CONF_WLAN_SMOKE in config or CONF_XR806_WIFI in config or CONF_XR806_WLAN_SETTINGS in config:
-            raise cv.Invalid("Stage 7b offline standby_trial cannot be combined with XR806 WLAN")
+        if (
+            CONF_WLAN_SMOKE in config
+            or CONF_XR806_WIFI in config
+            or CONF_XR806_WLAN_SETTINGS in config
+        ):
+            raise cv.Invalid(
+                "Stage 7b offline standby_trial cannot be combined with XR806 WLAN"
+            )
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = DOMAIN
     CORE.data[KEY_CORE][KEY_TARGET_FRAMEWORK] = "xradio"
     return config
@@ -141,8 +155,17 @@ async def to_code(config):
         cg.add_define("USE_XR806_LOWPOWER")
     if CONF_STANDBY_TRIAL in config:
         forbidden = (
-            "wifi", "api", "ota", "mqtt", "mdns", "network",
-            "web_server", "uart", "logger", "captive_portal", "improv_serial",
+            "wifi",
+            "api",
+            "ota",
+            "mqtt",
+            "mdns",
+            "network",
+            "web_server",
+            "uart",
+            "logger",
+            "captive_portal",
+            "improv_serial",
         )
         present = [domain for domain in forbidden if domain in CORE.config]
         if present:
@@ -152,7 +175,9 @@ async def to_code(config):
             )
         trial = config[CONF_STANDBY_TRIAL]
         cg.add_define("USE_XR806_STANDBY_TRIAL")
-        cg.add_global(cg.RawStatement('#include "esphome/components/xr806/standby_trial.h"'))
+        cg.add_global(
+            cg.RawStatement('#include "esphome/components/xr806/standby_trial.h"')
+        )
         standby = cg.new_Pvariable(trial["id"])
         cg.add(standby.set_entry_delay_ms(trial[CONF_ENTRY_AFTER_MS]))
         cg.add(standby.set_wake_after_ms(trial[CONF_WAKE_AFTER_MS]))
@@ -179,9 +204,13 @@ async def to_code(config):
             cg.add_define("USE_XR806_NETWORK_BRIDGE")
         if new_wifi:
             cg.add_define("USE_XR806_WIFI")
-            cg.add_global(cg.RawStatement('#include "esphome/components/xr806/wifi_component.h"'))
+            cg.add_global(
+                cg.RawStatement('#include "esphome/components/xr806/wifi_component.h"')
+            )
         else:
-            cg.add_global(cg.RawStatement('#include "esphome/components/xr806/wlan_smoke.h"'))
+            cg.add_global(
+                cg.RawStatement('#include "esphome/components/xr806/wlan_smoke.h"')
+            )
         wlan = cg.new_Pvariable(wlan_config["id"])
         cg.add(wlan.set_ssid(wlan_config["ssid"]))
         cg.add(wlan.set_password(wlan_config["password"]))
@@ -200,11 +229,12 @@ async def to_code(config):
 def run_compile(args, config) -> bool:
     """Build an XR806 AWIH image using the XRadio vendor SDK."""
     import filecmp
+    from pathlib import Path
     import shutil
     import subprocess
-    from pathlib import Path
 
     from esphome.core import EsphomeError
+
     from .build_support.dependencies import DEPENDENCIES, resolve_dependencies
     from .build_support.noise_build import prepare_noise_build
 
@@ -221,14 +251,9 @@ def run_compile(args, config) -> bool:
     try:
         sdk_cache, arduinojson_src = resolve_dependencies()
     except (OSError, RuntimeError, subprocess.CalledProcessError) as err:
-        raise EsphomeError(
-            f"XR806 dependency resolution failed: {err}"
-        ) from err
+        raise EsphomeError(f"XR806 dependency resolution failed: {err}") from err
 
-    adapter = (
-        repo_root
-        / "esphome/components/xr806/build_support/xr806_esphome.mk"
-    )
+    adapter = repo_root / "esphome/components/xr806/build_support/xr806_esphome.mk"
 
     if not adapter.is_file():
         raise EsphomeError(f"XR806 Make adapter not found: {adapter}")
@@ -254,9 +279,7 @@ def run_compile(args, config) -> bool:
         import tempfile
 
         xr_build.mkdir(parents=True, exist_ok=True)
-        staging = Path(
-            tempfile.mkdtemp(prefix=".sdk-stage-", dir=xr_build)
-        )
+        staging = Path(tempfile.mkdtemp(prefix=".sdk-stage-", dir=xr_build))
 
         try:
             print("[XR806] Creating isolated SDK workspace", flush=True)
@@ -267,14 +290,10 @@ def run_compile(args, config) -> bool:
                 symlinks=True,
                 ignore=shutil.ignore_patterns(".git"),
             )
-            (staging / revision_file.name).write_text(
-                sdk_revision + "\n"
-            )
+            (staging / revision_file.name).write_text(sdk_revision + "\n")
             staging.rename(sdk_root)
         except (OSError, shutil.Error) as err:
-            raise EsphomeError(
-                f"Could not prepare XR806 SDK workspace: {err}"
-            ) from err
+            raise EsphomeError(f"Could not prepare XR806 SDK workspace: {err}") from err
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
@@ -282,9 +301,7 @@ def run_compile(args, config) -> bool:
     sdk = sdk_root / "project/demo/trv16_port/gcc"
 
     if not sdk.is_dir():
-        raise EsphomeError(
-            f"XR806 vendor Makefile directory missing: {sdk}"
-        )
+        raise EsphomeError(f"XR806 vendor Makefile directory missing: {sdk}")
 
     elf = xr_build / "app.elf"
     image = fw_dir / "firmware.img"
@@ -311,6 +328,7 @@ def run_compile(args, config) -> bool:
 
     # XR806_NOISE_INTEGRATED_V1: plain esphome compile owns crypto builds.
     import re
+
     defines = (source / "esphome/core/defines.h").read_text()
     if re.search(r"(?m)^\s*#define\s+USE_NOISE(?:\s|$)", defines):
         try:
@@ -320,8 +338,10 @@ def run_compile(args, config) -> bool:
 
     command = [
         "make",
-        "-f", "Makefile",
-        "-f", str(adapter),
+        "-f",
+        "Makefile",
+        "-f",
+        str(adapter),
         *(f"{key}={value}" for key, value in variables.items()),
         str(image),
     ]
@@ -338,9 +358,7 @@ def run_compile(args, config) -> bool:
         raise EsphomeError(f"XR806 build could not start: {err}") from err
 
     if result.returncode != 0:
-        raise EsphomeError(
-            f"XR806 build failed (exit {result.returncode})"
-        )
+        raise EsphomeError(f"XR806 build failed (exit {result.returncode})")
 
     if not image.is_file():
         raise EsphomeError(f"XR806 firmware missing: {image}")
@@ -352,9 +370,7 @@ def run_compile(args, config) -> bool:
     destination = CORE.firmware_bin
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    if not destination.is_file() or not filecmp.cmp(
-        image, destination, shallow=False
-    ):
+    if not destination.is_file() or not filecmp.cmp(image, destination, shallow=False):
         shutil.copy2(image, destination)
 
     print(f"[XR806] AWIH firmware: {image}", flush=True)
