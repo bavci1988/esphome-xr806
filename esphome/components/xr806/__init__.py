@@ -140,7 +140,7 @@ async def to_code(config):
     if CONF_STANDBY_TRIAL in config:
         forbidden = (
             "wifi", "api", "ota", "mqtt", "mdns", "network",
-            "web_server", "uart", "captive_portal", "improv_serial",
+            "web_server", "uart", "logger", "captive_portal", "improv_serial",
         )
         present = [domain for domain in forbidden if domain in CORE.config]
         if present:
