@@ -131,7 +131,7 @@ STANDBY_SCHEMA = cv.Schema(
         cv.Optional(CONF_WAKE_PIN): cv.one_of(
             "PA11", "PA12", "PA13", "PA19", "PA20", upper=True
         ),
-        cv.Optional(CONF_WAKE_EDGE, default="falling"): cv.one_of(
+        cv.Optional(CONF_WAKE_EDGE): cv.one_of(
             "falling", "rising", lower=True
         ),
         cv.Optional(
@@ -151,6 +151,11 @@ def _update_core_data(config):
             "Choose either xr806.wifi or legacy xr806.wlan_smoke, not both"
         )
     if CONF_STANDBY in config:
+        standby_cfg = config[CONF_STANDBY]
+        if (CONF_WAKE_PIN in standby_cfg) != (CONF_WAKE_EDGE in standby_cfg):
+            raise cv.Invalid(
+                "xr806.standby requires explicit wake_pin and wake_edge together"
+            )
         if not config["lowpower"]:
             raise cv.Invalid("xr806.standby requires xr806.lowpower: true")
         if not config[CONF_STANDBY][CONF_ENABLED]:
@@ -209,7 +214,7 @@ async def to_code(config):
         cg.add(controller.set_min_awake_ms(cfg[CONF_MIN_AWAKE_MS]))
         if CONF_WAKE_PIN in cfg:
             cg.add(controller.set_wake_pin(int(cfg[CONF_WAKE_PIN][2:])))
-        cg.add(controller.set_wake_falling(cfg[CONF_WAKE_EDGE] == "falling"))
+        cg.add(controller.set_wake_falling(cfg.get(CONF_WAKE_EDGE, "falling") == "falling"))
         # Transports which are absent can never have work in flight. Present
         # transports retain their initial busy vote until their own driver
         # explicitly votes idle; no hardcoded MCU or Tuya protocol assumption.
