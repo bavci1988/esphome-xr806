@@ -21,6 +21,9 @@ int main() {
   assert(!XR806StandbyTrialState::expected_wake_event(1u << 10, -1));
   assert(!XR806StandbyTrialState::expected_wake_event(1u << 27, 10)); // software PM abort
   assert(!XR806StandbyTrialState::expected_wake_event(0, 10));
+  assert(XR806StandbyTrialState::resumed_from_expected_source(0, 1u << 10, 10));
+  assert(!XR806StandbyTrialState::resumed_from_expected_source(-1, 1u << 10, 10));
+  assert(!XR806StandbyTrialState::resumed_from_expected_source(0, 1u << 27, 10));
 
   XR806LowPowerPolicy p;
   p.request_standby(true);
