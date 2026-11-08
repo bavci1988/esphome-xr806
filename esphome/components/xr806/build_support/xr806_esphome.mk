@@ -71,6 +71,8 @@ XR806_CXXFLAGS := \
     -I$(XR806_REPO_ROOT) \
     -include $(XR806_DEFINES) \
     -include $(XR806_REPO_ROOT)/esphome/components/xr806/network_compat.h \
+    -include $(XR806_REPO_ROOT)/esphome/components/xr806/socket_compat.h \
+    -include $(XR806_REPO_ROOT)/esphome/components/xr806/api_compat.h \
     -I$(XR806_ARDUINOJSON_SRC) \
     -I$(ROOT_PATH)/include \
     -I$(ROOT_PATH)/project \
@@ -244,6 +246,13 @@ $(eval $(call XR806_COMPILE_CPP,core_log,$(XR806_SRC)/esphome/core/log.cpp))
 
 XR806_AUTO_COMPONENT_SRCS := $(shell find $(XR806_SRC)/esphome/components -type f -name '*.cpp' ! -path '$(XR806_SRC)/esphome/components/xr806/*' 2>/dev/null | LC_ALL=C sort)
 
+# XR806_API_SOCKET_DEDUP_V1: already compiled with XR806_SOCKET_SHIM.
+# Avoid linking the auto-discovered copies alongside xr_socket_*.o.
+XR806_AUTO_COMPONENT_SRCS := $(filter-out \
+    $(XR806_SRC)/esphome/components/socket/socket.cpp \
+    $(XR806_SRC)/esphome/components/socket/lwip_sockets_impl.cpp, \
+    $(XR806_AUTO_COMPONENT_SRCS))
+
 XR806_AUTO_COMPONENT_OBJECTS := $(patsubst $(XR806_SRC)/esphome/components/%.cpp,$(XR806_OBJDIR)/auto/components/%.o,$(XR806_AUTO_COMPONENT_SRCS))
 
 XR806_ESPHOME_OBJECTS += $(XR806_AUTO_COMPONENT_OBJECTS)
@@ -282,6 +291,21 @@ XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_network_bridge.o
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_network_bridge.o
 $(eval $(call XR806_COMPILE_CPP,xr_network_bridge,$(XR806_REPO_ROOT)/esphome/components/xr806/network_bridge.cpp))
 
+
+# XR806_API_CORE_LINK_V1
+# ESPHome-generated build metadata + reusable entity iteration + real WLAN MAC.
+XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_core_build_info.o \
+                        $(XR806_OBJDIR)/xr_core_component_iterator.o \
+                        $(XR806_OBJDIR)/xr_mac_address.o
+
+# The original link target's prerequisites were expanded earlier in this file.
+$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_core_build_info.o \
+                 $(XR806_OBJDIR)/xr_core_component_iterator.o \
+                 $(XR806_OBJDIR)/xr_mac_address.o
+
+$(eval $(call XR806_COMPILE_CPP,xr_core_build_info,$(XR806_SRC)/esphome/core/build_info_data.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_core_component_iterator,$(XR806_SRC)/esphome/core/component_iterator.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_mac_address,$(XR806_REPO_ROOT)/esphome/components/xr806/mac_address.cpp))
 
 # XR806_HEADER_DEPENDENCIES_V1
 # Track C++ header dependencies across all ESPHome objects.
