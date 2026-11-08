@@ -94,10 +94,11 @@ class XR806LowPowerPolicy {
 
  private:
   void update_(uint32_t blocker, bool ready) {
-    if (ready)
+    if (ready) {
       blockers_.fetch_and(~blocker, std::memory_order_acq_rel);
-    else
+    } else {
       blockers_.fetch_or(blocker, std::memory_order_acq_rel);
+    }
   }
 
   std::atomic<uint32_t> blockers_{ALL_REQUIREMENTS};
