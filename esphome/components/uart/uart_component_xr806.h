@@ -60,6 +60,9 @@ class XR806UARTComponent final : public UARTComponent, public Component {
   size_t rx_tail_{0};
   size_t rx_count_{0};
   uint32_t rx_overflows_{0};
+  bool tx_fault_{false};
+  bool rx_overflow_fault_{false};
+  bool tx_hardware_idle_() const;
 
 #ifdef USE_XR806_LOWPOWER
   uint32_t last_uart_activity_ms_{0};
