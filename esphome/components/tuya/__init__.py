@@ -18,6 +18,7 @@ CONF_STATUS_PIN = "status_pin"
 CONF_FORCE_TIME_SYNC = "force_time_sync"
 CONF_PROTOCOL = "protocol"
 CONF_AUTO_BAUD = "auto_baud"
+CONF_MCU_WAKE_PIN = "mcu_wake_pin"
 
 tuya_ns = cg.esphome_ns.namespace("tuya")
 TuyaDatapointType = tuya_ns.enum("TuyaDatapointType", is_class=True)
@@ -67,6 +68,10 @@ def _validate_time_options(config: ConfigType) -> ConfigType:
             "status_pin is unsupported for low_power_v0; wake is configured separately",
             path=[CONF_STATUS_PIN],
         )
+    if CONF_MCU_WAKE_PIN in config and config[CONF_PROTOCOL] != "low_power_v0":
+        raise cv.Invalid(
+            "mcu_wake_pin requires protocol: low_power_v0", path=[CONF_MCU_WAKE_PIN]
+        )
     if config[CONF_AUTO_BAUD]:
         if config[CONF_PROTOCOL] != "low_power_v0":
             raise cv.Invalid(
@@ -89,6 +94,7 @@ CONFIG_SCHEMA = cv.All(
                 "standard", "low_power_v0", lower=True
             ),
             cv.Optional(CONF_AUTO_BAUD, default=False): cv.boolean,
+            cv.Optional(CONF_MCU_WAKE_PIN): pins.gpio_output_pin_schema,
             cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
             cv.Optional(CONF_FORCE_TIME_SYNC, default=False): cv.boolean,
             cv.Optional(CONF_IGNORE_MCU_UPDATE_ON_DATAPOINTS): cv.ensure_list(
@@ -114,6 +120,7 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     var = await uart.new_uart_component(config)
     cg.add(var.set_auto_baud(config[CONF_AUTO_BAUD]))
+    await cg.add_pin(var.set_mcu_wake_pin, config.get(CONF_MCU_WAKE_PIN))
     cg.add(
         var.set_protocol(
             TuyaProtocol.LOW_POWER_V0
