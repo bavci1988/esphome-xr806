@@ -24,6 +24,7 @@ tuya_ns = cg.esphome_ns.namespace("tuya")
 TuyaDatapointType = tuya_ns.enum("TuyaDatapointType", is_class=True)
 TuyaProtocol = tuya_ns.enum("TuyaProtocol", is_class=True)
 Tuya = tuya_ns.class_("Tuya", cg.Component, uart.UARTDevice)
+TuyaRefreshAction = tuya_ns.class_("TuyaRefreshAction", automation.Action)
 
 TuyaDatapoint = tuya_ns.struct("TuyaDatapoint")
 
@@ -145,3 +146,14 @@ async def to_code(config):
             [(type_, "x")], conf, params=[(TuyaDatapoint, "x")], forward=forward
         )
         cg.add(var.register_listener(conf[CONF_SENSOR_DATAPOINT], callback))
+
+
+@automation.register_action(
+    "tuya.refresh",
+    TuyaRefreshAction,
+    cv.Schema({cv.Required(CONF_TUYA_ID): cv.use_id(Tuya)}),
+    synchronous=True,
+)
+async def tuya_refresh_to_code(config, action_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_TUYA_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
