@@ -17,8 +17,8 @@ extern "C" {
 #error "XR806 Stage 7b PA10..PA23 wake-index mapping needs XR806 architecture v3"
 #endif
 
-#include "esphome/components/xr806/standby_trial.h"
-#include "esphome/components/xr806/lowpower_policy.h"
+#include "standby_trial.h"
+#include "lowpower_policy.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
@@ -31,7 +31,7 @@ extern "C" {
 
 namespace esphome::xr806 {
 
-static const char *const TAG = "xr806.standby";
+ESPHOME_LOG_TAG(TAG, "xr806.standby");
 
 void XR806StandbyTrial::setup() {
   this->state_.arm(millis());
@@ -43,11 +43,12 @@ void XR806StandbyTrial::dump_config() {
   ESP_LOGCONFIG(TAG, "  Enter after: %u ms; wake timer: %u ms",
                 static_cast<unsigned>(this->entry_delay_ms_),
                 static_cast<unsigned>(this->wake_after_ms_));
-  if (this->has_wake_pin_)
+  if (this->has_wake_pin_) {
     ESP_LOGCONFIG(TAG, "  Wake PA%u / IO%u: %s edge",
                   static_cast<unsigned>(this->wake_pin_),
                   static_cast<unsigned>(this->wake_pin_ - 10),
-                  this->wake_falling_ ? "falling" : "rising");
+                  this->wake_falling_ ? LOG_STR_LITERAL("falling") : LOG_STR_LITERAL("rising"));
+  }
   ESP_LOGCONFIG(TAG, "  Mode: PM_MODE_STANDBY (SRAM retention), NOT hibernation");
 }
 
