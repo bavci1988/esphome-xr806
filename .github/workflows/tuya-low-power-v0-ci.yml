@@ -57,7 +57,7 @@ jobs:
           mkdir -p /tmp/tuya-host-syntax/esphome/core
           {
             echo '#define USE_HOST'
-            sed '/^#define USE_XR806/d' "$ROOT/esphome/core/defines.h"
+            sed -e '/^#define USE_XR806/d' -e '/^#define USE_LVGL/d' "$ROOT/esphome/core/defines.h"
           } > /tmp/tuya-host-syntax/esphome/core/defines.h
           git clone --quiet --filter=blob:none https://github.com/bblanchon/ArduinoJson.git /tmp/tuya-arduinojson
           git -C /tmp/tuya-arduinojson checkout --quiet 77771d3c07668e01d8f52acb03910c1110bb373f
