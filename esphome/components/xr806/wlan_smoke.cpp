@@ -13,6 +13,10 @@
 #include "esphome/core/log.h"
 
 extern "C" {
+// Match the vendor build: the WLAN declarations are conditional on CONFIG_WLAN
+// and PRJCONF_NET_EN, both selected by this project's actual SDK configuration.
+#include "xr_config.h"
+#include "demo/trv16_port/prj_config.h"
 #include "common/framework/net_ctrl.h"
 #include "net/wlan/wlan.h"
 #include "net/wlan/wlan_ext_req.h"
