@@ -19,6 +19,7 @@ IS_TARGET_PLATFORM = True
 # Temporary vendor WLAN smoke probe, not the standard ESPHome wifi: component.
 CONF_WLAN_SMOKE = "wlan_smoke"
 CONF_XR806_WIFI = "wifi"
+CONF_XR806_WLAN_SETTINGS = "wlan"
 CONF_NETWORK_BRIDGE = "network_bridge"
 CONF_DTIM = "dtim"
 CONF_LISTEN_INTERVAL = "listen_interval"
@@ -52,6 +53,16 @@ WLAN_SMOKE_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 
 # Production-name schema; same SDK options as legacy probe during migration.
+XR806_WLAN_SETTINGS_SCHEMA = cv.Schema(
+    {
+        cv.Optional(CONF_POWER_SAVE, default=False): cv.boolean,
+        cv.Optional(CONF_DTIM, default=1): cv.int_range(min=1, max=30),
+        cv.Optional(CONF_LISTEN_INTERVAL, default=0): cv.int_range(min=0, max=30),
+        cv.Optional(CONF_SOCKET_PROBE, default=False): cv.boolean,
+        cv.Optional(CONF_SOCKET_FACADE_PROBE, default=False): cv.boolean,
+    }
+)
+
 XR806_WIFI_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(XR806WiFiComponent),
@@ -69,6 +80,8 @@ XR806_WIFI_SCHEMA = cv.Schema(
 
 
 def _update_core_data(config):
+    if CONF_XR806_WLAN_SETTINGS in config and (CONF_XR806_WIFI in config or CONF_WLAN_SMOKE in config):
+        raise cv.Invalid("xr806.wlan cannot be combined with xr806.wifi/wlan_smoke")
     if CONF_WLAN_SMOKE in config and CONF_XR806_WIFI in config:
         raise cv.Invalid("Choose either xr806.wifi or legacy xr806.wlan_smoke, not both")
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = DOMAIN
@@ -84,6 +97,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
             cv.Optional(CONF_WLAN_SMOKE): WLAN_SMOKE_SCHEMA,
             cv.Optional(CONF_XR806_WIFI): XR806_WIFI_SCHEMA,
+            cv.Optional(CONF_XR806_WLAN_SETTINGS): XR806_WLAN_SETTINGS_SCHEMA,
         }
     ),
     _update_core_data,
@@ -94,6 +108,8 @@ async def to_code(config):
     # XR806_LOWPOWER_FLAG_V1: activate future XR806 PM policy
     if config["lowpower"]:
         cg.add_define("USE_XR806_LOWPOWER")
+    if CONF_XR806_WLAN_SETTINGS in config and "wifi" not in CORE.config:
+        raise cv.Invalid("xr806.wlan requires top-level wifi:")
     cg.add_define("USE_XR806")
     # XR806 uses ordinary addressable memory, not Arduino PROGMEM.
     cg.add_define("PROGMEM")

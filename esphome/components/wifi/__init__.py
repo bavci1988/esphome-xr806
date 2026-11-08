@@ -120,6 +120,7 @@ _WIFI_FIRST_PLATFORMS: frozenset[str] = frozenset(
         Platform.BK72XX,
         Platform.RTL87XX,
         Platform.LN882X,
+        "xr806",  # XR806_TOP_LEVEL_WIFI_V1
         # Legacy umbrella key for the LibreTiny families (bk72xx /
         # rtl87xx / ln882x); still produced by older configs that
         # haven't migrated to the per-family keys.
@@ -573,7 +574,74 @@ def _consume_wifi_sockets(config: ConfigType) -> ConfigType:
     return config
 
 
+# XR806_TOP_LEVEL_WIFI_V1
+# Only the tested, single-network DHCP station subset is supported so far.
+# Do not silently accept options whose semantics we have not implemented.
+def _validate_xr806_sta_wifi(config: ConfigType) -> ConfigType:
+    if CORE.target_platform != "xr806":
+        return config
+
+    full_config = fv.full_config.get()
+    xr = full_config.get("xr806", {})
+    if "wifi" in xr or "wlan_smoke" in xr:
+        raise cv.Invalid(
+            "XR806: choose top-level wifi: OR xr806.wifi/wlan_smoke, never both"
+        )
+
+    allowed = {
+        CONF_ID,
+        CONF_NETWORKS,
+        CONF_DOMAIN,
+        CONF_REBOOT_TIMEOUT,
+        CONF_FAST_CONNECT,
+        CONF_LEASE_CACHE,
+        CONF_USE_ADDRESS,
+        CONF_PASSIVE_SCAN,
+        CONF_ENABLE_ON_BOOT,
+        CONF_POST_CONNECT_ROAMING,
+    }
+    unsupported = sorted(set(config) - allowed)
+    if unsupported:
+        raise cv.Invalid(
+            f"XR806 top-level wifi: unsupported option(s): {', '.join(unsupported)}"
+        )
+
+    networks = config.get(CONF_NETWORKS, [])
+    if len(networks) != 1:
+        raise cv.Invalid("XR806 wifi: currently supports exactly one STA network")
+    net = networks[0]
+    for key in net:
+        if key not in (CONF_ID, CONF_SSID, CONF_PASSWORD, CONF_PRIORITY):
+            raise cv.Invalid(f"XR806 wifi: unsupported network option: {key}")
+    if net.get(CONF_PRIORITY, 0) != 0:
+        raise cv.Invalid("XR806 wifi: per-network priority is not implemented")
+    if not net.get(CONF_SSID):
+        raise cv.Invalid("XR806 wifi: an SSID is required")
+    password = net.get(CONF_PASSWORD, "")
+    if password and not 8 <= len(password) <= 63:
+        raise cv.Invalid("XR806 wifi: password must be 8..63 characters or empty")
+
+    if config.get(CONF_DOMAIN) != ".local":
+        raise cv.Invalid("XR806 wifi: custom domain not supported yet")
+    if config.get(CONF_USE_ADDRESS) != f"{CORE.name}.local":
+        raise cv.Invalid("XR806 wifi: custom use_address not supported yet")
+    if config.get(CONF_REBOOT_TIMEOUT) != cv.time_period(DEFAULT_REBOOT_TIMEOUT):
+        raise cv.Invalid("XR806 wifi: reboot_timeout not implemented yet")
+    if config.get(CONF_FAST_CONNECT, {}).get(CONF_ENABLED, False):
+        raise cv.Invalid("XR806 wifi: fast_connect not implemented yet")
+    if config.get(CONF_LEASE_CACHE, {}).get(CONF_ENABLED, False):
+        raise cv.Invalid("XR806 wifi: lease_cache not implemented yet")
+    if config.get(CONF_PASSIVE_SCAN, False):
+        raise cv.Invalid("XR806 wifi: passive_scan not implemented yet")
+    if not config.get(CONF_ENABLE_ON_BOOT, True):
+        raise cv.Invalid("XR806 wifi: enable_on_boot: false not supported yet")
+    if not config.get(CONF_POST_CONNECT_ROAMING, True):
+        raise cv.Invalid("XR806 wifi: post_connect_roaming option not supported yet")
+    return config
+
+
 FINAL_VALIDATE_SCHEMA = cv.All(
+    _validate_xr806_sta_wifi,
     final_validate,
     validate_variant,
     _consume_wifi_sockets,
@@ -836,6 +904,38 @@ def wifi_network(config, ap, manual_ip_index: int | None):
 
 @coroutine_with_priority(CoroPriority.COMMUNICATION)
 async def to_code(config):
+    # XR806_TOP_LEVEL_WIFI_V1: use the existing XR806 station backend.
+    # Do not define USE_WIFI: upstream WiFiComponent is not implemented on XR806.
+    # network::is_connected/get_ip_addresses use the XR806-specific bridge.
+    if CORE.target_platform == "xr806":
+        from esphome.components.xr806 import XR806WiFiComponent
+
+        net = config[CONF_NETWORKS][0]
+        cg.add_define("USE_XR806_WLAN_SMOKE")  # Transitional vendor WLAN guard.
+        cg.add_define("USE_XR806_WIFI")
+        cg.add_define("USE_XR806_NETWORK_BRIDGE")
+        cg.add_global(
+            cg.RawStatement('#include "esphome/components/xr806/wifi_component.h"')
+        )
+        typed_id = config[CONF_ID].copy()
+        typed_id.type = XR806WiFiComponent
+        wlan = cg.new_Pvariable(typed_id)
+        cg.add(wlan.set_ssid(net[CONF_SSID]))
+        cg.add(wlan.set_password(net.get(CONF_PASSWORD, "")))
+        # Preserve the existing XR806-specific radio policy.
+        radio = CORE.config['xr806'].get('wlan', {})
+        cg.add(wlan.set_power_save(radio.get('power_save', False)))
+        cg.add(wlan.set_dtim(radio.get('dtim', 1)))
+        cg.add(wlan.set_listen_interval(radio.get('listen_interval', 0)))
+        cg.add(wlan.set_socket_probe(radio.get('socket_probe', False)))
+        cg.add(wlan.set_socket_facade_probe(radio.get('socket_facade_probe', False)))
+        if radio.get('socket_facade_probe', False):
+            cg.add_define('USE_XR806_SOCKET_FACADE_PROBE')
+            cg.add_define('USE_SOCKET_IMPL_LWIP_SOCKETS')
+            cg.add_define('USE_NETWORK_IPV4', 1)
+        await cg.register_component(wlan, config)
+        return
+
     var = cg.new_Pvariable(config[CONF_ID])
 
     prio = get_network_priority("wifi")
