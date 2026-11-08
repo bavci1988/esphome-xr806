@@ -23,7 +23,10 @@ XR806_ESPHOME_OBJECTS := $(addprefix $(XR806_OBJDIR)/, \
     wake_freertos.o \
     main.o \
     runtime.o \
-    wlan_smoke.o)
+    xr_wifi_component.o \
+    xr_socket_compat.o \
+    xr_socket_core.o \
+    xr_socket_lwip.o)
 
 XR806_ESPHOME_MAIN := $(XR806_OBJDIR)/sdk_main_esphome.o
 
@@ -65,7 +68,9 @@ XR806_CXXFLAGS := \
     -DCONFIG_ARCH_APP_CORE \
     -DPLATFORM_XR806=1 \
     -I$(XR806_SRC) \
+    -I$(XR806_REPO_ROOT) \
     -include $(XR806_DEFINES) \
+    -include $(XR806_REPO_ROOT)/esphome/components/xr806/network_compat.h \
     -I$(XR806_ARDUINOJSON_SRC) \
     -I$(ROOT_PATH)/include \
     -I$(ROOT_PATH)/project \
@@ -91,7 +96,22 @@ $(eval $(call XR806_COMPILE_CPP,hal,$(XR806_SRC)/esphome/components/xr806/hal.cp
 $(eval $(call XR806_COMPILE_CPP,wake_freertos,$(XR806_SRC)/esphome/core/wake/wake_freertos.cpp))
 $(eval $(call XR806_COMPILE_CPP,main,$(XR806_SRC)/main.cpp))
 $(eval $(call XR806_COMPILE_CPP,runtime,$(XR806_REPO_ROOT)/esphome/components/xr806/runtime.cpp))
-$(eval $(call XR806_COMPILE_CPP,wlan_smoke,$(XR806_REPO_ROOT)/esphome/components/xr806/wlan_smoke.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_wifi_component,$(XR806_REPO_ROOT)/esphome/components/xr806/wifi_component.cpp))
+
+$(eval $(call XR806_COMPILE_CPP,xr_socket_compat,$(XR806_REPO_ROOT)/esphome/components/xr806/socket_compat.cpp))
+
+# Compile unchanged ESPHome socket sources with XR806 prototypes.
+XR806_SOCKET_SHIM := $(XR806_REPO_ROOT)/esphome/components/xr806/socket_compat.h
+
+define XR806_COMPILE_SOCKET_CPP
+$(XR806_OBJDIR)/$(1).o: $(2) $(XR806_DEFINES) $(XR806_SOCKET_SHIM)
+	@mkdir -p $$(@D)
+	$$(XR806_CXX) $$(XR806_CXXFLAGS) -include $$(XR806_SOCKET_SHIM) -c $$< -o $$@
+endef
+
+$(eval $(call XR806_COMPILE_SOCKET_CPP,xr_socket_core,$(XR806_REPO_ROOT)/esphome/components/socket/socket.cpp))
+$(eval $(call XR806_COMPILE_SOCKET_CPP,xr_socket_lwip,$(XR806_REPO_ROOT)/esphome/components/socket/lwip_sockets_impl.cpp))
+
 
 # ESPHOME_SDK_MAIN_RULE_V1
 # Build a separate SDK main.o with ESPHome enabled.
@@ -246,3 +266,27 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/xr806_preferences.o
 $(eval $(call XR806_COMPILE_CPP,xr806_preferences,$(XR806_REPO_ROOT)/esphome/components/xr806/preferences.cpp))
 
 # === END XR806_PREFERENCES_V1 ===
+
+
+# XR806_NETWORK_STATUS_V1
+# Platform-owned network state; no ESPHome Core modifications.
+XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_network_status.o
+$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_network_status.o
+
+$(eval $(call XR806_COMPILE_CPP,xr_network_status,$(XR806_REPO_ROOT)/esphome/components/xr806/network_status.cpp))
+
+
+# XR806_NETWORK_BRIDGE_V1
+# The actual implementation compiles only when USE_XR806_NETWORK_BRIDGE is set.
+XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_network_bridge.o
+$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_network_bridge.o
+$(eval $(call XR806_COMPILE_CPP,xr_network_bridge,$(XR806_REPO_ROOT)/esphome/components/xr806/network_bridge.cpp))
+
+
+# XR806_HEADER_DEPENDENCIES_V1
+# Track C++ header dependencies across all ESPHome objects.
+# Prevent stale main.o after platform class/header migrations.
+XR806_CXXFLAGS += -MMD -MP
+
+# GCC writes one .d file alongside each compiled .o file.
+-include $(XR806_ESPHOME_OBJECTS:.o=.d)
