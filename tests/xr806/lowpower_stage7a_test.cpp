@@ -28,7 +28,7 @@ int main() {
   assert(p.can_enter_standby());
   p.require_external_mcu(false);
   assert(p.can_enter_standby());
-  p.require_external_mcu(true); // Reconnection/driver re-registration fail closed.
+  p.require_external_mcu(true);  // Reconnection/driver re-registration fail closed.
   assert(!p.can_enter_standby());
   p.require_external_mcu(false);
   assert(p.can_enter_standby());
@@ -60,7 +60,7 @@ int main() {
   assert(!retry.applied());
   assert(retry.due(999999));
   retry.record(0xfffffff0u, false);
-  assert(!retry.due(0x10u)); // 32-bit millisecond clock wrap.
+  assert(!retry.due(0x10u));  // 32-bit millisecond clock wrap.
   assert(retry.due(static_cast<uint32_t>(0xfffffff0u + 30000u)));
   return 0;
 }
