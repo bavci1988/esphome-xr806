@@ -213,8 +213,8 @@ void MDNSComponent::compile_records_(StaticVector<MDNSService, MDNS_SERVICE_COUN
     MDNS_STATIC_CONST_CHAR(PLATFORM_NRF52, "nRF52");
     txt_records.push_back({MDNS_STR(TXT_PLATFORM), MDNS_STR(PLATFORM_NRF52)});
 #elif defined(USE_XR806)
-    MDNS_STATIC_CONST_CHAR(PLATFORM_XR806, "XR806");
-    txt_records.push_back({MDNS_STR(TXT_PLATFORM), MDNS_STR(PLATFORM_XR806)});
+    MDNS_STATIC_CONST_CHAR(MDNS_PLATFORM_XR806_TEXT, "XR806");
+    txt_records.push_back({MDNS_STR(TXT_PLATFORM), MDNS_STR(MDNS_PLATFORM_XR806_TEXT)});
 #endif
 
     txt_records.push_back({MDNS_STR(TXT_BOARD), MDNS_STR(VALUE_BOARD)});
