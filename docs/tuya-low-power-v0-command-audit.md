@@ -45,20 +45,47 @@ A host test passing is **not** a full XR806 compile or hardware verification.
   behavior are described in the lab but lack a specialized ESPHome
   configuration/entity mapping. Time/date handling must apply DST once.
 
-### Additional MCU dispatcher branches
+### Additional MCU dispatcher branches (verified jump-table correction)
 
-The original HC32 dispatcher at `0x618C`, with switch table beginning at
-`0x61A2`, has 17 slots `0x00..0x10`. Decoding the original binary jump
-bytes shows **non-default handlers** for:
+The original HC32 switch at `0x618C` uses Thumb helper `0x5FF8`. The
+**count byte** is at `0x61A2` (=17) and the **17 halfword-offset bytes**
+begin at `0x61A3`, not at `0x61A2`. Reading the latter as index 0
+would shift every command and falsely classify CMD10 as ignored.
 
-`00, 01, 02, 03, 04, 06, 07, 09, 0B, 0C, 0D, 0E`.
+Directly decoding these 17 bytes from the supplied 65,536-byte HC32 image
+gives the following handler entry points (the switch helper computes
+`(0x61A3 + 2 * table[cmd]) & ~1`):
 
-`05, 08, 0A, 0F, 10` fall through to the default path. Commands
-`12` and `38` also fall through to default when **received by the HC32**;
-this does not contradict WXU using CMD12 or the MCU itself **sending**
-CMD38. The specialized meanings of `03,04,07,0B,0C,0D,0E` require
-individual classification before deciding whether ESPHome needs them.
-Do not invent OTA/network-config semantics just from command numbers.
+| CMD | Handler | Evidence-based classification |
+|---|---|---|
+| 00 | 61B6 | MCU heartbeat |
+| 01 | 61BC | MCU product information |
+| 02 | 61C2 | Wi-Fi/network-status handling |
+| 03 | 61FA | Sets RAM flag `0x200000FE=1`; likely network/pairing control, exact purpose unproven |
+| 04 | 6202 | Sets RAM flag `0x200000FF=1`; exact purpose unproven |
+| 05 | 639A | Default (MCU ignores WXU DP-report ACK) |
+| 06 | 624C | Local time |
+| 07 | 6258 | Reads two bytes, calls `0x76B4`; specialized service, meaning not fully confirmed |
+| 08 | 639A | Default |
+| 09 | 620A | Datapoint command write |
+| 0A | 639A | Default |
+| 0B | 626A | Reads two bytes, calls `0x75BE`; specialized service |
+| 0C | 627C | Calls `0x7594`, writes a timer; specialized service |
+| 0D | 628E | Sets transfer state / expected value; service transfer |
+| 0E | 6326 | Checks transfer state, length, sends status CMD0E; service transfer |
+| 0F | 639A | Default |
+| 10 | 6398 -> 63D2 | Parses a length-bounded nested DP/record list through `0x645C` |
+
+**Scope decision:** ESPHome needs `00,01,02,05,06,09,12,38` for the
+observed thermostat protocol. The outbound `CMD12` and inbound `CMD38`
+are not inside the same HC32 receive-switch table. CMD13 is accepted as a
+no-op by this HC32 firmware and is sent only on the observed reset branch.
+
+Do not emulate `03,04,07,0B,0C,0D,0E,10` without a specific user-facing
+feature and a decoded payload contract. Several handlers resemble service
+transport / MCU update sequences, but this is **not yet a verified complete
+OTA command specification**. Unrecognized messages are logged and ignored;
+they must not be replied to with fabricated payloads.
 
 ## What the TuyaOS SDK does and does not supply
 
