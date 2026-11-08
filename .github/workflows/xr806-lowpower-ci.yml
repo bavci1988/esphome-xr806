@@ -1,0 +1,30 @@
+name: XR806 Low-Power Policy (MCU-independent)
+
+on:
+  push:
+    branches: [dev, test/xr806-lowpower-stage7a]
+  pull_request:
+    branches: [dev]
+    paths:
+      - "esphome/components/xr806/lowpower_policy.h"
+      - "esphome/components/xr806/wifi_power_save_retry.h"
+      - "tests/xr806/lowpower_stage7a_test.cpp"
+      - ".github/workflows/xr806-lowpower-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build MCU-neutral policy and WiFi PS retry tests
+        run: |
+          set -euo pipefail
+          g++ -std=gnu++20 -Wall -Wextra -Werror -pthread -I. \
+            tests/xr806/lowpower_stage7a_test.cpp \
+            -o /tmp/xr806-lowpower-policy-test
+          /tmp/xr806-lowpower-policy-test
+          echo "PASS MCU-independent WXU policy and radio PS retries"
