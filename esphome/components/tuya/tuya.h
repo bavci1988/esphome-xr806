@@ -9,6 +9,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/components/uart/uart.h"
 #include "tuya_low_power_v0.h"
+#include "tuya_low_power_product.h"
 #include "tuya_low_power_autobaud.h"
 
 #ifdef USE_TIME
@@ -111,6 +112,9 @@ class Tuya final : public Component, public uart::UARTDevice {
   void set_status_pin(InternalGPIOPin *status_pin) { this->status_pin_ = status_pin; }
   void set_protocol(TuyaProtocol protocol) { this->protocol_ = protocol; }
   void set_auto_baud(bool auto_baud) { this->auto_baud_ = auto_baud; }
+  bool request_low_power_refresh();
+  // Called by an actual XR806 PM bridge (not by CMD38 alone).
+  bool notify_low_power_transition(bool sleeping);
   void set_string_datapoint_value(uint8_t datapoint_id, const std::string &value);
   void set_enum_datapoint_value(uint8_t datapoint_id, uint8_t value);
   void set_bitmask_datapoint_value(uint8_t datapoint_id, uint32_t value, uint8_t length);
@@ -146,6 +150,8 @@ class Tuya final : public Component, public uart::UARTDevice {
   void send_low_power_network_();
   void update_low_power_sleep_lock_();
   void poll_low_power_autobaud_();
+  void process_low_power_queue_();
+  bool low_power_ready_for_sleep_() const;
   void send_raw_command_(TuyaCommand command);
   void process_command_queue_();
   void send_command_(const TuyaCommand &command);
@@ -175,6 +181,10 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool auto_baud_{false};
   TuyaLowPowerAutoBaud lp_autobaud_{};
   TuyaLowPowerV0Session lp_v0_{};
+  TuyaLowPowerProductInfo lp_product_{};
+  uint32_t lp_wake_guard_until_{0};
+  uint32_t lp_last_resync_ms_{0};
+  bool lp_sleep_notified_{false};
   uint8_t lp_network_status_{0xFF};
   TuyaInitState init_state_ = TuyaInitState::INIT_HEARTBEAT;
   bool init_failed_{false};
