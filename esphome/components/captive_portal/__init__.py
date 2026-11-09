@@ -15,6 +15,7 @@ from esphome.const import (
     PLATFORM_LN882X,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import CORE, coroutine_with_priority
 from esphome.coroutine import CoroPriority
@@ -56,6 +57,7 @@ CONFIG_SCHEMA = cv.All(
             PLATFORM_LN882X,
             PLATFORM_RP2,
             PLATFORM_RTL87XX,
+            PLATFORM_XR806,
         ]
     ),
 )
