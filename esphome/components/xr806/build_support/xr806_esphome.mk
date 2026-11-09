@@ -289,6 +289,7 @@ $(XR806_OBJDIR)/auto/components/%.o: $(XR806_SRC)/esphome/components/%.cpp $(XR8
 XR806_OTA_INFLATE_C := $(XR806_SRC)/esphome/components/esphome/ota/ota_esphome_inflate.c
 ifneq ($(wildcard $(XR806_OTA_INFLATE_C)),)
 XR806_OTA_INFLATE_OBJ := $(XR806_OBJDIR)/xr_ota_inflate.o
+XR806_ESPHOME_OBJECTS += $(XR806_OTA_INFLATE_OBJ)
 $(XR806_OUTPUT): $(XR806_OTA_INFLATE_OBJ)
 $(XR806_OTA_INFLATE_OBJ): $(XR806_OTA_INFLATE_C) $(XR806_DEFINES)
 >@mkdir -p $(@D)
