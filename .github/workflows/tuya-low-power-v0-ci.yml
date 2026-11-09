@@ -84,6 +84,13 @@ jobs:
             exit 1
           fi
           grep -q "requires xr806.standby" /tmp/wlan-invalid.log
+      - name: Reject unsupported XR806 OTA flash backend
+        run: |
+          if python -m esphome config tests/yaml/tuya_low_power_v0_xr806_ota_rejected.yaml > /tmp/ota-invalid.log 2>&1; then
+            echo "XR806 OTA unexpectedly accepted without flash backend" >&2
+            exit 1
+          fi
+          grep -q "not supported on xr806" /tmp/ota-invalid.log
       - name: Syntax-check Tuya C++ against generated ESPHome headers (SDK neutral)
         run: |
           set -euo pipefail
