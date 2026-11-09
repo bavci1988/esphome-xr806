@@ -102,6 +102,7 @@ void Tuya::setup() {
 void Tuya::loop() {
   this->read_available([this](uint8_t b) { this->handle_char_(b); });
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    this->poll_low_power_sleep_preflight_();
 #ifdef USE_XR806_STANDBY_CONTROLLER
     if (this->lp_standby_.requested()) {
       const auto &policy = esphome::xr806::lowpower_policy();
@@ -269,6 +270,12 @@ bool Tuya::validate_message_() {
 }
 
 void Tuya::handle_char_(uint8_t c) {
+  // An incoming byte before CMD38 consent invalidates a pending network
+  // preflight. The MCU must see a busy response, not a delayed grant.
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_cmd38_pending_) {
+    this->cancel_low_power_preflight_(true);
+    this->lp_cmd38_cooldown_until_ = millis() + 500;
+  }
   // The first arriving byte, not only a fully checksummed frame, must
   // preempt a provisional CMD38 -> CMD12 -> CPU standby transaction.
   // Otherwise partial/noisy UART RX can race the final PM admission check.
@@ -626,6 +633,8 @@ void Tuya::handle_datapoints_(const uint8_t *buffer, size_t len) {
 }
 
 void Tuya::send_raw_command_(TuyaCommand command) {
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_cmd38_pending_)
+    this->cancel_low_power_preflight_(true);
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
     this->cancel_low_power_standby_();
   uint8_t len_hi = (uint8_t) (command.payload.size() >> 8);
@@ -724,6 +733,8 @@ void Tuya::process_command_queue_() {
 }
 
 void Tuya::send_command_(const TuyaCommand &command) {
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_cmd38_pending_)
+    this->cancel_low_power_preflight_(true);
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
     this->cancel_low_power_standby_();
   command_queue_.push_back(command);
