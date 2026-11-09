@@ -120,6 +120,7 @@ void Tuya::loop() {
       if (!this->lp_standby_.recovery_required()) {
         this->lp_standby_.transport_fault();
         this->lp_v0_.command_timeout();
+        this->lp_wire_.transport_fault();
         this->lp_network_status_ = 0xFF;
         ESP_LOGE(TAG, "XR806 UART unhealthy: MCU transactions cancelled, standby blocked until recovery");
       }
@@ -296,8 +297,8 @@ void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buff
     // CMD02/CMD09 are only acknowledged by an *empty* reply. CMD05 reports
     // never consume a queued command, and any unsolicited matching command ID
     // must not release an unrelated transaction.
-    const bool valid_reply = (command == 0x01 && len > 0) || ((command == 0x02 || command == 0x09) && len == 0);
-    if (valid_reply && this->expected_response_.has_value() && this->expected_response_ == command_type) {
+    if (this->lp_wire_.complete(command, len) && this->expected_response_.has_value() &&
+        this->expected_response_ == command_type) {
       this->expected_response_.reset();
       if (!this->command_queue_.empty())
         this->command_queue_.erase(this->command_queue_.begin());
@@ -629,8 +630,15 @@ void Tuya::send_raw_command_(TuyaCommand command) {
   this->last_command_timestamp_ = millis();
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
     const auto cmd = static_cast<uint8_t>(command.cmd);
-    if (cmd == 0x01 || cmd == 0x02 || cmd == 0x09)
+    if (cmd == 0x01 || cmd == 0x02 || cmd == 0x09) {
+      if (!this->lp_wire_.begin(cmd, millis())) {
+        ESP_LOGE(TAG, "Refusing overlapping/ambiguous low-power MCU wire transaction");
+        this->lp_v0_.command_timeout();
+        this->lp_wire_.transport_fault();
+        return;
+      }
       this->expected_response_ = command.cmd;
+    }
     if (cmd == 0x02 && command.payload.size() == 1 && command.payload[0] == 0x04)
       this->lp_v0_.begin_full_status(millis());
     if (cmd == 0x09 && command.payload.size() >= 4) {
