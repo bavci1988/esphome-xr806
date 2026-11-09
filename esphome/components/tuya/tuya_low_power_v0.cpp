@@ -99,6 +99,8 @@ void Tuya::invalidate_low_power_mode_epoch_() {
 }
 
 void Tuya::poll_low_power_product_recovery_() {
+  if (this->init_failed_)
+    return;
   const uint32_t now = millis();
   // Never inject an autonomous CMD01 during a report burst or a write ACK.
   const bool idle = !this->lp_v0_.busy() && this->command_queue_.empty() &&
@@ -108,6 +110,7 @@ void Tuya::poll_low_power_product_recovery_() {
       return;
     if (this->lp_product_retry_.exhausted()) {
       this->init_failed_ = true;
+      this->lp_mode_requery_pending_ = false;
       this->lp_v0_.command_timeout();
       ESP_LOGE(LP_TAG, "Malformed MCU product info: bounded 500ms CMD01 recovery exhausted");
       this->mark_failed();
@@ -351,6 +354,12 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       if (len != 1 || data[0] != 0)
         return;
       this->lp_standby_.reset_on_mcu_boot();
+      // The HC32 may have a new RTC sleep-window marker (sm), including
+      // after a PA3 pulse or local UI change; force a fresh product epoch.
+      if (this->lp_v0_.has_product()) {
+        this->invalidate_low_power_mode_epoch_();
+        this->lp_sleep_window_.reset_reports();
+      }
 #ifdef USE_XR806_STANDBY_CONTROLLER
       if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr)
         controller->request_standby(false);
@@ -403,7 +412,7 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       }
       this->product_ = std::make_unique<char[]>(len + 1);
       std::memcpy(this->product_.get(), data, len);
-      this->product_[len] = '\\0';
+      this->product_[len] = '\0';
       this->lp_v0_.product_received();
       this->init_state_ = TuyaInitState::INIT_DATAPOINT;
       ESP_LOGI(LP_TAG, "TRV16 PID %s version %s wk=%d mwk=%d sm=%d", this->lp_product_.pid.c_str(),
@@ -429,14 +438,21 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         const size_t size = (static_cast<size_t>(data[offset + 2]) << 8) | data[offset + 3];
         const uint8_t type = data[offset + 1];
         if (size > len - offset - 4 || type > 5 || ((type == 1 || type == 4) && size != 1) ||
-            (type == 2 && size != 4) || (type == 1 && data[offset + 4] > 1))
+            (type == 2 && size != 4) || (type == 1 && data[offset + 4] > 1) ||
+            !TuyaLowPowerSleepWindow::valid_datapoint(data[offset], type, data + offset + 4, size)) {
+          ESP_LOGW(LP_TAG, "Rejecting malformed MCU DP report; no partial CMD05 acknowledgements");
           return;
+        }
         offset += 4 + size;
       }
       offset = 0;
       while (offset < len) {
         const size_t size = (static_cast<size_t>(data[offset + 2]) << 8) | data[offset + 3];
         this->send_low_power_direct_(0x05, {0x00, data[offset]});
+        const bool previous_product_epoch = this->lp_sleep_window_.product_epoch_valid();
+        this->lp_sleep_window_.observe_report(data[offset], data[offset + 1], data + offset + 4, size);
+        if (previous_product_epoch && !this->lp_sleep_window_.product_epoch_valid())
+          this->invalidate_low_power_mode_epoch_();
         this->lp_v0_.observe_dp(data[offset], data[offset + 1], data + offset + 4, size);
         offset += 4 + size;
       }
