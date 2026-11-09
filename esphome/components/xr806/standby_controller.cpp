@@ -159,6 +159,7 @@ void XR806StandbyController::attempt_standby_() {
   bool pm_called = false;
   int result = -1;
   uint32_t event = 0;
+  uint32_t commit_epoch = 0;
 
   // Always retain a hardware wake timer as fallback, including on PA20 wake.
   if (HAL_Wakeup_SetTimer_mS(this->wake_after_ms_) != 0) {
@@ -206,7 +207,7 @@ void XR806StandbyController::attempt_standby_() {
   // The lock-free policy fence rejects any activity/vote transition during
   // final admission. Physical producers still require SDK PM wake locks:
   // this is NOT a replacement for atomic HAL/RTOS critical sections.
-  const uint32_t commit_epoch = p.generation();
+  commit_epoch = p.generation();
   if (!p.begin_commit(commit_epoch))
     goto abort;
   if (!p.commit_valid(commit_epoch))
