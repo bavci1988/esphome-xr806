@@ -183,6 +183,7 @@ _filter_define_source_files = filter_source_files_from_defines(
         "ota_signature_esp_idf.cpp": "USE_OTA_SIGNED_VERIFICATION_MULTI_KEY",
         "ota_bootloader_esp_idf.cpp": "USE_OTA_PARTITIONS",
         "ota_partitions_esp_idf.cpp": "USE_OTA_PARTITIONS",
+        "ota_backend_xr806.cpp": "USE_XR806",
     }
 )
 
