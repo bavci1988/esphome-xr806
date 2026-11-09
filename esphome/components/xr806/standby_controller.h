@@ -79,7 +79,8 @@ class XR806StandbyController final : public Component {
   void cancel_prepared_(size_t prepared);
   bool is_any_transport_unowned_() const;
 
-  static constexpr size_t MAX_PARTICIPANTS = 4;
+  // MCU UART + WLAN + Native API + OTA + mDNS, plus one future board owner.
+  static constexpr size_t MAX_PARTICIPANTS = 6;
   XR806StandbyParticipant *participants_[MAX_PARTICIPANTS]{};
   size_t participant_count_{0};
   XR806StandbyCoordinatorState state_{};
