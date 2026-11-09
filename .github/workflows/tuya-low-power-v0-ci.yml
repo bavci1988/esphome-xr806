@@ -2,10 +2,11 @@ name: Tuya MCU Low-Power v0 (host tests)
 
 on:
   push:
-    branches: [feature/tuya-low-power-v0]
+    branches: [dev, feature/xr806-tuya-standby-bridge]
     paths:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
+      - "tests/tuya_low_power_standby_state_test.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
       - "tests/yaml/tuya_low_power_v0_xr806.yaml"
   pull_request:
@@ -13,6 +14,7 @@ on:
     paths:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
+      - "tests/tuya_low_power_standby_state_test.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
   workflow_dispatch:
 
@@ -32,7 +34,11 @@ jobs:
             tests/tuya_low_power_v0_session_test.cpp \
             -o /tmp/tuya-low-power-v0-test
           /tmp/tuya-low-power-v0-test
-          echo "PASS Tuya Low-Power v0 host transaction state"
+          g++ -std=c++17 -Wall -Wextra -Werror -I. \
+            tests/tuya_low_power_standby_state_test.cpp \
+            -o /tmp/tuya-low-power-standby-state-test
+          /tmp/tuya-low-power-standby-state-test
+          echo "PASS Tuya MCU transaction and guarded CMD12/CMD38 standby states"
 
   xr806-codegen:
     runs-on: ubuntu-24.04
