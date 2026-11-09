@@ -5,14 +5,14 @@ on:
     paths:
       - "esphome/components/ota/ota_backend_xr806.*"
       - "esphome/components/xr806/ota_writer_*"
-      - "tools/xr806/make_ota_xz.py"
+      - "tools/xr806/*.py"
       - "tests/xr806/*ota*"
       - ".github/workflows/xr806-ota-writer-tests.yml"
   pull_request:
     paths:
       - "esphome/components/ota/ota_backend_xr806.*"
       - "esphome/components/xr806/ota_writer_*"
-      - "tools/xr806/make_ota_xz.py"
+      - "tools/xr806/*.py"
       - "tests/xr806/*ota*"
 jobs:
   host:
@@ -20,7 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Test packager and corrupted or oversized images
-        run: python3 -m unittest discover -s tests/xr806 -p test_make_ota_xz.py -v
+        run: |
+          python3 -m unittest discover -s tests/xr806 -p test_make_ota_xz.py -v
+          python3 -m unittest discover -s tests/xr806 -p test_ota_factory_migration.py -v
       - name: Compile and execute flash-admission C++20 tests
         run: |
           g++ -std=c++20 -Wall -Wextra -Werror -I. tests/xr806/ota_writer_part_vi_test.cpp -o /tmp/xr806-ota-test
