@@ -24,7 +24,7 @@ int main() {
   assert(!Window::valid_datapoint(101, 1, enabled, 0));
   assert(!Window::valid_datapoint(101, 1, nullptr, 1));
   assert(Window::valid_datapoint(102, 0, overnight, 4));
-  assert(!Window::valid_datapoint(102, 0, overnight, 1));   // Original HC32 RAW1 OOB bug
+  assert(!Window::valid_datapoint(102, 0, overnight, 1));  // Original HC32 RAW1 OOB bug
   assert(!Window::valid_datapoint(102, 0, overnight, 3));
   assert(!Window::valid_datapoint(102, 0, overnight, 5));
   assert(!Window::valid_datapoint(102, 1, overnight, 4));
@@ -49,10 +49,8 @@ int main() {
   for (int minute = 0; minute < 1440; ++minute) {
     auto hour = static_cast<uint8_t>(minute / 60);
     auto min = static_cast<uint8_t>(minute % 60);
-    assert(Window::rtc_marker(false, true, true, hour, min, 8, 0, 18, 0) ==
-           (minute >= 8 * 60 && minute < 18 * 60));
-    assert(Window::rtc_marker(false, true, true, hour, min, 22, 0, 6, 0) ==
-           (minute >= 22 * 60 || minute < 6 * 60));
+    assert(Window::rtc_marker(false, true, true, hour, min, 8, 0, 18, 0) == (minute >= 8 * 60 && minute < 18 * 60));
+    assert(Window::rtc_marker(false, true, true, hour, min, 22, 0, 6, 0) == (minute >= 22 * 60 || minute < 6 * 60));
     assert(!Window::rtc_marker(true, true, true, hour, min, 8, 0, 8, 0));
   }
   assert(Window::rtc_marker(true, false, false, 9, 0, 8, 0, 18, 0));
@@ -64,13 +62,13 @@ int main() {
   state.product_validated();
   assert(!state.standby_mode_stable());  // Need DP101 from a validated full status report.
   state.observe_report(101, 1, disabled, 1);
-  assert(state.standby_mode_stable());   // Dormant disabled; last sm was validated.
+  assert(state.standby_mode_stable());  // Dormant disabled; last sm was validated.
   state.observe_report(102, 0, overnight, 4);
   assert(state.standby_mode_stable());
-  state.observe_report(102, 0, overnight, 4); // No difference => do not invalidate.
+  state.observe_report(102, 0, overnight, 4);  // No difference => do not invalidate.
   assert(state.product_epoch_valid());
   state.observe_report(102, 0, changed, 4);
-  assert(!state.product_epoch_valid()); // An MCU update can make sm stale.
+  assert(!state.product_epoch_valid());  // An MCU update can make sm stale.
   state.product_validated();
   assert(state.standby_mode_stable());
   state.observe_report(101, 1, enabled, 1);
