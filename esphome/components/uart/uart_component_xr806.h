@@ -36,6 +36,7 @@ class XR806UARTComponent final : public UARTComponent, public Component {
   }
 
   bool reconfigure_baud_rate(uint32_t baud_rate) override;
+  void set_baud_probe_mode(bool probing) override;
   bool is_connected() override { return initialized_ && !tx_fault_ && !rx_overflow_fault_; }
 
   void write_array(const uint8_t *data, size_t len) override;
@@ -66,6 +67,8 @@ class XR806UARTComponent final : public UARTComponent, public Component {
   uint32_t rx_overflows_{0};
   bool tx_fault_{false};
   bool rx_overflow_fault_{false};
+  bool baud_probe_mode_{false};
+  uint32_t ignored_probe_line_errors_{0};
   bool tx_hardware_idle_() const;
 
 #ifdef USE_XR806_LOWPOWER
