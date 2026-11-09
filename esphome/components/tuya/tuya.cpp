@@ -53,6 +53,16 @@ void Tuya::setup() {
     esphome::xr806::lowpower_policy().require_external_mcu(true);
     this->update_low_power_sleep_lock_();
 #endif
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    // Registration is a protocol-specific opt-in. The generic platform PM
+    // driver never sends Tuya packets or infers the MCU's 'sm' selection.
+    if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr) {
+      this->lp_bridge_registered_ = controller->register_participant(this);
+      if (!this->lp_bridge_registered_) {
+        ESP_LOGE(TAG, "Cannot register Tuya MCU standby participant; PM remains blocked");
+        this->mark_failed();
+      }
+    }
     // The original WXU probes CMD01 at each candidate baud, without a heartbeat.
     // With a fixed rate the existing queued CMD01 request is sufficient.
     if (this->auto_baud_) {
@@ -79,6 +89,21 @@ void Tuya::setup() {
 void Tuya::loop() {
   this->read_available([this](uint8_t b) { this->handle_char_(b); });
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    if (this->lp_standby_.requested() && esphome::xr806::standby_controller() != nullptr &&
+        !esphome::xr806::lowpower_policy().standby_requested()) {
+      // A queued command, network event or an external request cancellation
+      // must not leave HC32 believing that WXU is still sleeping.
+      this->cancel_low_power_standby_();
+    }
+#endif
+    if (this->parent_ != nullptr && !this->parent_->is_connected()) {
+      this->lp_standby_.transport_fault();
+#ifdef USE_XR806_STANDBY_CONTROLLER
+      if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr)
+        controller->request_standby(false);
+#endif
+    }
     if (this->auto_baud_) {
       if (this->lp_autobaud_.searching())
         this->poll_low_power_autobaud_();
@@ -560,6 +585,8 @@ void Tuya::handle_datapoints_(const uint8_t *buffer, size_t len) {
 }
 
 void Tuya::send_raw_command_(TuyaCommand command) {
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
+    this->cancel_low_power_standby_();
   uint8_t len_hi = (uint8_t) (command.payload.size() >> 8);
   uint8_t len_lo = (uint8_t) (command.payload.size() & 0xFF);
   uint8_t version = 0;
@@ -649,6 +676,8 @@ void Tuya::process_command_queue_() {
 }
 
 void Tuya::send_command_(const TuyaCommand &command) {
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
+    this->cancel_low_power_standby_();
   command_queue_.push_back(command);
   process_command_queue_();
 }
