@@ -49,6 +49,13 @@ void Tuya::setup() {
       this->mcu_wake_pin_->setup();
       this->mcu_wake_pin_->digital_write(false);  // Inactive logical level.
     }
+#ifdef USE_XR806
+    if (this->trv16_pb04_requested_ && !this->trv16_pb04_.claim(this->trv16_pb04_active_high_)) {
+      ESP_LOGE(TAG, "PB04 is owned by another peripheral/flash mux; MCU wake pin refused");
+      this->mark_failed();
+      return;
+    }
+#endif
 #ifdef USE_XR806_LOWPOWER
     esphome::xr806::lowpower_policy().require_external_mcu(true);
     this->update_low_power_sleep_lock_();
