@@ -38,6 +38,18 @@ void MD5Digest::add(const uint8_t *data, size_t len) { br_md5_update(&this->ctx_
 void MD5Digest::calculate() { br_md5_out(&this->ctx_, this->digest_); }
 #endif  // USE_RP2
 
+#ifdef USE_XR806
+void MD5Digest::init() {
+  mbedtls_md5_init(&this->ctx_);
+  mbedtls_md5_starts(&this->ctx_);
+  memset(this->digest_, 0, 16);
+}
+
+void MD5Digest::add(const uint8_t *data, size_t len) { mbedtls_md5_update(&this->ctx_, data, len); }
+
+void MD5Digest::calculate() { mbedtls_md5_finish(&this->ctx_, this->digest_); }
+#endif  // USE_XR806
+
 #ifdef USE_HOST
 MD5Digest::~MD5Digest() {
   if (this->ctx_) {
@@ -72,6 +84,8 @@ void MD5Digest::calculate() {
     this->calculated_ = true;
   }
 }
+#elif defined(USE_XR806)
+MD5Digest::~MD5Digest() { mbedtls_md5_free(&this->ctx_); }
 #else
 MD5Digest::~MD5Digest() = default;
 #endif  // USE_HOST
