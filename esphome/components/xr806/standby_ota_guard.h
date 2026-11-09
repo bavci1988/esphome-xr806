@@ -14,8 +14,9 @@ namespace esphome::xr806 {
 // Native API listener shutdown. Until every installed OTA transport exports
 // a proven listener/flash-queue quiesce callback, keep OTA_BUSY asserted.
 // Lifecycle events still cancel provisional CMD38 immediately.
-class XR806OTAStandbyGuard final : public Component, public XR806StandbyParticipant,
-                                  public ota::OTAGlobalStateListener {
+class XR806OTAStandbyGuard final : public Component,
+                                   public XR806StandbyParticipant,
+                                   public ota::OTAGlobalStateListener {
  public:
   void setup() override {
     lowpower_policy().set_ota_idle(false);
@@ -28,8 +29,7 @@ class XR806OTAStandbyGuard final : public Component, public XR806StandbyParticip
     }
   }
 
-  void on_ota_global_state(ota::OTAState state, float progress, uint8_t error,
-                           ota::OTAComponent *component) override {
+  void on_ota_global_state(ota::OTAState state, float progress, uint8_t error, ota::OTAComponent *component) override {
     (void) progress;
     (void) error;
     (void) component;
