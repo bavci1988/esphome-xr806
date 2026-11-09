@@ -48,6 +48,81 @@ bool XR806StandbyController::register_participant(XR806StandbyParticipant *parti
   return true;
 }
 
+bool XR806StandbyController::register_service_owner(XR806StandbyService service, XR806StandbyServiceOwner *owner) {
+  const auto index = static_cast<size_t>(service);
+  if (owner == nullptr || index >= SERVICE_COUNT || this->service_owners_[index] != nullptr || this->busy_ ||
+      !this->services_.active()) {
+    return false;
+  }
+  this->service_owners_[index] = owner;
+  return true;
+}
+
+bool XR806StandbyController::prepare_service_owners() {
+  if (this->busy_) {
+    return false;
+  }
+  if (this->services_.active()) {
+    this->services_.begin(millis());
+  }
+  if (this->services_.expired(millis())) {
+    this->cancel_service_owners();
+    return false;
+  }
+  if (this->services_.quiesced()) {
+    return true;
+  }
+  if (!this->services_.preparing()) {
+    return false;
+  }
+
+  // Network stack teardown is strictly API -> OTA -> mDNS -> WLAN.
+  // WLAN may not power down until higher-level listeners are drained.
+  for (size_t i = 0; i < SERVICE_COUNT; ++i) {
+    XR806StandbyServiceOwner *owner = this->service_owners_[i];
+    if (owner == nullptr) {
+      const bool absent = (i == static_cast<size_t>(XR806StandbyService::API) && this->no_api_) ||
+                          (i == static_cast<size_t>(XR806StandbyService::OTA) && this->no_ota_) ||
+                          (i == static_cast<size_t>(XR806StandbyService::MDNS) && this->no_mdns_) ||
+                          (i == static_cast<size_t>(XR806StandbyService::WLAN) && this->no_network_);
+      if (!absent) {
+        return false;  // A configured but unregistered service must block PM.
+      }
+    } else if (!owner->pause_for_standby()) {
+      return false;  // Async mDNS or a connected client needs another pass.
+    }
+  }
+
+  return this->services_.ready(true);
+}
+
+void XR806StandbyController::resume_service_owners_() {
+  if (this->services_.active()) {
+    return;
+  }
+  this->services_.resume();
+  // Reverse the teardown, restoring WLAN before mDNS/OTA/API listeners.
+  for (size_t i = SERVICE_COUNT; i > 0; --i) {
+    if (auto *owner = this->service_owners_[i - 1]; owner != nullptr) {
+      owner->resume_after_standby();
+    }
+  }
+  this->services_.restored();
+}
+
+void XR806StandbyController::cancel_service_owners() {
+  if (this->services_.active() || this->busy_) {
+    return;
+  }
+  this->services_.resume();
+  for (size_t i = SERVICE_COUNT; i > 0; --i) {
+    if (auto *owner = this->service_owners_[i - 1]; owner != nullptr) {
+      owner->cancel_standby_pause();
+    }
+  }
+  this->services_.restored();
+}
+
 void XR806StandbyController::request_standby(bool requested) {
   // This method is invoked by the requesting application or MCU driver,
   // never by a periodic background timer in the XR806 platform.
@@ -98,10 +173,14 @@ bool XR806StandbyController::is_any_transport_unowned_() const {
 }
 
 void XR806StandbyController::loop() {
-  if (this->busy_ || this->state_.disabled() || this->is_any_transport_unowned_())
+  if (this->busy_ || this->state_.disabled() || this->is_any_transport_unowned_()) {
     return;
+  }
 
   auto &p = lowpower_policy();
+  if (!p.standby_requested() && this->services_.expired(millis())) {
+    this->cancel_service_owners();
+  }
   const uint32_t blockers = p.blockers();
   constexpr uint32_t OWNED_BY_COORDINATOR =
       XR806LowPowerPolicy::SCHEDULER_BUSY | XR806LowPowerPolicy::WAKE_NOT_READY | XR806LowPowerPolicy::NOT_REQUESTED;
@@ -137,6 +216,17 @@ void XR806StandbyController::attempt_standby_() {
       this->busy_ = false;
       return;
     }
+  }
+
+  // No application may enter PM until every configured service owner
+  // explicitly acknowledged the quiesce handshake. Connected API/OTA
+  // clients must veto, and missing owners must never count as idle.
+  if ((!this->no_network_ || !this->no_api_ || !this->no_ota_ || !this->no_mdns_) &&
+      !this->services_.quiesced()) {
+    this->cancel_prepared_(prepared);
+    this->state_.postpone();
+    this->busy_ = false;
+    return;
   }
 
   // If a client sent UART bytes or changed any PM vote while preparing,
@@ -201,7 +291,8 @@ void XR806StandbyController::attempt_standby_() {
   p.set_scheduler_idle(true);
   // The last software check is deliberately adjacent to the PM request.
   // Platform/transport owners must ALSO hold SDK PM wakelocks while busy.
-  if (!p.can_enter_standby()) {
+  if (!p.can_enter_standby() ||
+      (this->services_.quiesced() && !this->services_.enter())) {
     goto abort;
   }
 
@@ -258,6 +349,10 @@ abort:
     ESP_LOGI(TAG, "Standby PM return=%d event=0x%08lx expected=%d; hardware current not verified", result,
              static_cast<unsigned long>(event), static_cast<int>(expected));
   }
+
+  // Never strand listeners/radio after a failed or successful PM call.
+  // resume_after_standby() is also used for a prepared PM abort.
+  this->resume_service_owners_();
 
   if (this->state_.disabled()) {
     ESP_LOGE(TAG, "PM permanently disabled after three unsuccessful attempts");
