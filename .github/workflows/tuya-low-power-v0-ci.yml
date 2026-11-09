@@ -98,6 +98,13 @@ jobs:
             exit 1
           fi
           grep -q "not supported on xr806" /tmp/ota-invalid.log
+      - name: Reject tuya.refresh on a standard Tuya hub
+        run: |
+          if python -m esphome config tests/yaml/tuya_refresh_standard_rejected.yaml > /tmp/refresh-invalid.log 2>&1; then
+            echo "tuya.refresh unexpectedly accepted on a standard Tuya hub" >&2
+            exit 1
+          fi
+          grep -q "tuya.refresh requires protocol: low_power_v0" /tmp/refresh-invalid.log
       - name: Syntax-check Tuya C++ against generated ESPHome headers (SDK neutral)
         run: |
           set -euo pipefail
@@ -112,3 +119,8 @@ jobs:
           git clone --quiet --filter=blob:none https://github.com/bblanchon/ArduinoJson.git /tmp/tuya-arduinojson
           git -C /tmp/tuya-arduinojson checkout --quiet 77771d3c07668e01d8f52acb03910c1110bb373f
           g++ -std=gnu++20 -fsyntax-only -Wall -Wextra             -I/tmp/tuya-arduinojson/src -I.             esphome/components/tuya/tuya.cpp             esphome/components/tuya/tuya_low_power_v0.cpp
+          # Standard Tuya builds (no low_power_v0) must compile without the low-power code.
+          sed -i '/^#define USE_TUYA_LOW_POWER_V0$/d' esphome/core/defines.h
+          ! grep -q USE_TUYA_LOW_POWER_V0 esphome/core/defines.h
+          g++ -std=gnu++20 -fsyntax-only -Wall -Wextra -I/tmp/tuya-arduinojson/src -I. \
+            esphome/components/tuya/tuya.cpp esphome/components/tuya/tuya_low_power_v0.cpp
