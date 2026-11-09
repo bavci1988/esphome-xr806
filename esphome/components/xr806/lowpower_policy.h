@@ -40,6 +40,18 @@ class XR806LowPowerPolicy {
 
   void set_network_idle(bool ready) { update_(NETWORK_BUSY, ready); }
 
+  // A registered WLAN owner may explicitly park the link for this PM
+  // transaction. Tuya can postpone CMD02 network-state broadcasts until
+  // resume, but the platform never interprets any Tuya commands.
+  void set_network_quiescing(bool value) {
+    if (network_quiescing_.exchange(value, std::memory_order_acq_rel) != value) {
+      if (commit_active_.load(std::memory_order_acquire))
+        commit_aborted_.store(true, std::memory_order_release);
+      generation_.fetch_add(1, std::memory_order_acq_rel);
+    }
+  }
+  bool network_quiescing() const { return network_quiescing_.load(std::memory_order_acquire); }
+
   void set_ota_idle(bool ready) { update_(OTA_BUSY, ready); }
 
   // No external MCU is required on a standalone WXU.
@@ -121,6 +133,7 @@ class XR806LowPowerPolicy {
   std::atomic<uint32_t> blockers_{ALL_REQUIREMENTS};
   std::atomic<bool> requested_{false};
   std::atomic<bool> external_mcu_required_{false};
+  std::atomic<bool> network_quiescing_{false};
   std::atomic<uint32_t> generation_{0};
   std::atomic<bool> commit_active_{false};
   std::atomic<bool> commit_aborted_{false};
