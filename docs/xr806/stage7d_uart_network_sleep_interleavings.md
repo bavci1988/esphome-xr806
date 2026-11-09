@@ -43,9 +43,12 @@ HC32 GPIO-wake event after timer-only wake.
    withdraws PM/preflight before closing anything. A paused API listener
    therefore cannot silently authorize CPU standby during teardown.
 5. **mDNS callback generation:** `XR806StandbyAsyncEpoch` is shared by
-   the real lwIP-backed mDNS owner and the host tests. An old callback
-   from a cancelled/restarted preflight cannot release the new mDNS
-   owner vote. The callback rechecks cancellation after publishing.
+   the real lwIP-backed mDNS owner and the host tests. A single
+   atomic CAS word encodes both the suspension request and its generation;
+   separate boolean+epoch stores would expose a transient ABA window.
+   An old callback from a cancelled/restarted preflight cannot release
+   the new mDNS owner vote. The callback rechecks cancellation after
+   publishing.
 6. **No unsafe OTA shortcut:** A state listener can veto standby on OTA
    activity, but is not equivalent to a flash writer, TCP listener and
    pending-write drain. OTA is deliberately fail-closed.
