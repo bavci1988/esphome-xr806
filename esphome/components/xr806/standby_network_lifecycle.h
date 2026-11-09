@@ -50,8 +50,7 @@ class XR806StandbyNetworkLifecycle {
   }
 
   bool ready(uint32_t generation) const {
-    return phase_ == Phase::READY && generation_ == generation &&
-           (quiesced_ & present_) == present_;
+    return phase_ == Phase::READY && generation_ == generation && (quiesced_ & present_) == present_;
   }
 
   uint32_t generation() const { return generation_; }
