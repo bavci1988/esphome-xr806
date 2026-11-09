@@ -14,6 +14,8 @@
 #include "ota_backend_arduino_libretiny.h"
 #elif defined(USE_HOST)
 #include "ota_backend_host.h"
+#elif defined(USE_XR806)
+#include "ota_backend_xr806.h"
 #else
 // Stub for static analysis when no platform is defined
 namespace esphome::ota {
