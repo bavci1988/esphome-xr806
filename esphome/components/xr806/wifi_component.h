@@ -33,6 +33,7 @@ class XR806WiFiComponent final : public Component
   void set_network_suspend(bool enabled) { this->network_suspend_opt_in_ = enabled; }
   void standby_preflight(bool requested) override;
   bool may_quiesce() const override { return this->network_suspend_opt_in_; }
+  uint32_t owned_services() const override { return XR806LowPowerPolicy::NETWORK_BUSY; }
   bool prepare_for_standby() override;
   void standby_cancelled() override;
   void standby_resumed(const XR806StandbyResume &event) override;
