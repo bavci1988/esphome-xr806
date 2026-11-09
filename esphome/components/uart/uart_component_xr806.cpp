@@ -152,16 +152,20 @@ void XR806UARTComponent::check_logger_conflict() {
 #ifdef USE_XR806_LOWPOWER
 
 void XR806UARTComponent::note_uart_activity_() {
-  esphome::xr806::lowpower_policy().set_uart_idle(false);
+  // Physical UART traffic must not begin until the native PM driver has
+  // acknowledged its wakelock. A software-only idle vote cannot stop a
+  // concurrent vendor PM thread that has already started admission.
   if (!this->uart_pm_wakelock_held_) {
     if (pm_wake_lock(&this->uart_pm_wakelock_) != 0) {
       this->tx_fault_ = true;
+      esphome::xr806::lowpower_policy().set_uart_idle(false);
       ESP_LOGE(TAG, "Unable to claim native UART0 PM wakelock; standby disabled");
       this->mark_failed();
       return;
     }
     this->uart_pm_wakelock_held_ = true;
   }
+  esphome::xr806::lowpower_policy().set_uart_idle(false);
   this->last_uart_activity_ms_ = millis();
 }
 
@@ -323,8 +327,11 @@ void XR806UARTComponent::write_array(
     return;
 
 #ifdef USE_XR806_LOWPOWER
-  if (len != 0)
-    this->note_uart_activity_();
+  this->note_uart_activity_();
+  // An SDK PM wakelock acquisition failure is a hard transport fault:
+  // NEVER push even the first TX byte when the native lock was refused.
+  if (this->tx_fault_ || !this->uart_pm_wakelock_held_)
+    return;
 #endif
 
   for (size_t i = 0; i < len; ++i) {
