@@ -297,10 +297,14 @@ void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buff
     // never consume a queued command, and any unsolicited matching command ID
     // must not release an unrelated transaction.
     const bool valid_reply = (command == 0x01 && len > 0) || ((command == 0x02 || command == 0x09) && len == 0);
-    if (valid_reply && this->expected_response_.has_value() && this->expected_response_ == command_type) {
+    // The gate is the only authority for releasing queued CMD01/02/09.
+    // CMD05 reports and unscheduled ACKs cannot consume a queued write.
+    if (valid_reply && this->expected_response_.has_value() && this->expected_response_ == command_type &&
+        this->lp_transaction_.observe(command, len, millis()) == TuyaLowPowerTransactionGate::Reply::MATCH) {
       this->expected_response_.reset();
-      if (!this->command_queue_.empty())
+      if (!this->command_queue_.empty()) {
         this->command_queue_.erase(this->command_queue_.begin());
+      }
       this->init_retries_ = 0;
     }
     this->handle_low_power_command_(command, version, buffer, len);
@@ -629,8 +633,17 @@ void Tuya::send_raw_command_(TuyaCommand command) {
   this->last_command_timestamp_ = millis();
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
     const auto cmd = static_cast<uint8_t>(command.cmd);
-    if (cmd == 0x01 || cmd == 0x02 || cmd == 0x09)
+    if (cmd == 0x01 || cmd == 0x02 || cmd == 0x09) {
+      // Single-flight invariant. A queued request may not overwrite the
+      // expected ACK or escape a timeout quarantine.
+      if (!this->lp_transaction_.begin(cmd, millis())) {
+        ESP_LOGE(TAG, "Refusing overlapping Tuya MCU CMD 0x%02X", cmd);
+        this->lp_v0_.command_timeout();
+        this->update_low_power_sleep_lock_();
+        return;
+      }
       this->expected_response_ = command.cmd;
+    }
     if (cmd == 0x02 && command.payload.size() == 1 && command.payload[0] == 0x04)
       this->lp_v0_.begin_full_status(millis());
     if (cmd == 0x09 && command.payload.size() >= 4) {
