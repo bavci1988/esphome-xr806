@@ -318,6 +318,14 @@ void Tuya::send_low_power_direct_(uint8_t command, const std::vector<uint8_t> &p
 void Tuya::send_low_power_network_() {
   if (!this->lp_v0_.has_product())
     return;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  // An intentional, pending XR806 WLAN teardown is not a new logical
+  // Tuya network epoch: defer CMD02 until abort/resume, when the station
+  // is restored. External/unplanned link loss remains visible as before.
+  if (esphome::xr806::lowpower_policy().network_quiescing() &&
+      esphome::xr806::lowpower_policy().standby_requested())
+    return;
+#endif
   uint8_t status = 0x02;
 #ifdef USE_NETWORK
   if (network::is_connected())
@@ -516,10 +524,11 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       auto *controller = esphome::xr806::standby_controller();
       const auto blockers = esphome::xr806::lowpower_policy().blockers();
       const bool ota_veto = (blockers & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
-      const bool owner_veto =
-          (blockers &
-           (esphome::xr806::XR806LowPowerPolicy::NETWORK_BUSY | esphome::xr806::XR806LowPowerPolicy::API_BUSY |
-            esphome::xr806::XR806LowPowerPolicy::MDNS_BUSY | esphome::xr806::XR806LowPowerPolicy::OTA_BUSY)) != 0;
+      // Connected API/WLAN/mDNS may be still active at CMD38 receive,
+      // but can be parked during the bounded *provisional* handoff only
+      // when all concrete owners advertise an audited lifecycle. Active
+      // OTA work and unregistered owners always veto.
+      const bool owner_veto = ota_veto || controller == nullptr || !controller->may_quiesce();
       const bool wake_matches_mcu = controller != nullptr && controller->has_wake_pin() &&
                                     controller->requires_external_sync() &&
                                     controller->wake_pin() == this->lp_product_.wake_gpio;
