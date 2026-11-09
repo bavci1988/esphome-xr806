@@ -282,6 +282,22 @@ $(XR806_OBJDIR)/auto/components/%.o: $(XR806_SRC)/esphome/components/%.cpp $(XR8
 
 # === END XR806_AUTO_COMPONENTS_V1 ===
 
+# XR806_OTA_INFLATE_C_V1
+# ESPHome OTA's raw DEFLATE decoder is a C file selected by generated
+# USE_OTA_DEFLATE. The general auto-component rule only compiles C++.
+# Compile this single generated C source as C, with the vendor ARM toolchain.
+XR806_OTA_INFLATE_C := $(XR806_SRC)/esphome/components/esphome/ota/ota_esphome_inflate.c
+ifneq ($(wildcard $(XR806_OTA_INFLATE_C)),)
+XR806_OTA_INFLATE_OBJ := $(XR806_OBJDIR)/xr_ota_inflate.o
+$(XR806_OUTPUT): $(XR806_OTA_INFLATE_OBJ)
+$(XR806_OTA_INFLATE_OBJ): $(XR806_OTA_INFLATE_C) $(XR806_DEFINES)
+>@mkdir -p $(@D)
+>$(CC) $(CC_FLAGS) $(CC_SYMBOLS) $(INCLUDE_PATHS) \
+>    -I$(XR806_SRC) -include $(XR806_DEFINES) -MMD -MP -c $< -o $@
+-include $(XR806_OTA_INFLATE_OBJ:.o=.d)
+endif
+
+
 
 # === XR806_PREFERENCES_V1 ===
 # Non-persistent preferences manager for early XR806 bring-up.
