@@ -263,6 +263,9 @@ void XR806WiFiComponent::register_standby_owner_() {
 }
 
 bool XR806WiFiComponent::can_pause_for_standby() const {
+  if (this->standby_paused_) {
+    return true;
+  }
   // Connected WLAN is NOT stopped for an MCU's spontaneous CMD38.
   // This avoids destroying Home Assistant/API/OTA sessions in flight.
   return this->standby_registered_ && !this->connected_ && !this->standby_paused_;
