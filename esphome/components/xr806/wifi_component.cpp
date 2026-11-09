@@ -6,6 +6,9 @@
 
 #include "esphome/components/xr806/wifi_component.h"
 #include "esphome/components/xr806/network_status.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/lowpower_policy.h"
+#endif
 #if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
 #include "esphome/components/network/util.h"
 #endif
@@ -70,6 +73,21 @@ void XR806WiFiComponent::setup() {
     return;
   }
 
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  this->network_pm_lock_.name = const_cast<char *>("esphome.xr806.wlan");
+  if (!this->claim_network_lock_()) {
+    ESP_LOGE(TAG, "Cannot acquire XR806 native WLAN PM wakelock");
+    this->mark_failed();
+    return;
+  }
+  auto *controller = standby_controller();
+  if (controller == nullptr || !controller->register_participant(this)) {
+    ESP_LOGE(TAG, "Cannot register WLAN PM lifecycle owner");
+    this->mark_failed();
+    return;
+  }
+  lowpower_policy().set_network_idle(false);
+#endif
   if (wlan_sta_enable() != 0) {
     ESP_LOGE(TAG, "Could not start WLAN station");
     this->mark_failed();
@@ -97,6 +115,87 @@ void XR806WiFiComponent::dump_config() {
                 this->socket_facade_probe_enabled_ ? "enabled" : "disabled");
 }
 
+
+#ifdef USE_XR806_STANDBY_CONTROLLER
+bool XR806WiFiComponent::claim_network_lock_() {
+  if (this->network_pm_lock_held_)
+    return true;
+  if (pm_wake_lock(&this->network_pm_lock_) != 0)
+    return false;
+  this->network_pm_lock_held_ = true;
+  return true;
+}
+
+void XR806WiFiComponent::restore_network_() {
+  if (!this->network_suspending_ && !this->network_parked_)
+    return;
+  auto &policy = lowpower_policy();
+  policy.set_network_idle(false);  // Claim CPU before resuming Wi-Fi activity.
+  if (!this->claim_network_lock_()) {
+    ESP_LOGE(TAG, "Failed to reacquire WLAN native PM wakelock; recovery blocked");
+    this->mark_failed();
+    return;
+  }
+  this->network_suspending_ = false;
+  this->network_parked_ = false;
+  if (wlan_sta_enable() != 0) {
+    ESP_LOGE(TAG, "WLAN station restart after aborted PM failed");
+    this->mark_failed();
+    return;
+  }
+  this->reconnect_.begin(millis());
+  this->connected_ = false;
+  this->ip_address_.clear();
+  this->power_save_retry_.reset();
+}
+
+void XR806WiFiComponent::standby_preflight(bool requested) {
+  if (!requested) {
+    this->restore_network_();
+    return;
+  }
+  if (!this->network_suspend_opt_in_)
+    return;  // Default retains NETWORK_BUSY forever.
+  if (this->network_parked_)
+    return;
+  auto &policy = lowpower_policy();
+  const uint32_t other_services = XR806LowPowerPolicy::API_BUSY | XR806LowPowerPolicy::OTA_BUSY |
+                                   XR806LowPowerPolicy::MDNS_BUSY;
+  if ((policy.blockers() & other_services) != 0)
+    return;  // Never disable Wi-Fi while API/mDNS/OTA still own sockets.
+  if (!this->network_suspending_) {
+    if (wlan_sta_disable() != 0) {
+      ESP_LOGW(TAG, "WLAN STA disable refused; retaining PM blocker");
+      return;
+    }
+    this->network_suspending_ = true;
+  }
+  const auto snapshot = read_xr806_network_snapshot(wlan_netif_get(WLAN_MODE_STA));
+  if (snapshot.associated || snapshot.link_up)
+    return;  // Driver callback has not completed yet.
+  if (this->network_pm_lock_held_) {
+    if (pm_wake_unlock(&this->network_pm_lock_) != 0) {
+      ESP_LOGE(TAG, "WLAN PM wakelock release failed; suspend refused");
+      return;
+    }
+    this->network_pm_lock_held_ = false;
+  }
+  this->network_parked_ = true;
+  policy.set_network_idle(true);
+}
+
+bool XR806WiFiComponent::prepare_for_standby() {
+  return this->network_suspend_opt_in_ && this->network_parked_ &&
+         !this->network_pm_lock_held_;
+}
+
+void XR806WiFiComponent::standby_cancelled() { this->restore_network_(); }
+
+void XR806WiFiComponent::standby_resumed(const XR806StandbyResume &event) {
+  (void) event;
+  this->restore_network_();
+}
+#endif
 
 void XR806WiFiComponent::probe_socket_() {
   ESP_LOGI(TAG, "Starting lwIP TCP socket probe");
@@ -249,6 +348,10 @@ void XR806WiFiComponent::apply_power_save_(void *opaque_netif, uint32_t now) {
 }
 
 void XR806WiFiComponent::loop() {
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (this->network_suspending_ || this->network_parked_)
+    return;  // Never launch an automatic reconnect during PM admission.
+#endif
   const uint32_t now = millis();
   if (static_cast<uint32_t>(now - this->last_poll_ms_) < 1000U)
     return;
