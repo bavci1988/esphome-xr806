@@ -58,7 +58,7 @@ struct XR806OTARuntimeResult {
 };
 
 constexpr XR806OTARuntimeResult xr806_preflight_runtime_ota(const XR806OTARuntimeGeometry &g,
-                                                              const XR806OTARuntimeProof &proof) {
+                                                            const XR806OTARuntimeProof &proof) {
   XR806OTARuntimeResult out{};
   if (!g.runtime_snapshot_observed)
     return out;
@@ -80,15 +80,14 @@ constexpr XR806OTARuntimeResult xr806_preflight_runtime_ota(const XR806OTARuntim
   out.candidate_seq = candidate;
   // A single flash device is the only verified case; do not assume external
   // SPI flash IDs or address spaces are interchangeable.
-  if (g.image_flash[g.running_seq] != g.image_flash[candidate] ||
-      g.image_flash[g.running_seq] != g.metadata_flash) {
+  if (g.image_flash[g.running_seq] != g.image_flash[candidate] || g.image_flash[g.running_seq] != g.metadata_flash) {
     out.error = XR806OTARuntimeError::FLASH_ID_UNSUPPORTED;
     return out;
   }
 
   const uint32_t candidate_kib = g.compression_policy ? g.compressed_max_kib : g.image_max_kib;
-  if (!g.flash_bytes || !g.metadata_bytes || !candidate_kib || !g.image_max_kib ||
-      candidate_kib > UINT32_MAX / 1024U || g.image_max_kib > UINT32_MAX / 1024U) {
+  if (!g.flash_bytes || !g.metadata_bytes || !candidate_kib || !g.image_max_kib || candidate_kib > UINT32_MAX / 1024U ||
+      g.image_max_kib > UINT32_MAX / 1024U) {
     out.error = XR806OTARuntimeError::INVALID_GEOMETRY;
     return out;
   }
@@ -96,14 +95,11 @@ constexpr XR806OTARuntimeResult xr806_preflight_runtime_ota(const XR806OTARuntim
   out.candidate = {g.image_addr[candidate], candidate_kib * 1024U};
   out.running = {g.image_addr[g.running_seq], g.image_max_kib * 1024U};
 
-  constexpr uint32_t SECTOR = 4096;
-  if (!xr806_ota_range_valid(out.metadata, g.flash_bytes) ||
-      !xr806_ota_range_valid(out.candidate, g.flash_bytes) ||
-      !xr806_ota_range_valid(out.running, g.flash_bytes) ||
-      (out.metadata.offset % SECTOR) || (out.metadata.length % SECTOR) ||
-      (out.candidate.offset % SECTOR) || (out.candidate.length % SECTOR) ||
-      (out.running.offset % SECTOR) || (g.bootloader_bytes == 0) ||
-      (out.running.offset < g.bootloader_bytes)) {
+  constexpr uint32_t sector = 4096;
+  if (!xr806_ota_range_valid(out.metadata, g.flash_bytes) || !xr806_ota_range_valid(out.candidate, g.flash_bytes) ||
+      !xr806_ota_range_valid(out.running, g.flash_bytes) || (out.metadata.offset % sector) ||
+      (out.metadata.length % sector) || (out.candidate.offset % sector) || (out.candidate.length % sector) ||
+      (out.running.offset % sector) || (g.bootloader_bytes == 0) || (out.running.offset < g.bootloader_bytes)) {
     out.error = XR806OTARuntimeError::INVALID_GEOMETRY;
     return out;
   }
@@ -111,8 +107,7 @@ constexpr XR806OTARuntimeResult xr806_preflight_runtime_ota(const XR806OTARuntim
     out.error = XR806OTARuntimeError::EXCEEDS_SLOT;
     return out;
   }
-  if (xr806_ota_overlap(out.running, out.candidate) ||
-      xr806_ota_overlap(out.running, out.metadata)) {
+  if (xr806_ota_overlap(out.running, out.candidate) || xr806_ota_overlap(out.running, out.metadata)) {
     out.error = XR806OTARuntimeError::RUNNING_IMAGE_OVERLAP;
     return out;
   }

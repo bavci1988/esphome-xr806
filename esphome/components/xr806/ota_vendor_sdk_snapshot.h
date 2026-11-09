@@ -12,8 +12,7 @@ extern "C" {
 
 namespace esphome::xr806 {
 
-inline bool xr806_capture_vendor_ota_snapshot(uint32_t measured_flash_bytes,
-                                              uint32_t prospective_upload_bytes,
+inline bool xr806_capture_vendor_ota_snapshot(uint32_t measured_flash_bytes, uint32_t prospective_upload_bytes,
                                               XR806OTARuntimeGeometry *out) {
   if (out == nullptr)
     return false;

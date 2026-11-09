@@ -46,8 +46,7 @@ extern "C" void xr806_esphome_run(void) {
              static_cast<unsigned>(geo.image_flash[1]), static_cast<unsigned long>(geo.image_addr[1]),
              static_cast<unsigned long>(geo.bootloader_bytes));
     ESP_LOGI("xr806.ota", "SDK OTA: image_max=%lu KiB, compressed_max=%lu KiB; policy_compression=%u",
-             static_cast<unsigned long>(geo.image_max_kib),
-             static_cast<unsigned long>(geo.compressed_max_kib),
+             static_cast<unsigned long>(geo.image_max_kib), static_cast<unsigned long>(geo.compressed_max_kib),
              static_cast<unsigned>(geo.compression_policy));
     ESP_LOGW("xr806.ota", "Diagnostic only: flash bytes unknown, no erase/write/upload/rollback authorization");
   }

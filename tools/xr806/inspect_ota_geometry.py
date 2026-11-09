@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
 """Read-only XR806 AWIH/OTA-geometry inspection; never uploads or writes flash.
 
 Usage: python tools/xr806/inspect_ota_geometry.py WXU_XR806_flash_2MiB.bin
 All reported offsets are flash *file* offsets, not assumed live RAM addresses.
 """
+
 import argparse
 import json
 from pathlib import Path
@@ -39,15 +39,18 @@ def decode_fdcm_selection(data: bytes, start: int, size: int) -> dict:
     Reconstructs src/rom/rom_bin/src/image/fdcm.c and image/image.c. This is
     offline evidence, not proof that a bootloader on the board uses that ROM.
     """
-    region = data[start:start + size]
+    region = data[start : start + size]
     if len(region) < 12:
         raise ValueError("OTA FDCM area too small")
     magic, bitmap_size, data_size = struct.unpack_from("<IHH", region)
-    if magic != 0xA55A5AA5 or data_size != 4 or bitmap_size == 0 or (
-        8 + bitmap_size >= len(region)
+    if (
+        magic != 0xA55A5AA5
+        or data_size != 4
+        or bitmap_size == 0
+        or (8 + bitmap_size >= len(region))
     ):
         raise ValueError("invalid OTA FDCM header")
-    bitmap = region[8:8 + bitmap_size]
+    bitmap = region[8 : 8 + bitmap_size]
     used = 0
     for value in bitmap:
         if value == 0:
@@ -62,11 +65,18 @@ def decode_fdcm_selection(data: bytes, start: int, size: int) -> dict:
         raise ValueError("OTA FDCM records absent or exceed area")
     records = []
     for i in range(used):
-        raw_seq, raw_state = struct.unpack_from("<HH", region, 8 + bitmap_size + i * data_size)
+        raw_seq, raw_state = struct.unpack_from(
+            "<HH", region, 8 + bitmap_size + i * data_size
+        )
         seq = {0x5555: 0, 0xAAAA: 1}.get(raw_seq)
         state = {0x9669: "VERIFIED", 0x6996: "UNVERIFIED"}.get(raw_state, "UNKNOWN")
-        records.append({"seq": seq, "state": state,
-                        "offset": f"0x{start + 8 + bitmap_size + i * 4:06x}"})
+        records.append(
+            {
+                "seq": seq,
+                "state": state,
+                "offset": f"0x{start + 8 + bitmap_size + i * 4:06x}",
+            }
+        )
     latest = records[-1]
     return {
         "record_count": len(records),
@@ -81,12 +91,14 @@ def parse(data: bytes) -> dict:
     boot = HEADER.unpack_from(data)
     if boot[0] != MAGIC or boot[10] != BOOT_ID:
         raise ValueError("flash start is not an expected XR806 AWIH BOOT header")
-    if awih_checksum16(data[:HEADER.size]) != 0xFFFF:
+    if awih_checksum16(data[: HEADER.size]) != 0xFFFF:
         raise ValueError("invalid vendor AWIH BOOT header checksum")
     boot_payload_end = HEADER.size + boot[4]
-    if boot_payload_end > len(data) or (
-        (boot[3] + awih_checksum16(data[HEADER.size:boot_payload_end])) & 0xFFFF
-    ) != 0xFFFF:
+    if (
+        boot_payload_end > len(data)
+        or ((boot[3] + awih_checksum16(data[HEADER.size : boot_payload_end])) & 0xFFFF)
+        != 0xFFFF
+    ):
         raise ValueError("invalid vendor AWIH BOOT payload checksum")
     private = boot[11:17]
     packed_ota = private[0]
@@ -110,21 +122,27 @@ def parse(data: bytes) -> dict:
         if at + HEADER.size <= len(data):
             h = HEADER.unpack_from(data, at)
             payload_end = at + HEADER.size + h[4]
-            if (h[0] == MAGIC and h[10] in SECTION_IDS and
-                    payload_end <= len(data) and
-                    awih_checksum16(data[at:at + HEADER.size]) == 0xFFFF):
+            if (
+                h[0] == MAGIC
+                and h[10] in SECTION_IDS
+                and payload_end <= len(data)
+                and awih_checksum16(data[at : at + HEADER.size]) == 0xFFFF
+            ):
                 valid_payload = (
-                    (h[3] + awih_checksum16(data[at + HEADER.size:payload_end])) & 0xFFFF
+                    (h[3] + awih_checksum16(data[at + HEADER.size : payload_end]))
+                    & 0xFFFF
                 ) == 0xFFFF
-                sections.append({
-                    "offset": f"0x{at:06x}",
-                    "kind": SECTION_IDS[h[10]],
-                    "id": f"0x{h[10]:08x}",
-                    "payload_bytes": h[4],
-                    "next_relative": f"0x{h[9]:08x}",
-                    "header_checksum_valid": True,
-                    "payload_checksum_valid": valid_payload,
-                })
+                sections.append(
+                    {
+                        "offset": f"0x{at:06x}",
+                        "kind": SECTION_IDS[h[10]],
+                        "id": f"0x{h[10]:08x}",
+                        "payload_bytes": h[4],
+                        "next_relative": f"0x{h[9]:08x}",
+                        "header_checksum_valid": True,
+                        "payload_checksum_valid": valid_payload,
+                    }
+                )
         at += 4
     return {
         "flash_bytes": len(data),
@@ -137,9 +155,11 @@ def parse(data: bytes) -> dict:
         },
         "fdcm_selection": decode_fdcm_selection(data, metadata_start, metadata_size),
         "evidence": {
-            "non_ff_bytes_at_sdk_example_0x100000_4k": sum(x != 255 for x in data[0x100000:0x101000]),
+            "non_ff_bytes_at_sdk_example_0x100000_4k": sum(
+                x != 255 for x in data[0x100000:0x101000]
+            ),
             "non_ff_bytes_at_header_metadata_4k": sum(
-                x != 255 for x in data[metadata_start:metadata_start + metadata_size]
+                x != 255 for x in data[metadata_start : metadata_start + metadata_size]
             ),
             "proposed_compressed_slot_start": f"0x{proposed_compressed_start:06x}",
             "proposed_compressed_slot_end": f"0x{proposed_compressed_end:06x}",

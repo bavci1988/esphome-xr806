@@ -51,13 +51,14 @@ int main() {
   assert(poison.faulted() && !poison.acquire(veto, lock, &failed_unlock));
 
   // Hypothetical separately verified 2-MiB layout, NOT the TRV16 dump.
-  XR806OTAFlashPlan p{
-      2U * 1024U * 1024U,
-      {0x000000U, 0x0FF000U},
-      {0x101000U, 0x96000U},
-      {0x100000U, 0x1000U},
-      0x55000U,
-      false, false, false};
+  XR806OTAFlashPlan p{2U * 1024U * 1024U,
+                      {0x000000U, 0x0FF000U},
+                      {0x101000U, 0x96000U},
+                      {0x100000U, 0x1000U},
+                      0x55000U,
+                      false,
+                      false,
+                      false};
   assert(xr806_validate_ota_flash_plan(p) == XR806OTAFlashPlanError::UNVERIFIED_LAYOUT);
   p.layout_verified = p.image_format_verified = p.boot_recovery_verified = true;
   assert(xr806_validate_ota_flash_plan(p) == XR806OTAFlashPlanError::OK);
@@ -76,13 +77,14 @@ int main() {
   // Original WXU BOOT header says metadata at 0x177000, 4KiB,
   // xz_max=400KiB, and the second AWIH sequence starts at 0x178000.
   // That identifies candidate geometry, NOT active-slot or recovery proof.
-  XR806OTAFlashPlan original{
-      2U * 1024U * 1024U,
-      {0x000000U, 0x131000U},  // Conservative span of first AWIH section series.
-      {0x178000U, 0x64000U},  // Candidate compressed update slot.
-      {0x177000U, 0x1000U},
-      0x50000U,
-      false, false, false};
+  XR806OTAFlashPlan original{2U * 1024U * 1024U,
+                             {0x000000U, 0x131000U},  // Conservative span of first AWIH section series.
+                             {0x178000U, 0x64000U},   // Candidate compressed update slot.
+                             {0x177000U, 0x1000U},
+                             0x50000U,
+                             false,
+                             false,
+                             false};
   assert(xr806_validate_ota_flash_plan(original) == XR806OTAFlashPlanError::UNVERIFIED_LAYOUT);
   original.image_bytes = 0x65000U;
   assert(xr806_validate_ota_flash_plan(original) == XR806OTAFlashPlanError::INVALID_IMAGE_SIZE);
