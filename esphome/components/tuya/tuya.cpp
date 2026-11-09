@@ -143,11 +143,13 @@ void Tuya::loop() {
 
 void Tuya::dump_config() {
   ESP_LOGCONFIG(TAG, "Tuya:");
-  ESP_LOGCONFIG(TAG, "  Protocol: %s", this->protocol_ == TuyaProtocol::LOW_POWER_V0 ? "low_power_v0" : "standard");
+  ESP_LOGCONFIG(TAG, "  Protocol: %s", this->protocol_ == TuyaProtocol::LOW_POWER_V0
+                                           ? LOG_STR_LITERAL("low_power_v0") : LOG_STR_LITERAL("standard"));
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
     ESP_LOGCONFIG(TAG, "  Auto baud: %s", YESNO(this->auto_baud_));
-    if (this->auto_baud_ && this->lp_autobaud_.locked())
+    if (this->auto_baud_ && this->lp_autobaud_.locked()) {
       ESP_LOGCONFIG(TAG, "  Detected baud: %u", static_cast<unsigned>(this->lp_autobaud_.baud()));
+    }
   }
   if (this->init_state_ != TuyaInitState::INIT_DONE) {
     if (this->init_failed_) {
