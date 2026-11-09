@@ -90,7 +90,7 @@ The vendor's `ota_push_start()` erases the inactive image slot IMMEDIATELY; with
 
 ### Parallel USE_TUYA_LOW_POWER_V0 work
 
-The separate `claude/serene-franklin-jgpjuw` branch gates the Tuya V0 setup/loop/driver through `USE_TUYA_LOW_POWER_V0`. Its changes also touch XR806 HAL, mDNS, network and build files. This OTA branch intentionally does not blindly merge those unrelated changes. The OTA PM state machine is kept in the XR806 platform; it is NOT attached to shared `ota::UpdateLock` until a real vendor OTA backend exists. Future integration must run both Standard Tuya and low_power_v0 regression tests and real CMD38/network/OTA standby races.
+The OTA branch now includes Claude's upstream-compatible refactor as a second Git parent. Standard `wifi:`, platform-owned API/WLAN/mDNS standby, and `USE_TUYA_LOW_POWER_V0` remain intact and unchanged. The pull request is stacked on the Claude branch until that refactor reaches `dev`. The OTA PM state machine is kept in the XR806 platform; it is NOT attached to shared `ota::UpdateLock` until a real vendor OTA backend exists. Future integration must run both Standard Tuya and low_power_v0 regression tests and real CMD38/network/OTA standby races.
 
 ## Upstream-compatible integration with standard WiFi and Standby (2026-11-09)
 
