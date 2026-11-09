@@ -66,6 +66,8 @@ jobs:
       - name: Generate XR806 C++ without a hardware SDK build
         run: |
           python -m esphome compile tests/yaml/tuya_low_power_v0_xr806.yaml --only-generate
+          python -m esphome config tests/yaml/tuya_low_power_v0_xr806_network_suspend.yaml
+          python -m esphome compile tests/yaml/tuya_low_power_v0_xr806_network_suspend.yaml --only-generate
           python -m esphome config tests/yaml/tuya_low_power_pb04_optin_codegen.yaml
           python -m esphome compile tests/yaml/tuya_low_power_pb04_optin_codegen.yaml --only-generate
       - name: Reject PB04 MCU wake without explicit verified wiring
@@ -75,6 +77,13 @@ jobs:
             exit 1
           fi
           grep -q "Explicit physical pin-ownership" /tmp/pb04-invalid.log
+      - name: Reject network_suspend without a standby coordinator
+        run: |
+          if python -m esphome config tests/yaml/tuya_low_power_v0_xr806_network_suspend_rejected.yaml > /tmp/wlan-invalid.log 2>&1; then
+            echo "network_suspend unexpectedly accepted without standby" >&2
+            exit 1
+          fi
+          grep -q "requires xr806.standby" /tmp/wlan-invalid.log
       - name: Syntax-check Tuya C++ against generated ESPHome headers (SDK neutral)
         run: |
           set -euo pipefail
