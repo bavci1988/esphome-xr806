@@ -148,5 +148,16 @@ int main() {
   assert(!info.is_verified_trv16());
   const std::string missing_pin = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"sm":1})";
   assert(!info.parse(reinterpret_cast<const uint8_t *>(missing_pin.data()), missing_pin.size()));
+  assert(!info.parsed);
+  const std::string missing_p = R"({"v":"1.3.1","wk":20,"mwk":28,"sm":1})";
+  const std::string missing_v = R"({"p":"ihedujbuli6hsx9b","wk":20,"mwk":28,"sm":1})";
+  const std::string bad_sm = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":2})";
+  const std::string typed_p = R"({"p":42,"v":"1.3.1","wk":20,"mwk":28,"sm":1})";
+  assert(!info.parse(reinterpret_cast<const uint8_t *>(missing_p.data()), missing_p.size()));
+  assert(!info.parse(reinterpret_cast<const uint8_t *>(missing_v.data()), missing_v.size()));
+  assert(!info.parse(reinterpret_cast<const uint8_t *>(bad_sm.data()), bad_sm.size()));
+  assert(!info.parse(reinterpret_cast<const uint8_t *>(typed_p.data()), typed_p.size()));
+  assert(!info.parse(nullptr, 0));
+  assert(!info.parsed);
   return 0;
 }
