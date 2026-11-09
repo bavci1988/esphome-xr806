@@ -16,7 +16,7 @@ int main() {
   g.running_seq = 0;
   g.selected_seq = 0;
   g.selected_verified = true;
-  g.upload_bytes = 770u * 1024u;
+  g.upload_bytes = 760u * 1024u;
   auto result = validate_writer(g);
   assert(result.error == WriterError::OK);
   assert(result.candidate_seq == 1);
