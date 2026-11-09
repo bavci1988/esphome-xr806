@@ -12,3 +12,8 @@
 #if defined(USE_XR806) && defined(USE_NETWORK)
 #include "lwip/ip_addr.h"
 #endif
+
+#ifdef __cplusplus
+// Force-included into every XR806 C++ unit; declares no platform API.
+namespace esphome::xr806 {}
+#endif

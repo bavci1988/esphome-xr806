@@ -5,6 +5,7 @@ from esphome.components.const import CONF_ENABLED
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_BOARD,
+    CONF_WIFI,
     KEY_CORE,
     KEY_TARGET_FRAMEWORK,
     KEY_TARGET_PLATFORM,
@@ -18,8 +19,7 @@ IS_TARGET_PLATFORM = True
 
 # Temporary vendor WLAN smoke probe, not the standard ESPHome wifi: component.
 CONF_WLAN_SMOKE = "wlan_smoke"
-CONF_XR806_WIFI = "wifi"
-CONF_XR806_WLAN_SETTINGS = "wlan"
+CONF_WLAN = "wlan"
 CONF_NETWORK_BRIDGE = "network_bridge"
 CONF_NETWORK_SUSPEND = "network_suspend"
 CONF_DTIM = "dtim"
@@ -137,22 +137,20 @@ STANDBY_SCHEMA = cv.Schema(
 
 
 def _update_core_data(config):
-    if CONF_XR806_WLAN_SETTINGS in config and (
-        CONF_XR806_WIFI in config or CONF_WLAN_SMOKE in config
-    ):
+    if CONF_WLAN in config and (CONF_WIFI in config or CONF_WLAN_SMOKE in config):
         raise cv.Invalid("xr806.wlan cannot be combined with xr806.wifi/wlan_smoke")
-    if CONF_WLAN_SMOKE in config and CONF_XR806_WIFI in config:
+    if CONF_WLAN_SMOKE in config and CONF_WIFI in config:
         raise cv.Invalid(
             "Choose either xr806.wifi or legacy xr806.wlan_smoke, not both"
         )
-    if CONF_XR806_WIFI in config and config[CONF_XR806_WIFI][CONF_NETWORK_SUSPEND]:
+    if CONF_WIFI in config and config[CONF_WIFI][CONF_NETWORK_SUSPEND]:
         if CONF_STANDBY not in config:
             raise cv.Invalid(
                 "xr806.wifi.network_suspend requires xr806.standby and full PM gating"
             )
         if (
-            config[CONF_XR806_WIFI][CONF_SOCKET_PROBE]
-            or config[CONF_XR806_WIFI][CONF_SOCKET_FACADE_PROBE]
+            config[CONF_WIFI][CONF_SOCKET_PROBE]
+            or config[CONF_WIFI][CONF_SOCKET_FACADE_PROBE]
         ):
             raise cv.Invalid(
                 "xr806.wifi.network_suspend cannot share ad-hoc socket probes"
@@ -182,11 +180,7 @@ def _update_core_data(config):
                 "resume_marker_pb05 is unsafe on the current WXU pin map; "
                 "use timer/current measurements instead"
             )
-        if (
-            CONF_WLAN_SMOKE in config
-            or CONF_XR806_WIFI in config
-            or CONF_XR806_WLAN_SETTINGS in config
-        ):
+        if CONF_WLAN_SMOKE in config or CONF_WIFI in config or CONF_WLAN in config:
             raise cv.Invalid(
                 "Stage 7b offline standby_trial cannot be combined with XR806 WLAN"
             )
@@ -202,8 +196,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional("lowpower", default=False): cv.boolean,
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
             cv.Optional(CONF_WLAN_SMOKE): WLAN_SMOKE_SCHEMA,
-            cv.Optional(CONF_XR806_WIFI): XR806_WIFI_SCHEMA,
-            cv.Optional(CONF_XR806_WLAN_SETTINGS): XR806_WLAN_SETTINGS_SCHEMA,
+            cv.Optional(CONF_WIFI): XR806_WIFI_SCHEMA,
+            cv.Optional(CONF_WLAN): XR806_WLAN_SETTINGS_SCHEMA,
             cv.Optional(CONF_STANDBY_TRIAL): STANDBY_TRIAL_SCHEMA,
             cv.Optional(CONF_STANDBY): STANDBY_SCHEMA,
         }
@@ -238,9 +232,9 @@ async def to_code(config):
         wlan = (
             "wifi" in CORE.config
             or "network" in CORE.config
-            or CONF_XR806_WIFI in config
+            or CONF_WIFI in config
             or CONF_WLAN_SMOKE in config
-            or CONF_XR806_WLAN_SETTINGS in config
+            or CONF_WLAN in config
         )
         cg.add(controller.set_no_network(not wlan))
         cg.add(controller.set_no_api("api" not in CORE.config))
@@ -294,7 +288,7 @@ async def to_code(config):
         cg.add(standby.set_wake_falling(trial[CONF_WAKE_EDGE] == "falling"))
         cg.add(standby.set_resume_marker_pb05(trial[CONF_RESUME_MARKER_PB05]))
         await cg.register_component(standby, trial)
-    if CONF_XR806_WLAN_SETTINGS in config and "wifi" not in CORE.config:
+    if CONF_WLAN in config and "wifi" not in CORE.config:
         raise cv.Invalid("xr806.wlan requires top-level wifi:")
     cg.add_define("USE_XR806")
     # XR806 uses ordinary addressable memory, not Arduino PROGMEM.
@@ -302,9 +296,9 @@ async def to_code(config):
     cg.add_define(ThreadModel.MULTI_ATOMICS)
     cg.add_define("ESPHOME_BOARD", config[CONF_BOARD])
 
-    if CONF_WLAN_SMOKE in config or CONF_XR806_WIFI in config:
-        new_wifi = CONF_XR806_WIFI in config
-        wlan_config = config[CONF_XR806_WIFI if new_wifi else CONF_WLAN_SMOKE]
+    if CONF_WLAN_SMOKE in config or CONF_WIFI in config:
+        new_wifi = CONF_WIFI in config
+        wlan_config = config[CONF_WIFI if new_wifi else CONF_WLAN_SMOKE]
         cg.add_define("USE_XR806_WLAN_SMOKE")
         if new_wifi and wlan_config[CONF_NETWORK_BRIDGE]:
             if "network" not in CORE.config:
@@ -491,4 +485,4 @@ def run_compile(args, config) -> bool:
 
 # XR806_GPIO_REGISTRATION_V1
 # Register the platform's native GPIO schema during platform import.
-from . import gpio as _xr806_gpio  # noqa: F401  # pylint: disable=wrong-import-position
+from . import gpio as _xr806_gpio  # noqa: E402, F401  # pylint: disable=wrong-import-position

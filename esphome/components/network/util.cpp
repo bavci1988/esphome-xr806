@@ -128,7 +128,7 @@ network::IPAddresses get_ip_addresses() {
     return openthread::global_openthread_component->get_ip_addresses();
 #endif
 #if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
-  return xr806_platform_get_ip_addresses();
+  return xr806::network_get_ip_addresses();
 #else
   return {};
 #endif

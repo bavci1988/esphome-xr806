@@ -12,6 +12,13 @@
 
 #include "lwip/opt.h"
 
+namespace esphome::xr806 {
+
+// Non-blocking lwIP readiness poll used by the socket hooks below.
+bool lwip_fd_readable(int fd);
+
+}  // namespace esphome::xr806
+
 namespace esphome::socket {
 
 bool wake_register_fd(int fd);
