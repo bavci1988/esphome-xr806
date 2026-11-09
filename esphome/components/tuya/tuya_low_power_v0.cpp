@@ -370,8 +370,10 @@ void Tuya::send_low_power_network_() {
   // An intentional, pending XR806 WLAN teardown is not a new logical
   // Tuya network epoch: defer CMD02 until abort/resume, when the station
   // is restored. External/unplanned link loss remains visible as before.
+  const auto *controller = esphome::xr806::standby_controller();
   if (esphome::xr806::lowpower_policy().network_quiescing() &&
-      esphome::xr806::lowpower_policy().standby_requested())
+      (esphome::xr806::lowpower_policy().standby_requested() ||
+       (controller != nullptr && controller->preflight_requested())))
     return;
 #endif
   uint8_t status = 0x02;
