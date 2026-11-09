@@ -768,6 +768,7 @@ _platform_filter = filter_source_files_from_platform(
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
         },
+        "uart_component_xr806.cpp": {PlatformFramework.XR806_XRADIO},
     }
 )
 

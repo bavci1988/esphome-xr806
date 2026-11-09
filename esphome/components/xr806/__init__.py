@@ -5,10 +5,11 @@ from esphome.components.const import CONF_ENABLED
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_BOARD,
-    CONF_WIFI,
+    CONF_ID,
     KEY_CORE,
     KEY_TARGET_FRAMEWORK,
     KEY_TARGET_PLATFORM,
+    Framework,
     ThreadModel,
 )
 from esphome.core import CORE
@@ -17,16 +18,10 @@ CODEOWNERS = []
 DOMAIN = "xr806"
 IS_TARGET_PLATFORM = True
 
-# Temporary vendor WLAN smoke probe, not the standard ESPHome wifi: component.
-CONF_WLAN_SMOKE = "wlan_smoke"
 CONF_WLAN = "wlan"
-CONF_NETWORK_BRIDGE = "network_bridge"
 CONF_NETWORK_SUSPEND = "network_suspend"
 CONF_DTIM = "dtim"
 CONF_LISTEN_INTERVAL = "listen_interval"
-CONF_POWER_SAVE = "power_save"
-CONF_SOCKET_PROBE = "socket_probe"
-CONF_SOCKET_FACADE_PROBE = "socket_facade_probe"
 CONF_STANDBY_TRIAL = "standby_trial"
 CONF_STANDBY = "standby"
 CONF_OTA_GUARD_ID = "ota_guard_id"
@@ -40,58 +35,22 @@ CONF_WAKE_EDGE = "wake_edge"
 CONF_RESUME_MARKER_PB05 = "resume_marker_pb05"
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
-XR806WLANSmoke = xr806_ns.class_("XR806WLANSmoke", cg.Component)
-XR806WiFiComponent = xr806_ns.class_("XR806WiFiComponent", cg.Component)
+XR806WiFiStandby = xr806_ns.class_("XR806WiFiStandby", cg.Component)
 XR806StandbyTrial = xr806_ns.class_("XR806StandbyTrial", cg.Component)
 XR806StandbyController = xr806_ns.class_("XR806StandbyController", cg.Component)
 XR806OTAStandbyGuard = xr806_ns.class_("XR806OTAStandbyGuard", cg.Component)
 
 
-def validate_wlan_smoke_password(value):
-    value = cv.string_strict(value)
-    if value and not 8 <= len(value) <= 63:
-        raise cv.Invalid("WLAN smoke password must be empty or 8..63 characters")
-    return value
-
-
-WLAN_SMOKE_SCHEMA = cv.Schema(
+# Radio settings for the standard wifi: component. DTIM and the listen interval
+# apply when wifi: power_save_mode is LIGHT or HIGH.
+XR806_WLAN_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(): cv.declare_id(XR806WLANSmoke),
-        cv.Required("ssid"): cv.All(cv.string_strict, cv.Length(min=1, max=32)),
-        cv.Required("password"): validate_wlan_smoke_password,
-        cv.Optional(CONF_POWER_SAVE, default=False): cv.boolean,
-        cv.Optional(CONF_SOCKET_PROBE, default=False): cv.boolean,
-        cv.Optional(CONF_SOCKET_FACADE_PROBE, default=False): cv.boolean,
+        cv.GenerateID(): cv.declare_id(XR806WiFiStandby),
         cv.Optional(CONF_DTIM, default=1): cv.int_range(min=1, max=30),
         cv.Optional(CONF_LISTEN_INTERVAL, default=0): cv.int_range(min=0, max=30),
-    }
-).extend(cv.COMPONENT_SCHEMA)
-
-# Production-name schema; same SDK options as legacy probe during migration.
-XR806_WLAN_SETTINGS_SCHEMA = cv.Schema(
-    {
-        cv.Optional(CONF_POWER_SAVE, default=False): cv.boolean,
-        cv.Optional(CONF_DTIM, default=1): cv.int_range(min=1, max=30),
-        cv.Optional(CONF_LISTEN_INTERVAL, default=0): cv.int_range(min=0, max=30),
-        cv.Optional(CONF_SOCKET_PROBE, default=False): cv.boolean,
-        cv.Optional(CONF_SOCKET_FACADE_PROBE, default=False): cv.boolean,
+        cv.Optional(CONF_NETWORK_SUSPEND, default=False): cv.boolean,
     }
 )
-
-XR806_WIFI_SCHEMA = cv.Schema(
-    {
-        cv.GenerateID(): cv.declare_id(XR806WiFiComponent),
-        cv.Required("ssid"): cv.All(cv.string_strict, cv.Length(min=1, max=32)),
-        cv.Required("password"): validate_wlan_smoke_password,
-        cv.Optional(CONF_NETWORK_BRIDGE, default=False): cv.boolean,
-        cv.Optional(CONF_NETWORK_SUSPEND, default=False): cv.boolean,
-        cv.Optional(CONF_POWER_SAVE, default=False): cv.boolean,
-        cv.Optional(CONF_SOCKET_PROBE, default=False): cv.boolean,
-        cv.Optional(CONF_SOCKET_FACADE_PROBE, default=False): cv.boolean,
-        cv.Optional(CONF_DTIM, default=1): cv.int_range(min=1, max=30),
-        cv.Optional(CONF_LISTEN_INTERVAL, default=0): cv.int_range(min=0, max=30),
-    }
-).extend(cv.COMPONENT_SCHEMA)
 
 
 # Stage 7b is an OFFLINE, bounded one-shot for an isolated WXU test board.
@@ -137,24 +96,10 @@ STANDBY_SCHEMA = cv.Schema(
 
 
 def _update_core_data(config):
-    if CONF_WLAN in config and (CONF_WIFI in config or CONF_WLAN_SMOKE in config):
-        raise cv.Invalid("xr806.wlan cannot be combined with xr806.wifi/wlan_smoke")
-    if CONF_WLAN_SMOKE in config and CONF_WIFI in config:
+    if config[CONF_WLAN][CONF_NETWORK_SUSPEND] and CONF_STANDBY not in config:
         raise cv.Invalid(
-            "Choose either xr806.wifi or legacy xr806.wlan_smoke, not both"
+            "xr806.wlan.network_suspend requires xr806.standby and full PM gating"
         )
-    if CONF_WIFI in config and config[CONF_WIFI][CONF_NETWORK_SUSPEND]:
-        if CONF_STANDBY not in config:
-            raise cv.Invalid(
-                "xr806.wifi.network_suspend requires xr806.standby and full PM gating"
-            )
-        if (
-            config[CONF_WIFI][CONF_SOCKET_PROBE]
-            or config[CONF_WIFI][CONF_SOCKET_FACADE_PROBE]
-        ):
-            raise cv.Invalid(
-                "xr806.wifi.network_suspend cannot share ad-hoc socket probes"
-            )
     if CONF_STANDBY in config:
         standby_cfg = config[CONF_STANDBY]
         if (CONF_WAKE_PIN in standby_cfg) != (CONF_WAKE_EDGE in standby_cfg):
@@ -180,12 +125,8 @@ def _update_core_data(config):
                 "resume_marker_pb05 is unsafe on the current WXU pin map; "
                 "use timer/current measurements instead"
             )
-        if CONF_WLAN_SMOKE in config or CONF_WIFI in config or CONF_WLAN in config:
-            raise cv.Invalid(
-                "Stage 7b offline standby_trial cannot be combined with XR806 WLAN"
-            )
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = DOMAIN
-    CORE.data[KEY_CORE][KEY_TARGET_FRAMEWORK] = "xradio"
+    CORE.data[KEY_CORE][KEY_TARGET_FRAMEWORK] = Framework.XRADIO
     return config
 
 
@@ -195,9 +136,7 @@ CONFIG_SCHEMA = cv.All(
             # XR806_LOWPOWER_FLAG_V1
             cv.Optional("lowpower", default=False): cv.boolean,
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
-            cv.Optional(CONF_WLAN_SMOKE): WLAN_SMOKE_SCHEMA,
-            cv.Optional(CONF_WIFI): XR806_WIFI_SCHEMA,
-            cv.Optional(CONF_WLAN): XR806_WLAN_SETTINGS_SCHEMA,
+            cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
             cv.Optional(CONF_STANDBY_TRIAL): STANDBY_TRIAL_SCHEMA,
             cv.Optional(CONF_STANDBY): STANDBY_SCHEMA,
         }
@@ -229,14 +168,7 @@ async def to_code(config):
         # transports retain their initial busy vote until their own driver
         # explicitly votes idle; no hardcoded MCU or Tuya protocol assumption.
         cg.add(controller.set_no_uart("uart" not in CORE.config))
-        wlan = (
-            "wifi" in CORE.config
-            or "network" in CORE.config
-            or CONF_WIFI in config
-            or CONF_WLAN_SMOKE in config
-            or CONF_WLAN in config
-        )
-        cg.add(controller.set_no_network(not wlan))
+        cg.add(controller.set_no_network("wifi" not in CORE.config))
         cg.add(controller.set_no_api("api" not in CORE.config))
         cg.add(controller.set_no_ota("ota" not in CORE.config))
         cg.add(controller.set_no_mdns("mdns" not in CORE.config))
@@ -288,46 +220,24 @@ async def to_code(config):
         cg.add(standby.set_wake_falling(trial[CONF_WAKE_EDGE] == "falling"))
         cg.add(standby.set_resume_marker_pb05(trial[CONF_RESUME_MARKER_PB05]))
         await cg.register_component(standby, trial)
-    if CONF_WLAN in config and "wifi" not in CORE.config:
-        raise cv.Invalid("xr806.wlan requires top-level wifi:")
     cg.add_define("USE_XR806")
     # XR806 uses ordinary addressable memory, not Arduino PROGMEM.
     cg.add_define("PROGMEM")
     cg.add_define(ThreadModel.MULTI_ATOMICS)
     cg.add_define("ESPHOME_BOARD", config[CONF_BOARD])
 
-    if CONF_WLAN_SMOKE in config or CONF_WIFI in config:
-        new_wifi = CONF_WIFI in config
-        wlan_config = config[CONF_WIFI if new_wifi else CONF_WLAN_SMOKE]
-        cg.add_define("USE_XR806_WLAN_SMOKE")
-        if new_wifi and wlan_config[CONF_NETWORK_BRIDGE]:
-            if "network" not in CORE.config:
-                raise cv.Invalid("xr806.wifi.network_bridge requires network:")
-            cg.add_define("USE_XR806_NETWORK_BRIDGE")
-        if new_wifi:
-            cg.add_define("USE_XR806_WIFI")
+    if "wifi" in CORE.config:
+        wlan = config[CONF_WLAN]
+        cg.add_define("XR806_WLAN_DTIM", wlan[CONF_DTIM])
+        cg.add_define("XR806_WLAN_LISTEN_INTERVAL", wlan[CONF_LISTEN_INTERVAL])
+        if CONF_STANDBY in config:
+            # Owns NETWORK_BUSY and the native WLAN wakelock; parks the link only
+            # with network_suspend.
             cg.add_global(
-                cg.RawStatement('#include "esphome/components/xr806/wifi_component.h"')
+                cg.RawStatement('#include "esphome/components/xr806/wifi_standby.h"')
             )
-        else:
-            cg.add_global(
-                cg.RawStatement('#include "esphome/components/xr806/wlan_smoke.h"')
-            )
-        wlan = cg.new_Pvariable(wlan_config["id"])
-        cg.add(wlan.set_ssid(wlan_config["ssid"]))
-        cg.add(wlan.set_password(wlan_config["password"]))
-        cg.add(wlan.set_power_save(wlan_config[CONF_POWER_SAVE]))
-        if new_wifi and CONF_STANDBY in config:
-            cg.add(wlan.set_network_suspend(wlan_config[CONF_NETWORK_SUSPEND]))
-        cg.add(wlan.set_socket_probe(wlan_config[CONF_SOCKET_PROBE]))
-        cg.add(wlan.set_socket_facade_probe(wlan_config[CONF_SOCKET_FACADE_PROBE]))
-        if wlan_config[CONF_SOCKET_FACADE_PROBE]:
-            cg.add_define("USE_XR806_SOCKET_FACADE_PROBE")
-            cg.add_define("USE_SOCKET_IMPL_LWIP_SOCKETS")
-            cg.add_define("USE_NETWORK_IPV4", 1)
-        cg.add(wlan.set_dtim(wlan_config[CONF_DTIM]))
-        cg.add(wlan.set_listen_interval(wlan_config[CONF_LISTEN_INTERVAL]))
-        await cg.register_component(wlan, wlan_config)
+            standby_wlan = cg.new_Pvariable(wlan[CONF_ID], wlan[CONF_NETWORK_SUSPEND])
+            await cg.register_component(standby_wlan, {})
 
 
 def run_compile(args, config) -> bool:

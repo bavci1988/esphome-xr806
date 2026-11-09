@@ -14,7 +14,7 @@ The standalone `XR806_ESPHome_PartV.zip` host prototype was compared as a design
 | Late ACK at/after deadline before timer sweep | `TuyaLowPowerWireTransactions::overdue()` + `Tuya::handle_command_()` | Forward-ported from old Stage8 race branch with host regression including millis rollover. |
 | CMD38 busy while writes/status/owners are active | `tuya_low_power_v0.cpp` with service preflight in XR806 controller | Fail-closed, no synthetic HC32 CMD12/CMD38 ACK. |
 | PM admission and concurrent veto | `xr806/lowpower_policy.h`, `standby_controller.cpp`, `standby_async_epoch.h` | Newer monotonic abort-epoch scheme from Stage7d supersedes old `snapshot()`-only variant. Hardware IRQ/PM atomicity still requires board tests. |
-| WLAN/Native API/mDNS reversible preflight | `wifi_component.*`, `api_server.*`, `mdns.cpp`, `standby_network_lifecycle.h` | Epoch-aware async mDNS callback protection; do not substitute older lifecycle revisions. |
+| WLAN/Native API/mDNS reversible preflight | `xr806/wifi_standby.*` (seit 2026-11-09, vorher `xr806/wifi_component.*`), `api_server.*`, `mdns/mdns_xr806.cpp`, `standby_network_lifecycle.h` | Epoch-aware async mDNS callback protection; do not substitute older lifecycle revisions. |
 | OTA suspend/recovery | `xr806/standby_ota_guard.h` | **Intentionally vetoes PM while OTA transport lifecycle is unproven**, including listener drain and flash-write ownership; complete reversible OTA listener and all backend handling before lifting veto. |
 | Hardware validation | XR806-SDK pinned cross-build workflows | Host and cross-build successes do not demonstrate real wake lines, UART pulse shape, current draw, safe OTA resume or interrupt priority. |
 
