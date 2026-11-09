@@ -191,9 +191,11 @@ void Tuya::dump_config() {
                   this->reset_pin_reported_);
   }
   LOG_PIN("  Status Pin: ", this->status_pin_);
+  const char *product_text = this->protocol_ == TuyaProtocol::LOW_POWER_V0
+                                 ? this->lp_product_text_.data()
+                                 : (this->product_ ? this->product_.get() : LOG_STR_LITERAL(""));
   ESP_LOGCONFIG(TAG, "  Product: '%s'",
-                this->product_invalid_ ? LOG_STR_LITERAL(R"({"p":"INVALID"})")
-                                       : (this->product_ ? this->product_.get() : LOG_STR_LITERAL("")));
+                this->product_invalid_ ? LOG_STR_LITERAL(R"({"p":"INVALID"})") : product_text);
 #ifdef USE_TIME
   if (this->time_id_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Force time sync: %s", YESNO(this->force_time_sync_));
