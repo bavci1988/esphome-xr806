@@ -76,6 +76,15 @@ bool XR806StandbyController::prepare_service_owners() {
     return false;
   }
 
+  // Side-effect-free veto pass: no active connection/OTA transfer/WLAN
+  // association may be sacrificed merely because the MCU asked CMD38.
+  for (size_t i = 0; i < SERVICE_COUNT; ++i) {
+    if (auto *owner = this->service_owners_[i]; owner != nullptr && !owner->can_pause_for_standby()) {
+      this->cancel_service_owners();
+      return false;
+    }
+  }
+
   // Network stack teardown is strictly API -> OTA -> mDNS -> WLAN.
   // WLAN may not power down until higher-level listeners are drained.
   for (size_t i = 0; i < SERVICE_COUNT; ++i) {
