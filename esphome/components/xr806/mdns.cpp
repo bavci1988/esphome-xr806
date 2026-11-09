@@ -275,8 +275,7 @@ void MDNSComponent::standby_preflight(bool requested) {
 }
 
 bool MDNSComponent::prepare_for_standby() {
-  return backend().suspend_requested.load(std::memory_order_acquire) &&
-         backend().suspended.load(std::memory_order_acquire);
+  return backend().suspend_epoch.requested() && backend().suspended.load(std::memory_order_acquire);
 }
 
 void MDNSComponent::standby_cancelled() { this->standby_preflight(false); }
