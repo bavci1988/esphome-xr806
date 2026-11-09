@@ -579,9 +579,16 @@ def _validate_xr806(config: ConfigType) -> ConfigType:
     if not CORE.is_xr806:
         return config
     if CONF_AP in config:
-        raise cv.Invalid(
-            "The access point is not supported on XR806 yet", path=[CONF_AP]
-        )
+        if config[CONF_AP][CONF_AP_MODE] != WIFI_AP_MODE_FALLBACK:
+            raise cv.Invalid(
+                "XR806 supports fallback SoftAP only (one WLAN interface at a time)",
+                path=[CONF_AP, CONF_AP_MODE],
+            )
+        if CONF_MANUAL_IP in config[CONF_AP]:
+            raise cv.Invalid(
+                "XR806 SoftAP uses the vendor's static DHCP subnet; manual_ip is not supported",
+                path=[CONF_AP, CONF_MANUAL_IP],
+            )
     if CONF_MANUAL_IP in config or any(
         CONF_MANUAL_IP in network for network in config.get(CONF_NETWORKS, [])
     ):
@@ -922,7 +929,7 @@ async def to_code(config):
         cg.add_define("USE_WIFI_AP")
         # The LN882H radio cannot run the AP and STA together; the fallback AP
         # takes turns with the networks instead.
-        if CORE.is_ln882x:
+        if CORE.is_ln882x or CORE.is_xr806:
             cg.add_define("USE_WIFI_AP_EXCLUSIVE")
         # The Pico W driver drops the AP station events; wifi_component_pico_w.cpp counts them
         if CORE.is_rp2:
