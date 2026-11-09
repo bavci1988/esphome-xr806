@@ -569,9 +569,15 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       if (len != 1 || data[0] != 0)
         return;
       // Never confuse a repeated sleep request with a completion ACK.
-      if (this->lp_standby_.requested() || this->lp_cmd38_pending_ ||
-          static_cast<int32_t>(millis() - this->lp_cmd38_cooldown_until_) < 0) {
+      if (this->lp_cmd38_pending_) {
+        // The previous request is still pending. Send exactly one busy
+        // response; never replay a second CMD38 ACK for the same transaction.
         this->cancel_low_power_preflight_(true);
+        this->lp_cmd38_cooldown_until_ = millis() + 500;
+        return;
+      }
+      if (this->lp_standby_.requested() ||
+          static_cast<int32_t>(millis() - this->lp_cmd38_cooldown_until_) < 0) {
         this->cancel_low_power_standby_();
         this->send_low_power_direct_(0x38, {0x00, 0x01});
         return;
