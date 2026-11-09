@@ -87,9 +87,9 @@ void test_uart_ack_and_reports() {
 }
 
 void test_wake_and_owner_interleavings() {
-  constexpr std::array<uint32_t, 5> OWNER_BITS{Policy::UART_BUSY, Policy::NETWORK_BUSY, Policy::API_BUSY,
+  constexpr std::array<uint32_t, 5> owner_bits{Policy::UART_BUSY, Policy::NETWORK_BUSY, Policy::API_BUSY,
                                                Policy::MDNS_BUSY, Policy::OTA_BUSY};
-  for (uint32_t bit : OWNER_BITS) {
+  for (uint32_t bit : owner_bits) {
     Policy policy;
     release_all_owner_votes(policy);
     assert(policy.can_enter_standby());
