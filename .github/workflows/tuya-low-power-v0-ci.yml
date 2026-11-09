@@ -85,7 +85,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           candidates = [p for p in Path("tests/yaml/.esphome").rglob("defines.h")
-                        if "/xr806-ota-readonly-integration-ci/" in p.as_posix()]
+                        if "/xr806-ota-v0-ci/" in p.as_posix()]
           assert candidates, "read-only OTA+WiFi+Tuya fixture did not produce defines.h"
           flags = "\n".join(path.read_text() for path in candidates)
           for define in ("USE_XR806_OTA_RUNTIME_PROBE", "USE_WIFI", "USE_TUYA_LOW_POWER_V0"):
