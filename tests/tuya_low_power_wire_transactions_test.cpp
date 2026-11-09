@@ -14,6 +14,13 @@ int main() {
   assert(!t.complete(0x09, 2));  // malformed ACK
   assert(!t.complete(0x02, 0));  // wrong command code
   assert(t.active() && !t.expire(1599));
+  assert(!t.overdue(1599));
+  assert(t.overdue(1600));  // Frame delivered at deadline before queue sweep.
+  assert(t.accepts(0x09, 0));  // Type matches, but RX MUST reject overdue ACK.
+  assert(t.expire(1600));
+  assert(t.faulted() && !t.complete(0x09, 0));
+  t.recovered();  // Explicitly model complete identity/status resync.
+  assert(t.begin(0x09, 1700));
   assert(t.complete(0x09, 0));
   assert(t.idle());
 
@@ -36,7 +43,9 @@ int main() {
   t.recovered();
   assert(t.idle());
   assert(t.begin(0x01, 0xfffffff0u));
+  assert(!t.overdue(0x20u));
   assert(!t.expire(0x20u));
+  assert(t.overdue(static_cast<uint32_t>(0xfffffff0u + 1500u)));
   assert(t.expire(static_cast<uint32_t>(0xfffffff0u + 1500u)));
   assert(t.faulted());
   return 0;
