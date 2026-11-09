@@ -1,6 +1,7 @@
 // Stage 7d: deterministic PM/MCU interleaving model using the SAME
 // dependency-free state machines and owner policy as the production code.
 // Tests no real lwIP socket, PM driver, GPIO voltage or OTA flash backend.
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cassert>
@@ -167,6 +168,35 @@ void test_wake_and_owner_interleavings() {
   assert(!handshake.force_cancel());  // No CMD12/01 yet: no compensation.
 }
 
+void test_exhaustive_owner_permutations() {
+  std::array<uint8_t, 5> events{{0, 1, 2, 3, 4}};
+  size_t permutations = 0;
+  do {
+    Policy p;
+    release_all_owner_votes(p);
+    assert(p.can_enter_standby());
+    const uint32_t observed = p.generation();
+    assert(p.begin_commit(observed));
+    for (uint8_t event : events) {
+      switch (event) {
+        case 0: p.set_uart_idle(false); p.set_uart_idle(true); break;
+        case 1: p.set_network_idle(false); p.set_network_idle(true); break;
+        case 2: p.set_api_idle(false); p.set_api_idle(true); break;
+        case 3: p.set_mdns_idle(false); p.set_mdns_idle(true); break;
+        case 4: p.set_ota_idle(false); p.set_ota_idle(true); break;
+        default: assert(false); break;
+      }
+      assert(!p.commit_valid(observed));  // Releasing work cannot resurrect the old claim.
+    }
+    p.end_commit();
+    assert(p.blockers() == 0);
+    assert(p.begin_commit(p.generation()));
+    p.end_commit();
+    ++permutations;
+  } while (std::next_permutation(events.begin(), events.end()));
+  assert(permutations == 120);
+}
+
 void test_quiet_window_and_expiration() {
   using State = esphome::xr806::XR806StandbyCoordinatorState;
   State state;
@@ -191,6 +221,7 @@ void test_quiet_window_and_expiration() {
 int main() {
   test_uart_ack_and_reports();
   test_wake_and_owner_interleavings();
+  test_exhaustive_owner_permutations();
   test_quiet_window_and_expiration();
   return 0;
 }
