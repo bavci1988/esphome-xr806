@@ -1,0 +1,7 @@
+# Read-only ROM/FDCM diagnostic. No ota: component, no writable flash backend.
+esphome:
+  name: xr806-ota-readonly-ci
+xr806:
+  board: wxu
+  lowpower: true
+  ota_diagnostic_readonly: true

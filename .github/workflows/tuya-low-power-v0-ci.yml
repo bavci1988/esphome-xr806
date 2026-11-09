@@ -2,7 +2,7 @@ name: Tuya MCU Low-Power v0 (host tests)
 
 on:
   push:
-    branches: [dev, feature/xr806-stage7d-race-hardening]
+    branches: [dev, feature/xr806-ota-reversible-standby]
     paths:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
@@ -14,8 +14,11 @@ on:
       - "esphome/components/mdns/mdns_xr806.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
       - "tests/yaml/tuya_low_power_*.yaml"
+      - "tests/yaml/xr806_ota_readonly_diagnostic.yaml"
+      - "tests/yaml/xr806_ota_readonly_wifi_v0.yaml"
   pull_request:
-    branches: [dev]
+    # PR #12 is stacked on the upstream refactor branch until #13 lands.
+    branches: [dev, claude/serene-franklin-jgpjuw]
     paths:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
@@ -75,6 +78,21 @@ jobs:
           python -m esphome compile tests/yaml/tuya_low_power_v0_xr806.yaml --only-generate
           python -m esphome config tests/yaml/tuya_low_power_v0_xr806_network_suspend.yaml
           python -m esphome compile tests/yaml/tuya_low_power_v0_xr806_network_suspend.yaml --only-generate
+          python -m esphome config tests/yaml/xr806_ota_readonly_diagnostic.yaml
+          python -m esphome compile tests/yaml/xr806_ota_readonly_diagnostic.yaml --only-generate
+          python -m esphome config tests/yaml/xr806_ota_readonly_wifi_v0.yaml
+          python -m esphome compile tests/yaml/xr806_ota_readonly_wifi_v0.yaml --only-generate
+          python - <<'PY'
+          from pathlib import Path
+          candidates = [p for p in Path("tests/yaml/.esphome").rglob("defines.h")
+                        if "/xr806-ota-v0-ci/" in p.as_posix()]
+          assert candidates, "read-only OTA+WiFi+Tuya fixture did not produce defines.h"
+          flags = "\n".join(path.read_text() for path in candidates)
+          for define in ("USE_XR806_OTA_RUNTIME_PROBE", "USE_WIFI", "USE_TUYA_LOW_POWER_V0"):
+              assert f"#define {define}" in flags, (define, candidates)
+          assert "#define USE_OTA\n" not in flags, "read-only diagnostics must not enable OTA uploads"
+          print("PASS OTA read-only diagnostics with standard wifi: and Tuya V0")
+          PY
           python -m esphome config tests/yaml/tuya_low_power_pb04_optin_codegen.yaml
           python -m esphome compile tests/yaml/tuya_low_power_pb04_optin_codegen.yaml --only-generate
       - name: Reject PB04 MCU wake without explicit verified wiring
