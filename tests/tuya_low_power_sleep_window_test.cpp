@@ -31,6 +31,19 @@ int main() {
   assert(!Window::valid_datapoint(102, 0, invalid_minute, 4));
   assert(!Window::valid_datapoint(102, 0, invalid_hour, 4));
   assert(!Window::valid_datapoint(102, 0, nullptr, 4));
+  uint8_t heating_schedule[32]{};
+  for (size_t i = 0; i < 8; ++i) {
+    heating_schedule[4 * i] = static_cast<uint8_t>(6 + i);
+    heating_schedule[4 * i + 1] = static_cast<uint8_t>(i * 5);
+    heating_schedule[4 * i + 2] = 0;  // 16-bit temperature BE: no arbitrary range assumption
+    heating_schedule[4 * i + 3] = 210;
+  }
+  assert(Window::valid_datapoint(107, 0, heating_schedule, 32));
+  assert(!Window::valid_datapoint(107, 0, heating_schedule, 4));
+  assert(!Window::valid_datapoint(107, 0, heating_schedule, 31));
+  assert(!Window::valid_datapoint(107, 1, heating_schedule, 32));
+  heating_schedule[9] = 60;
+  assert(!Window::valid_datapoint(107, 0, heating_schedule, 32));
 
   // All 1440 minutes of each of the 3 cases run in original-code emulation.
   for (int minute = 0; minute < 1440; ++minute) {
