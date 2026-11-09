@@ -1,0 +1,22 @@
+# tuya.refresh is a low_power_v0 action; a standard Tuya hub must reject it.
+esphome:
+  name: tuya-refresh-standard
+esp8266:
+  board: d1_mini
+
+uart:
+  id: tuya_uart
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 9600
+
+tuya:
+  id: tuya_mcu
+  uart_id: tuya_uart
+
+button:
+  - platform: template
+    name: Refresh
+    on_press:
+      - tuya.refresh:
+          tuya_id: tuya_mcu

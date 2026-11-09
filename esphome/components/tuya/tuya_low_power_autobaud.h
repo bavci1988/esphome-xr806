@@ -52,11 +52,9 @@ class TuyaLowPowerAutoBaud {
   // Call only for fully received frames; this independent check also makes
   // it possible to test rejection of bad checksums and wrong commands.
   bool accept_frame(const uint8_t *frame, size_t frame_len, uint32_t now) {
-    if (!searching_ || !waiting_ || frame == nullptr ||
-        static_cast<uint32_t>(now - sent_at_ms_) >= PROBE_TIMEOUT_MS)
+    if (!searching_ || !waiting_ || frame == nullptr || static_cast<uint32_t>(now - sent_at_ms_) >= PROBE_TIMEOUT_MS)
       return false;
-    if (frame_len < 9 || frame[0] != 0x55 || frame[1] != 0xAA ||
-        frame[2] != 0x00 || frame[3] != 0x01)
+    if (frame_len < 9 || frame[0] != 0x55 || frame[1] != 0xAA || frame[2] != 0x00 || frame[3] != 0x01)
       return false;
     const size_t payload_len = (static_cast<size_t>(frame[4]) << 8) | frame[5];
     if (payload_len > 512 || frame_len != payload_len + 7)

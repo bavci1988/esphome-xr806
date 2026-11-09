@@ -1093,6 +1093,7 @@ _filter_platform_sources = filter_source_files_from_platform(
             PlatformFramework.BK72XX_ARDUINO,
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
+            PlatformFramework.XR806_XRADIO,
         },
         "wake/wake_esp8266.cpp": {
             PlatformFramework.ESP8266_ARDUINO,

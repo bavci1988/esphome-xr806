@@ -10,7 +10,7 @@ extern void loop();
 #include "esphome/core/defines.h"
 
 #ifdef USE_XR806_LOWPOWER
-#include "esphome/components/xr806/lowpower_policy.h"
+#include "lowpower_policy.h"
 
 namespace esphome::xr806 {
 

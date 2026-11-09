@@ -72,10 +72,6 @@ def _pin_shared_only_with_deep_sleep(pin_num: int) -> bool:
 
 def _final_validate(config: ConfigType) -> None:
     use_interrupt = config[CONF_USE_INTERRUPT]
-
-    # XR806 GPIO interrupts are experimental and explicitly opt-in.
-    # Polling remains the default until hardware validation is complete.
-
     if not use_interrupt:
         return
 

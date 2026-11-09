@@ -52,7 +52,7 @@ xr806:
 
 Do **not** combine this trial with top-level `wifi:`, `api:`,
 `ota:`, `uart:`, `mqtt:`, `mdns:`, `network:` or XR806's
-`wifi:` / `wlan:` / `wlan_smoke:` suboptions.
+`wlan: network_suspend` option.
 The YAML validator rejects these combinations. Run on a spare WXU /
 isolated test setup; **do not flash the live TRV16 yet**. The
 UART0 pins may carry HC32 data on a production TRV; any SDK / logger

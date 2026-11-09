@@ -37,3 +37,10 @@ climate:
     current_temperature_datapoint: 4
     target_temperature_multiplier: 0.1
     current_temperature_multiplier: 0.1
+
+button:
+  - platform: template
+    name: TRV16 Refresh
+    on_press:
+      - tuya.refresh:
+          tuya_id: trv16_mcu

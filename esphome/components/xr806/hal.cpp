@@ -3,7 +3,7 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/main_task.h"
 
-// Haupttask wird später durch Application::setup() registriert.
+// Set by Application::setup() once the main loop task is known.
 extern "C" {
 TaskHandle_t esphome_main_task_handle = nullptr;
 }
@@ -11,11 +11,10 @@ TaskHandle_t esphome_main_task_handle = nullptr;
 namespace esphome {
 
 void arch_init() {
-  // OpenXR806 platform_init() wurde bereits aufgerufen.
-  // Keine erneute Hardware- oder Watchdog-Initialisierung.
+  // The vendor platform_init() has already set up the hardware and the watchdog.
 }
 
-// Vollständiger Systemneustart über den XR806-SDK-Watchdog
+// Full system restart through the vendor SDK watchdog.
 [[noreturn]] void arch_restart() {
   xr806_reboot();
   while (true) {
