@@ -100,10 +100,14 @@ class XR806LowPowerPolicy {
   // transition invalidates this claim. Hardware producers must ALSO take
   // their vendor SDK PM wake lock BEFORE starting asynchronous work.
   bool begin_commit(uint32_t observed_generation) {
+    if (commit_active_.load(std::memory_order_acquire))
+      return false;
+    // Clear stale abort *before* claiming the phase; clearing it after CAS
+    // could lose a concurrent producer's veto.
+    commit_aborted_.store(false, std::memory_order_release);
     bool expected = false;
     if (!commit_active_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
       return false;
-    commit_aborted_.store(false, std::memory_order_release);
     if (!this->commit_valid(observed_generation)) {
       this->end_commit();
       return false;
