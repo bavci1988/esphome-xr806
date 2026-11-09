@@ -232,11 +232,17 @@ void XR806UARTComponent::fill_rx_() {
   for (size_t i = 0;
        i < 512 && HAL_UART_IsRxReady(this->uart_);
        ++i) {
-    uint8_t byte = HAL_UART_GetRxData(this->uart_);
-
 #ifdef USE_XR806_LOWPOWER
-    saw_rx = true;
+    if (!saw_rx) {
+      // Claim the SDK PM wakelock before consuming even the first RX byte.
+      // The HC32 wake GPIO is independent and not proof that UART is idle.
+      this->note_uart_activity_();
+      if (this->tx_fault_)
+        return;
+      saw_rx = true;
+    }
 #endif
+    uint8_t byte = HAL_UART_GetRxData(this->uart_);
 
     if (this->rx_count_ == this->rx_buffer_.size()) {
       ++this->rx_overflows_;
@@ -245,9 +251,6 @@ void XR806UARTComponent::fill_rx_() {
       // A truncated packet is never synchronized. During physical baud
       // probing the wrong-rate byte stream can legitimately overflow RX.
       this->rx_head_ = this->rx_tail_ = this->rx_count_ = 0;
-#ifdef USE_XR806_LOWPOWER
-      this->note_uart_activity_();  // Sticky fault will keep PM blocked.
-#endif
       continue;
     }
 
@@ -257,10 +260,6 @@ void XR806UARTComponent::fill_rx_() {
     ++this->rx_count_;
   }
 
-#ifdef USE_XR806_LOWPOWER
-  if (saw_rx)
-    this->note_uart_activity_();
-#endif
 }
 
 void XR806UARTComponent::loop() {
