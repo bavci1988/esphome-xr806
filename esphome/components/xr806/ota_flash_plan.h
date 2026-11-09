@@ -34,8 +34,7 @@ enum class XR806OTAFlashPlanError : uint8_t {
 };
 
 constexpr bool xr806_ota_range_valid(XR806OTAFlashRange r, uint32_t flash_size) {
-  return r.length != 0 && r.offset < flash_size &&
-         static_cast<uint64_t>(r.offset) + r.length <= flash_size;
+  return r.length != 0 && r.offset < flash_size && static_cast<uint64_t>(r.offset) + r.length <= flash_size;
 }
 
 constexpr bool xr806_ota_overlap(XR806OTAFlashRange a, XR806OTAFlashRange b) {
@@ -44,19 +43,15 @@ constexpr bool xr806_ota_overlap(XR806OTAFlashRange a, XR806OTAFlashRange b) {
 }
 
 constexpr XR806OTAFlashPlanError xr806_validate_ota_flash_plan(const XR806OTAFlashPlan &p) {
-  constexpr uint32_t ERASE_SECTOR = 4096;
+  constexpr uint32_t erase_sector = 4096;
   if (p.flash_size == 0 || !xr806_ota_range_valid(p.running_image, p.flash_size) ||
-      !xr806_ota_range_valid(p.candidate_image, p.flash_size) ||
-      !xr806_ota_range_valid(p.ota_metadata, p.flash_size) ||
-      (p.candidate_image.offset % ERASE_SECTOR) != 0 ||
-      (p.candidate_image.length % ERASE_SECTOR) != 0 ||
-      (p.ota_metadata.offset % ERASE_SECTOR) != 0 ||
-      (p.ota_metadata.length % ERASE_SECTOR) != 0)
+      !xr806_ota_range_valid(p.candidate_image, p.flash_size) || !xr806_ota_range_valid(p.ota_metadata, p.flash_size) ||
+      (p.candidate_image.offset % erase_sector) != 0 || (p.candidate_image.length % erase_sector) != 0 ||
+      (p.ota_metadata.offset % erase_sector) != 0 || (p.ota_metadata.length % erase_sector) != 0)
     return XR806OTAFlashPlanError::INVALID_GEOMETRY;
   if (p.image_bytes == 0 || p.image_bytes > p.candidate_image.length)
     return XR806OTAFlashPlanError::INVALID_IMAGE_SIZE;
-  if (xr806_ota_overlap(p.running_image, p.candidate_image) ||
-      xr806_ota_overlap(p.running_image, p.ota_metadata))
+  if (xr806_ota_overlap(p.running_image, p.candidate_image) || xr806_ota_overlap(p.running_image, p.ota_metadata))
     return XR806OTAFlashPlanError::ACTIVE_IMAGE_OVERLAP;
   if (xr806_ota_overlap(p.candidate_image, p.ota_metadata))
     return XR806OTAFlashPlanError::METADATA_OVERLAP;

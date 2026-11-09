@@ -12,7 +12,14 @@ class XR806OTADryRunSession {
  public:
   enum class Phase : uint8_t { IDLE, RECEIVING, VERIFYING, COMPLETE, ABORTED, FAILED };
   enum class Failure : uint8_t {
-    NONE, NOT_ADMITTED, BAD_PHASE, INVALID_CHUNK, CAPACITY, TIMEOUT, IMAGE_VERIFY, POWER_LOSS,
+    NONE,
+    NOT_ADMITTED,
+    BAD_PHASE,
+    INVALID_CHUNK,
+    CAPACITY,
+    TIMEOUT,
+    IMAGE_VERIFY,
+    POWER_LOSS,
   };
   static constexpr uint32_t MAX_CHUNK = 8192;
   static constexpr uint32_t TRANSFER_TIMEOUT_MS = 105000;
@@ -20,8 +27,7 @@ class XR806OTADryRunSession {
   bool begin(const XR806OTARuntimeResult &plan, uint32_t intended_bytes, uint32_t now) {
     if (phase_ != Phase::IDLE)
       return fail_(Failure::BAD_PHASE);
-    if (plan.error != XR806OTARuntimeError::OK || intended_bytes == 0 ||
-        intended_bytes > plan.candidate.length)
+    if (plan.error != XR806OTARuntimeError::OK || intended_bytes == 0 || intended_bytes > plan.candidate.length)
       return fail_(Failure::NOT_ADMITTED);
     expected_bytes_ = intended_bytes;
     total_bytes_ = 0;
@@ -57,8 +63,7 @@ class XR806OTADryRunSession {
   }
 
   bool expired(uint32_t now) const {
-    return phase_ == Phase::RECEIVING &&
-           static_cast<uint32_t>(now - last_activity_ms_) >= TRANSFER_TIMEOUT_MS;
+    return phase_ == Phase::RECEIVING && static_cast<uint32_t>(now - last_activity_ms_) >= TRANSFER_TIMEOUT_MS;
   }
 
   void abort() {
