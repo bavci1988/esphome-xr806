@@ -12,9 +12,9 @@ namespace esphome::tuya {
 struct TuyaLowPowerProductInfo {
   std::string pid;
   std::string version;
-  int wake_gpio{-1};     // wk: logical WXU MCU-to-WXU wake source
-  int mcu_wake_gpio{-1}; // mwk: vendor-encoded WXU-to-MCU wake line
-  int sleep_mode{-1};    // sm: 1 standby request, 0 hibernation request
+  int wake_gpio{-1};      // wk: logical WXU MCU-to-WXU wake source
+  int mcu_wake_gpio{-1};  // mwk: vendor-encoded WXU-to-MCU wake line
+  int sleep_mode{-1};     // sm: 1 standby request, 0 hibernation request
   bool parsed{false};
 
   static bool find_key(const std::string &s, const char *key, size_t &value) {
@@ -72,17 +72,13 @@ struct TuyaLowPowerProductInfo {
     const std::string s(reinterpret_cast<const char *>(data), len);
     if (s.front() != '{' || s.back() != '}')
       return false;
-    parsed = get_string(s, "p", pid) && get_string(s, "v", version) &&
-             get_integer(s, "wk", wake_gpio) &&
-             get_integer(s, "mwk", mcu_wake_gpio) &&
-             get_integer(s, "sm", sleep_mode) &&
-             sleep_mode <= 1;
+    parsed = get_string(s, "p", pid) && get_string(s, "v", version) && get_integer(s, "wk", wake_gpio) &&
+             get_integer(s, "mwk", mcu_wake_gpio) && get_integer(s, "sm", sleep_mode) && sleep_mode <= 1;
     return parsed;
   }
 
   bool is_verified_trv16() const {
-    return parsed && pid == "ihedujbuli6hsx9b" &&
-           wake_gpio == 20 && mcu_wake_gpio == 28;
+    return parsed && pid == "ihedujbuli6hsx9b" && wake_gpio == 20 && mcu_wake_gpio == 28;
   }
 };
 

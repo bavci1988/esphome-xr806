@@ -31,9 +31,7 @@ class XR806UARTComponent final : public UARTComponent, public Component {
   void loop() override;
   void dump_config() override;
 
-  float get_setup_priority() const override {
-    return setup_priority::BUS;
-  }
+  float get_setup_priority() const override { return setup_priority::BUS; }
 
   bool reconfigure_baud_rate(uint32_t baud_rate) override;
   void set_baud_probe_mode(bool probing) override;
