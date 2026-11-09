@@ -12,6 +12,7 @@ class TuyaLowPowerSleepWindow {
  public:
   static constexpr uint8_t ENABLE_DP = 101;
   static constexpr uint8_t WINDOW_DP = 102;
+  static constexpr uint8_t HEATING_SCHEDULE_DP = 107;
   static constexpr uint8_t BOOLEAN_TYPE = 1;
   static constexpr uint8_t RAW_TYPE = 0;
 
@@ -23,6 +24,16 @@ class TuyaLowPowerSleepWindow {
     if (id == WINDOW_DP)
       return type == RAW_TYPE && size == 4 && value != nullptr && value[0] < 24 &&
              value[1] < 60 && value[2] < 24 && value[3] < 60;
+    if (id == HEATING_SCHEDULE_DP) {
+      // A distinct HC32 handler reads eight 4-byte heating-program slots
+      // without its own bounds checks: hour, minute, temperature BE16.
+      if (type != RAW_TYPE || size != 32 || value == nullptr)
+        return false;
+      for (size_t i = 0; i < 8; ++i) {
+        if (value[4 * i] >= 24 || value[4 * i + 1] >= 60)
+          return false;
+      }
+    }
     return true;  // Other DPs are validated by the generic packet parser.
   }
 
