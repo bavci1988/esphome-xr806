@@ -63,6 +63,7 @@ void Tuya::setup() {
         this->mark_failed();
       }
     }
+#endif  // USE_XR806_STANDBY_CONTROLLER
     // The original WXU probes CMD01 at each candidate baud, without a heartbeat.
     // With a fixed rate the existing queued CMD01 request is sufficient.
     if (this->auto_baud_) {
