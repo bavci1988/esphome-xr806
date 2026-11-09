@@ -17,6 +17,9 @@
 #ifdef USE_XR806_STANDBY_CONTROLLER
 #include "esphome/components/xr806/standby_controller.h"
 #endif
+#ifdef USE_XR806
+#include "esphome/components/xr806/guarded_wake_output.h"
+#endif
 
 #ifdef USE_TIME
 #include "esphome/components/time/real_time_clock.h"
@@ -123,6 +126,12 @@ class Tuya final : public Component, public uart::UARTDevice
   void set_protocol(TuyaProtocol protocol) { this->protocol_ = protocol; }
   void set_auto_baud(bool auto_baud) { this->auto_baud_ = auto_baud; }
   void set_mcu_wake_pin(InternalGPIOPin *pin) { this->mcu_wake_pin_ = pin; }
+#ifdef USE_XR806
+  void set_trv16_pb04_wake(bool active_high) {
+    this->trv16_pb04_requested_ = true;
+    this->trv16_pb04_active_high_ = active_high;
+  }
+#endif
   bool request_low_power_refresh();
   // Called by an actual XR806 PM bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
@@ -199,6 +208,11 @@ class Tuya final : public Component, public uart::UARTDevice
   TuyaProtocol protocol_{TuyaProtocol::STANDARD};
   bool auto_baud_{false};
   InternalGPIOPin *mcu_wake_pin_{nullptr};
+#ifdef USE_XR806
+  xr806::XR806GuardedWakePB04 trv16_pb04_{};
+  bool trv16_pb04_requested_{false};
+  bool trv16_pb04_active_high_{false};
+#endif
   TuyaLowPowerAutoBaud lp_autobaud_{};
   TuyaLowPowerV0Session lp_v0_{};
   TuyaLowPowerProductInfo lp_product_{};
