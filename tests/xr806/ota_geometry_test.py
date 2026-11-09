@@ -17,6 +17,13 @@ boot = struct.pack(
     0x001000FF, 0x00177000, 0x019005D8,
     0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF
 )
+# Complete the vendor's additive 16-bit AWIH checksums on the synthetic
+# section. These are integrity checks, NOT signatures.
+boot = bytearray(boot)
+data_size = struct.unpack_from("<I", boot, 12)[0]
+struct.pack_into("<H", boot, 10,
+                 (0xFFFF - module.awih_checksum16(flash[len(boot):len(boot) + data_size])) & 0xFFFF)
+struct.pack_into("<H", boot, 8, (0xFFFF - module.awih_checksum16(boot)) & 0xFFFF)
 flash[:len(boot)] = boot
 flash[0x177000:0x177008] = struct.pack("<IHH", 0xA55A5AA5, 124, 4)
 flash[0x177008] = 0xF8  # three committed FDCM records
@@ -37,6 +44,8 @@ assert report["evidence"]["proposed_compressed_slot_start"] == "0x178000"
 assert report["evidence"]["proposed_compressed_slot_end"] == "0x1dc000"
 assert report["fdcm_selection"]["record_count"] == 3
 assert report["fdcm_selection"]["latest_selected_seq"] == 0
+assert report["evidence"]["sections"][0]["header_checksum_valid"]
+assert report["evidence"]["sections"][0]["payload_checksum_valid"]
 assert [r["seq"] for r in report["fdcm_selection"]["records"]] == [0, 1, 0]
 assert not report["write_authorized"]
 
@@ -45,6 +54,28 @@ try:
     assert False, "short input must be rejected"
 except ValueError:
     pass
+bad_header = bytearray(image)
+bad_header[20] ^= 0x01
+try:
+    module.parse(bad_header)
+    assert False, "header checksum corruption must be rejected"
+except ValueError:
+    pass
+bad_body = bytearray(image)
+bad_body[module.HEADER.size + 10] ^= 0x01
+try:
+    module.parse(bad_body)
+    assert False, "body checksum corruption must be rejected"
+except ValueError:
+    pass
+bad_fdcm = bytearray(image)
+bad_fdcm[0x177000] ^= 0x01
+try:
+    module.parse(bad_fdcm)
+    assert False, "FDCM magic corruption must be rejected"
+except ValueError:
+    pass
+
 flash[0:4] = b"BAD!"
 try:
     module.parse(flash)
