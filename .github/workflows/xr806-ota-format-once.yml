@@ -34,6 +34,44 @@ jobs:
               if old not in original:
                   raise SystemExit("Missing expected local identifier: " + name)
               path.write_text(original.replace(old, new))
+          test_path = Path("tests/xr806/ota_geometry_test.py")
+          test_source = test_path.read_text()
+          # Unlike assert False, raising is not optimized out by python -O.
+          import re
+          test_source, count = re.subn(
+              r'^    assert False, "([^"]+)"
+          clang-format -i -style=file \
+            esphome/components/xr806/ota_dry_run_session.h \
+            esphome/components/xr806/ota_flash_plan.h \
+            esphome/components/xr806/ota_update_pm_gate.h \
+            esphome/components/xr806/ota_vendor_runtime_preflight.h \
+            esphome/components/xr806/ota_vendor_sdk_snapshot.h \
+            esphome/components/xr806/runtime.cpp \
+            tests/xr806/ota_update_preflight_test.cpp \
+            tests/xr806/ota_vendor_runtime_test.cpp
+          ruff format tests/xr806/ota_geometry_test.py tools/xr806/inspect_ota_geometry.py
+          ruff check --fix tests/xr806/ota_geometry_test.py tools/xr806/inspect_ota_geometry.py
+      - name: Commit formatted OTA-only files
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add esphome/components/xr806/ota_*.h esphome/components/xr806/runtime.cpp \
+            tests/xr806/ota_* tools/xr806/inspect_ota_geometry.py
+          if ! git diff --cached --quiet; then
+            git commit -m "style(xr806-ota): apply upstream clang-format, ruff and clang-tidy naming"
+            git push origin HEAD:refs/heads/feature/xr806-ota-reversible-standby
+          fi
+,
+              lambda match: '    raise AssertionError("' + match.group(1) + '")',
+              test_source,
+              flags=re.MULTILINE,
+          )
+          if count != 5:
+              raise SystemExit("Unexpected assert-false count in OTA fixtures: " + str(count))
+          test_path.write_text(test_source.removeprefix("#!/usr/bin/env python3\n"))
+          tool_path = Path("tools/xr806/inspect_ota_geometry.py")
+          tool_path.write_text(tool_path.read_text().removeprefix("#!/usr/bin/env python3\n"))
           PY
           clang-format -i -style=file \
             esphome/components/xr806/ota_dry_run_session.h \
