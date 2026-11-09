@@ -142,6 +142,7 @@ class Tuya final : public Component,
   // Called by an actual XR806 PM bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
 #ifdef USE_XR806_STANDBY_CONTROLLER
+  bool owns_uart() const override { return true; }
   bool prepare_for_standby() override;
   void standby_cancelled() override;
   void standby_resumed(const xr806::XR806StandbyResume &event) override;
