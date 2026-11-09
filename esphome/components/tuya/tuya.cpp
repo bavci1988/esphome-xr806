@@ -98,12 +98,19 @@ void Tuya::loop() {
       this->cancel_low_power_standby_();
     }
 #endif
-    if (this->parent_ != nullptr && !this->parent_->is_connected()) {
-      this->lp_standby_.transport_fault();
+    if (this->parent_ == nullptr || !this->parent_->is_connected()) {
+      if (!this->lp_standby_.recovery_required()) {
+        this->lp_standby_.transport_fault();
+        this->lp_v0_.command_timeout();
+        this->lp_network_status_ = 0xFF;
+        ESP_LOGE(TAG, "XR806 UART unhealthy: MCU transactions cancelled, standby blocked until recovery");
+      }
 #ifdef USE_XR806_STANDBY_CONTROLLER
       if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr)
         controller->request_standby(false);
 #endif
+      this->update_low_power_sleep_lock_();
+      return;  // No further CMD09 or autobaud probes on a failed transport.
     }
     if (this->auto_baud_) {
       if (this->lp_autobaud_.searching())
@@ -219,6 +226,8 @@ bool Tuya::validate_message_() {
   const uint8_t calc_checksum = sum_bytes(data, 6 + length);
 
   if (rx_checksum != calc_checksum) {
+    if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
+      this->cancel_low_power_standby_();
     ESP_LOGW(TAG, "Tuya Received invalid message checksum %02X!=%02X", rx_checksum, calc_checksum);
     return false;
   }
