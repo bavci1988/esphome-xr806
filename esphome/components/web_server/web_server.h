@@ -607,7 +607,7 @@ class WebServer final : public Component, public AsyncWebHandler {
   }
 
   web_server_base::WebServerBase *base_;
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
   AsyncEventSource events_{StringRef::from_lit("/events"), this};
 #elif USE_ARDUINO
   DeferredUpdateEventSourceList events_;
