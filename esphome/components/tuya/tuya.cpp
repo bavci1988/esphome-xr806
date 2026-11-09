@@ -74,6 +74,11 @@ void Tuya::setup() {
     // The original WXU probes CMD01 at each candidate baud, without a heartbeat.
     // With a fixed rate the existing queued CMD01 request is sufficient.
     if (this->auto_baud_) {
+#ifdef USE_XR806
+      // A wrong candidate rate produces expected LSR framing errors. The
+      // physical UART driver must not latch a permanent fault during probes.
+      this->parent_->set_baud_probe_mode(true);
+#endif
       this->lp_autobaud_.start(this->parent_->get_baud_rate());
     } else {
       this->send_low_power_product_query_(false);
@@ -275,6 +280,11 @@ void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buff
     // independent so bad/wrong frames cannot unlock the boot state machine.
     if (!this->lp_autobaud_.accept_frame(this->rx_message_.data(), this->rx_message_.size(), millis()))
       return;
+#ifdef USE_XR806
+    // The accepted CMD01 packet was checksum-validated and matches this rate.
+    // From now on, any hardware framing/overrun error is a real sticky fault.
+    this->parent_->set_baud_probe_mode(false);
+#endif
     ESP_LOGI(TAG, "Tuya low_power_v0 baud locked: %u", static_cast<unsigned>(this->lp_autobaud_.baud()));
   }
 
