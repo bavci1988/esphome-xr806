@@ -1,7 +1,5 @@
-# XR806 OTA transport integration fixture: image writes must remain fail-closed.
-# This is for SDK cross-link testing, not a firmware upgrade test.
 esphome:
-  name: xr806-ota-noerase-ci
+  name: xr806-ota
 xr806:
   board: wxu
   lowpower: true

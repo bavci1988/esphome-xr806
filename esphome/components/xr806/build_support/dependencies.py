@@ -122,7 +122,6 @@ def ensure_dependency(name: str) -> Path:
 
     parent.mkdir(parents=True, exist_ok=True)
 
-    # XR806_DEPENDENCY_LOCK_V1
     # A permanent lock file coordinates independent build processes.
     # Do not unlink this file: waiters may still hold its inode.
     lock_path = parent / ".download.lock"
@@ -208,12 +207,3 @@ def resolve_dependencies() -> tuple[Path, Path]:
     arduinojson = ensure_dependency("arduinojson")
 
     return sdk, arduinojson / "src"
-
-
-if __name__ == "__main__":
-    sdk, arduinojson = resolve_dependencies()
-
-    print()
-    print("XR806 SDK:", sdk)
-    print("ArduinoJson:", arduinojson)
-    print("All dependencies verified.")

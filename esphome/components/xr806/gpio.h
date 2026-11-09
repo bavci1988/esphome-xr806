@@ -29,8 +29,6 @@ class XR806GPIOPin final : public GPIOPin {
 
   void detach_interrupt() const;
 
-  // XR806_IRQ_FALLBACK_V1
-
   template<typename T> void attach_interrupt(void (*func)(T *), T *arg, gpio::InterruptType type) const {
     this->attach_interrupt_(reinterpret_cast<void (*)(void *)>(func), arg, type);
   }

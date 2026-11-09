@@ -1,5 +1,7 @@
 """Native ESPHome platform for the Allwinner/XRadio XR806 SoC."""
 
+from pathlib import Path
+
 from esphome import final_validate as fv
 import esphome.codegen as cg
 from esphome.components.const import CONF_ENABLED
@@ -13,12 +15,14 @@ from esphome.const import (
     Framework,
     ThreadModel,
 )
-from esphome.core import CORE
+from esphome.core import CORE, EsphomeError
 from esphome.types import ConfigType
 
-CODEOWNERS = []
+CODEOWNERS = ["@bavci1988"]
 DOMAIN = "xr806"
 IS_TARGET_PLATFORM = True
+
+OTA_IMAGE_NAME = "firmware.ota.bin"
 
 CONF_WLAN = "wlan"
 CONF_NETWORK_SUSPEND = "network_suspend"
@@ -101,7 +105,7 @@ STANDBY_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 
 
-def _update_core_data(config):
+def _update_core_data(config: ConfigType) -> None:
     if config[CONF_WLAN][CONF_NETWORK_SUSPEND] and CONF_STANDBY not in config:
         raise cv.Invalid(
             "xr806.wlan.network_suspend requires xr806.standby and full PM gating"
@@ -139,7 +143,6 @@ def _update_core_data(config):
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
-            # XR806_LOWPOWER_FLAG_V1
             cv.Optional("lowpower", default=False): cv.boolean,
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
             cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
@@ -180,11 +183,11 @@ def _final_validate_uart(config: ConfigType) -> ConfigType:
 FINAL_VALIDATE_SCHEMA = _final_validate_uart
 
 
-async def to_code(config):
+async def to_code(config: ConfigType) -> None:
     if config[CONF_OTA_DIAGNOSTIC_READONLY]:
         # ROM/FDCM read-only snapshot: does not enable ESPHome OTA.
         cg.add_define("USE_XR806_OTA_RUNTIME_PROBE")
-    # XR806_LOWPOWER_FLAG_V1: activate future XR806 PM policy
+    # Activate future XR806 PM policy
     if config["lowpower"]:
         cg.add_define("USE_XR806_LOWPOWER")
     if CONF_STANDBY in config:
@@ -285,14 +288,10 @@ async def to_code(config):
             await cg.register_component(standby_wlan, {})
 
 
-def run_compile(args, config) -> bool:
+def run_compile(args: object, config: ConfigType) -> bool:
     """Build an XR806 AWIH image using the XRadio vendor SDK."""
-    import filecmp
-    from pathlib import Path
     import shutil
     import subprocess
-
-    from esphome.core import EsphomeError
 
     from .build_support.dependencies import DEPENDENCIES, resolve_dependencies
     from .build_support.noise_build import prepare_noise_build
@@ -305,7 +304,6 @@ def run_compile(args, config) -> bool:
     obj = xr_build / "obj"
     fw_dir = xr_build / "firmware"
 
-    # XR806_AUTO_DEPENDENCIES_V1
     # Resolve pinned Git dependencies from the local cache.
     try:
         sdk_cache, arduinojson_src = resolve_dependencies()
@@ -374,8 +372,6 @@ def run_compile(args, config) -> bool:
     variables = {
         "XR806_REPO_ROOT": str(repo_root),
         "XR806_ARDUINOJSON_SRC": str(arduinojson_src),
-        "XR806_SKIP_CODEGEN": "1",
-        "XR806_YAML": str(CORE.config_path),
         "XR806_SRC": str(source),
         "XR806_OBJDIR": str(obj),
         "XR806_ESPHOME_MAIN": str(obj / "sdk_main_esphome.o"),
@@ -385,7 +381,7 @@ def run_compile(args, config) -> bool:
         "XR806_AWIH": str(image),
     }
 
-    # XR806_NOISE_INTEGRATED_V1: plain esphome compile owns crypto builds.
+    # Plain esphome compile owns crypto builds.
     import re
 
     defines = (source / "esphome/core/defines.h").read_text()
@@ -426,58 +422,47 @@ def run_compile(args, config) -> bool:
         if firmware.read(4) != b"AWIH":
             raise EsphomeError("Invalid XR806 AWIH firmware header")
 
+    from .build_support.ota_image import make_ota_image, stamp_boot_header
+
+    try:
+        firmware = stamp_boot_header(
+            image.read_bytes(),
+            Path(variables["XR806_IMAGE_CFG"]).read_text(encoding="utf-8"),
+        )
+    except (OSError, ValueError) as err:
+        raise EsphomeError(f"XR806 BOOT header: {err}") from err
+
     destination = CORE.firmware_bin
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if not destination.is_file() or destination.read_bytes() != firmware:
+        destination.write_bytes(firmware)
+    print(f"[XR806] Firmware: {destination}", flush=True)
 
-    if not destination.is_file() or not filecmp.cmp(image, destination, shallow=False):
-        shutil.copy2(image, destination)
-
-    print(f"[XR806] AWIH firmware: {image}", flush=True)
-    print(f"[XR806] ESPHome firmware: {destination}", flush=True)
-
-    # Part VI: produce a separate bootloader-compatible XRadio XZ update.
-    # The normal AWIH firmware.bin stays intact for recovery/serial flashing.
-    # Never expose a stale OTA package when an updated image no longer fits.
+    # The network update file: the APP sections compressed for the bootloader.
+    # firmware.bin stays the full image for a wired flash.
+    ota_output = destination.with_name(OTA_IMAGE_NAME)
+    ota_output.unlink(missing_ok=True)
     if "ota" in CORE.config:
-        import sys
-
-        ota_output = destination.with_name("firmware.ota.bin")
-        ota_output.unlink(missing_ok=True)
-        packer = repo_root / "tools/xr806/make_ota_xz.py"
-        pack = subprocess.run(
-            [sys.executable, str(packer), str(destination), "-o", str(ota_output)],
-            text=True,
-            capture_output=True,
-            check=False,
+        try:
+            ota, info = make_ota_image(firmware)
+        except ValueError as err:
+            raise EsphomeError(f"XR806 OTA image: {err}") from err
+        ota_output.write_bytes(ota)
+        print(
+            f"[XR806] OTA image: {ota_output} ({info.ota_bytes} of {info.slot_bytes} bytes)",
+            flush=True,
         )
-        if pack.returncode or not ota_output.is_file() or ota_output.stat().st_size == 0:
-            raise EsphomeError(
-                "XR806 OTA packager FAILED. Firmware build is not OTA-ready: "
-                + (pack.stderr.strip() or pack.stdout.strip() or "no usable OTA artifact")
-            )
-        print(f"[XR806] Native XZ OTA package: {ota_output}", flush=True)
 
     return True
 
 
-def ota_image(binary):
-    """Native network OTA must send the AWIH/XZ image, not full BOOT+APP AWIH."""
-    from pathlib import Path
-    from esphome.core import EsphomeError
-
-    binary = Path(binary)
-    if binary.name.endswith(".ota.bin"):
-        return binary
-    ota = binary.with_name("firmware.ota.bin")
+def ota_image(binary: Path) -> Path:
+    """Network updates send the compressed APP image, not the full firmware.bin."""
+    ota = Path(binary).with_name(OTA_IMAGE_NAME)
     if not ota.is_file():
-        raise EsphomeError(
-            "No XR806 AWIH/XZ OTA image exists for this build. "
-            "Check flash-size/compression output; do not send full firmware.bin over OTA."
-        )
+        raise EsphomeError(f"No XR806 OTA image was built: {ota}")
     return ota
 
 
-
-# XR806_GPIO_REGISTRATION_V1
 # Register the platform's native GPIO schema during platform import.
 from . import gpio as _xr806_gpio  # noqa: E402, F401  # pylint: disable=wrong-import-position

@@ -15,6 +15,8 @@ from esphome.const import (
     CONF_PULLDOWN,
     CONF_PULLUP,
 )
+from esphome.cpp_generator import MockObj
+from esphome.types import ConfigType
 
 from . import DOMAIN
 from .boards import WXU_GPIO_PADS
@@ -42,7 +44,7 @@ for _pin in range(2, 8):
 _AVAILABLE = set(WXU_GPIO_PADS.values())
 
 
-def validate_gpio_pin(value):
+def validate_gpio_pin(value: object) -> int:
     """Translate PAx/PBx into the XR806 internal GPIO encoding."""
     if not isinstance(value, str):
         raise cv.Invalid("XR806 pins must use PAx or PBx notation, for example PA20")
@@ -70,7 +72,7 @@ def validate_gpio_pin(value):
     return number + (32 if bank == "B" else 0)
 
 
-def validate_gpio_usage(config):
+def validate_gpio_usage(config: ConfigType) -> ConfigType:
     """Accept only GPIO modes implemented by the XR806 HAL."""
     mode = config[CONF_MODE]
 
@@ -104,7 +106,7 @@ XR806_PIN_SCHEMA = pins.gpio_base_schema(
 
 
 @pins.PIN_SCHEMA_REGISTRY.register(DOMAIN, XR806_PIN_SCHEMA)
-async def xr806_pin_to_code(config):
+async def xr806_pin_to_code(config: ConfigType) -> MockObj:
     """Generate XR806GPIOPin instances from ESPHome YAML."""
     var = cg.new_Pvariable(config[CONF_ID])
 

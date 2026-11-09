@@ -9,7 +9,7 @@ xr806:
     quiet_ms: 250
     min_awake_ms: 5000
     wake_pin: PA20
-    wake_edge: falling  # CI example only: actual electrical edge unverified
+    wake_edge: falling
     require_external_sync: true
 
 uart:

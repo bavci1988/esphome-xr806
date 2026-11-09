@@ -1,6 +1,5 @@
-# CI-only: intentionally fake SSID and wake edge; NOT live-device wiring proof.
 esphome:
-  name: xr806-network-suspend-ci
+  name: tuya-low-power-ota
 xr806:
   board: wxu
   lowpower: true
@@ -31,6 +30,5 @@ tuya:
   protocol: low_power_v0
   auto_baud: true
 
-# YAML transport is accepted; platform OTA backend still refuses all flash writes.
 ota:
   - platform: esphome
