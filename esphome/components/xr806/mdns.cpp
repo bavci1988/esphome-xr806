@@ -99,7 +99,6 @@ void refresh_mdns(void *context) {
   if (state->standby_pause_requested.load(std::memory_order_acquire)) {
     remove_netif(state);
     state->standby_paused.store(true, std::memory_order_release);
-    xr806::lowpower_policy().set_mdns_idle(true);
     return;
   }
 #endif
@@ -170,7 +169,6 @@ void pause_mdns(void *context) {
     return;
   }
   state->standby_paused.store(true, std::memory_order_release);
-  xr806::lowpower_policy().set_mdns_idle(true);
 }
 #endif
 
@@ -273,6 +271,9 @@ bool MDNSComponent::pause_for_standby() {
     return false;
   }
   if (state.standby_paused.load(std::memory_order_acquire)) {
+    // The TCP/IP callback publishes only an ACK. The main-loop owner owns
+    // the PM vote, so late callbacks can never release it after cancellation.
+    xr806::lowpower_policy().set_mdns_idle(true);
     return true;
   }
   if (!state.standby_pause_requested.exchange(true, std::memory_order_acq_rel)) {
