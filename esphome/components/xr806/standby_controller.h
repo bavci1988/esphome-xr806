@@ -38,6 +38,9 @@ enum class XR806StandbyService : uint8_t { API, OTA, MDNS, WLAN, COUNT };
 class XR806StandbyServiceOwner {
  public:
   virtual ~XR806StandbyServiceOwner() = default;
+  // Preflight is side-effect free: refuse connected clients/OTA/WLAN before
+  // any other service is torn down. Pause still rechecks the same conditions.
+  virtual bool can_pause_for_standby() const { return true; }
   virtual bool pause_for_standby() = 0;
   virtual void cancel_standby_pause() = 0;
   virtual void resume_after_standby() = 0;
