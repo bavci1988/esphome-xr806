@@ -2,12 +2,13 @@ name: Tuya MCU Low-Power v0 (host tests)
 
 on:
   push:
-    branches: [dev, feature/trv16-re-sleep-window-recovery]
+    branches: [dev, feature/xr806-standby-race-arbiter]
     paths:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
       - "tests/tuya_low_power_standby_state_test.cpp"
       - "tests/tuya_low_power_sleep_window_test.cpp"
+      - "tests/tuya_low_power_wire_transactions_test.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
       - "tests/yaml/tuya_low_power_*.yaml"
   pull_request:
@@ -44,7 +45,11 @@ jobs:
             tests/tuya_low_power_sleep_window_test.cpp \
             -o /tmp/tuya-low-power-window-test
           /tmp/tuya-low-power-window-test
-          echo "PASS Tuya MCU transaction, standby, daily sleep-window and CMD01 recovery states"
+          g++ -std=c++17 -Wall -Wextra -Werror -I. \
+            tests/tuya_low_power_wire_transactions_test.cpp \
+            -o /tmp/tuya-low-power-wire-transactions-test
+          /tmp/tuya-low-power-wire-transactions-test
+          echo "PASS Tuya MCU state, serialized ACK quarantine, and CMD38 interleaving"
 
   xr806-codegen:
     runs-on: ubuntu-24.04
