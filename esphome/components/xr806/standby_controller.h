@@ -63,6 +63,9 @@ class XR806StandbyController final : public Component {
   bool requires_external_sync() const { return this->external_sync_required_; }
 
   bool may_quiesce() const;
+  bool services_quiesced() const;
+  void request_preflight(bool requested);
+  bool preflight_requested() const { return this->preflight_requested_; }
   bool register_participant(XR806StandbyParticipant *participant);
   void request_standby(bool requested);
 
@@ -100,6 +103,9 @@ class XR806StandbyController final : public Component {
   bool require_uart_participant_{false};
   bool busy_{false};
   uint32_t request_since_ms_{0};
+  uint32_t preflight_since_ms_{0};
+  bool preflight_requested_{false};
+  static constexpr uint32_t HANDSHAKE_PREFLIGHT_TIMEOUT_MS = 2000;
   static constexpr uint32_t PREFLIGHT_TIMEOUT_MS = 10000;
 };
 
