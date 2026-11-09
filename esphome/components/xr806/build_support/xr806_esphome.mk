@@ -209,8 +209,9 @@ $(XR806_FW_DIR)/sys_sdd_40M.bin: $(ROOT_PATH)/bin/xradio_v3/sys_sdd_40M.bin
 >@mkdir -p $(@D)
 >install -m 0644 $< $@
 
-$(XR806_AWIH): $(XR806_FW_DIR)/app.bin $(XR806_FW_DIR)/app_xip.bin $(XR806_IMAGE_CFG) $(XR806_FW_DIR)/mkimage $(XR806_FW_DIR)/boot_40M.bin $(XR806_FW_DIR)/wlan_bl.bin $(XR806_FW_DIR)/wlan_fw.bin $(XR806_FW_DIR)/sys_sdd_40M.bin
+$(XR806_AWIH): $(XR806_FW_DIR)/app.bin $(XR806_FW_DIR)/app_xip.bin $(XR806_IMAGE_CFG) $(XR806_FW_DIR)/mkimage $(XR806_FW_DIR)/boot_40M.bin $(XR806_FW_DIR)/wlan_bl.bin $(XR806_FW_DIR)/wlan_fw.bin $(XR806_FW_DIR)/sys_sdd_40M.bin $(XR806_REPO_ROOT)/tools/xr806/stamp_ota_header.py
 >cd $(XR806_FW_DIR) && ./mkimage -c image.cfg -o $(notdir $@)
+>python3 $(XR806_REPO_ROOT)/tools/xr806/stamp_ota_header.py $@ --image-config $(XR806_IMAGE_CFG) -o $@
 
 # XR806_GPIO_BUILD_RULE_V2
 # Additional GPIO object, independent of existing object-list formatting.
