@@ -22,7 +22,8 @@ namespace esphome::xr806 {
 // WLAN is initialized by the vendor platform_init() before ESPHome setup().
 class XR806WiFiComponent final : public Component
 #ifdef USE_XR806_STANDBY_CONTROLLER
-    , public XR806StandbyParticipant
+    ,
+                                 public XR806StandbyParticipant
 #endif
 {
  public:
