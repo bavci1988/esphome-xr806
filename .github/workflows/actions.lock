@@ -94,6 +94,9 @@ workflows:
         - 'peter-evans/create-pull-request@v8.1.1'
     '.github/workflows/verify-lockfile.yml':
         - 'actions/checkout@v7.0.1'
+    '.github/workflows/tuya-low-power-v0-ci.yml':
+        - 'actions/checkout@v7.0.1'
+        - 'actions/setup-python@v7.1.0'
     '.github/workflows/xr806-lowpower-ci.yml':
         - 'actions/checkout@v7.0.1'
     '.github/workflows/xr806-noise-ci.yml':
