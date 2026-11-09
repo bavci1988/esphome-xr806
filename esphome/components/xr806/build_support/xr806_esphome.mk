@@ -164,11 +164,11 @@ $(XR806_SRC)/main.cpp $(XR806_DEFINES) &: $(XR806_YAML) $(XR806_PLATFORM_PY)
 endif
 
 # XR806_IMAGE_CONFIG_V1
-# Preprocess the vendor's AWIH image configuration using SDK definitions.
+# Preprocess the WXU 2MiB OTA-enabled AWIH image configuration.\n# Layout: boot+app <=1276K; FDCM 1276..1280K; XZ update 1280..2048K.
 
 XR806_IMAGE_CFG ?= $(XR806_FW_DIR)/image.cfg
 
-$(XR806_IMAGE_CFG): $(ROOT_PATH)/project/image_cfg/image.cfg
+$(XR806_IMAGE_CFG): $(ROOT_PATH)/project/demo/trv16_port/image/xr806/image.cfg
 >@mkdir -p $(@D)
 >$(CC) -E -P -CC $(CC_SYMBOLS) \
 >    -I$(ROOT_PATH)/include \
