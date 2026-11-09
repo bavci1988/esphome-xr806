@@ -116,8 +116,7 @@ class XR806LowPowerPolicy {
   }
 
   bool commit_valid(uint32_t observed_generation) const {
-    return commit_active_.load(std::memory_order_acquire) &&
-           !commit_aborted_.load(std::memory_order_acquire) &&
+    return commit_active_.load(std::memory_order_acquire) && !commit_aborted_.load(std::memory_order_acquire) &&
            generation_.load(std::memory_order_acquire) == observed_generation && blockers() == 0;
   }
 
