@@ -18,7 +18,7 @@ int main() {
   assert(n.owner_quiesced(Network::API, generation));
   assert(n.owner_quiesced(Network::MDNS, generation));
   assert(n.owner_quiesced(Network::OTA, generation));
-  assert(!n.ready(generation)); // cannot skip vendor WLAN suspend/PM lock.
+  assert(!n.ready(generation));  // cannot skip vendor WLAN suspend/PM lock.
   assert(n.owner_quiesced(Network::WLAN, generation));
   assert(n.ready(generation));
   n.activity(Network::API);
@@ -50,7 +50,7 @@ int main() {
   assert(p.commit_valid(epoch));
   assert(!p.begin_commit(epoch));  // One PM entrant only.
   p.set_api_idle(false);
-  assert(!p.commit_valid(epoch)); // Fresh client immediately vetoes.
+  assert(!p.commit_valid(epoch));  // Fresh client immediately vetoes.
   p.end_commit();
   p.set_api_idle(true);
   const uint32_t epoch3 = p.generation();
@@ -82,21 +82,30 @@ int main() {
     bool vetoed = false;
     for (int event : order) {
       switch (event) {
-        case 0: q.set_api_idle(true); break;
-        case 1: q.set_mdns_idle(true); break;
-        case 2: q.set_network_idle(true); break;
-        case 3: q.set_uart_idle(false); vetoed = true; break;
+        case 0:
+          q.set_api_idle(true);
+          break;
+        case 1:
+          q.set_mdns_idle(true);
+          break;
+        case 2:
+          q.set_network_idle(true);
+          break;
+        case 3:
+          q.set_uart_idle(false);
+          vetoed = true;
+          break;
         case 4: {
           const auto e = q.generation();
           if (q.begin_commit(e)) {
-            assert(!vetoed); // Traffic never permits a PM admission.
+            assert(!vetoed);  // Traffic never permits a PM admission.
             q.end_commit();
           }
           break;
         }
       }
     }
-    assert(!q.can_enter_standby()); // UART RX stays busy for remainder.
+    assert(!q.can_enter_standby());  // UART RX stays busy for remainder.
     ++permutations;
   } while (std::next_permutation(order.begin(), order.end()));
   assert(permutations == 120);
