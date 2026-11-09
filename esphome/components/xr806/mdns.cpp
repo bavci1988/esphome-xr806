@@ -11,9 +11,9 @@
 #include <atomic>
 #include <cstdint>
 #ifdef USE_XR806_STANDBY_CONTROLLER
-#include "esphome/components/xr806/lowpower_policy.h"
-#include "esphome/components/xr806/standby_async_epoch.h"
-#include "esphome/components/xr806/standby_controller.h"
+#include "lowpower_policy.h"
+#include "standby_async_epoch.h"
+#include "standby_controller.h"
 #endif
 #include <cstring>
 #include <string>
@@ -150,8 +150,9 @@ void refresh_mdns(void *context) {
 
   const err_t err = mdns_resp_add_netif(iface, state->hostname.c_str(), MDNS_TTL_SECONDS);
   if (err != ERR_OK) {
-    if ((state->failures++ % 30) == 0)
+    if ((state->failures++ % 30) == 0) {
       ESP_LOGW(TAG, "mDNS netif registration failed (%d)", static_cast<int>(err));
+    }
     return;
   }
 
@@ -174,8 +175,9 @@ void shutdown_mdns(void *context) { remove_netif(static_cast<Backend *>(context)
 
 void request_refresh() {
   const err_t err = tcpip_callback(refresh_mdns, &backend());
-  if (err != ERR_OK)
+  if (err != ERR_OK) {
     ESP_LOGW(TAG, "Cannot schedule mDNS refresh (%d)", static_cast<int>(err));
+  }
 }
 
 void register_xr806(MDNSComponent *component, StaticVector<MDNSService, MDNS_SERVICE_COUNT> &services) {
@@ -289,8 +291,9 @@ void MDNSComponent::standby_resumed(const xr806::XR806StandbyResume &event) {
 void MDNSComponent::on_shutdown() {
   this->cancel_interval("xr806_mdns_refresh");
   const err_t err = tcpip_callback(shutdown_mdns, &backend());
-  if (err != ERR_OK)
+  if (err != ERR_OK) {
     ESP_LOGW(TAG, "Cannot schedule mDNS shutdown (%d)", static_cast<int>(err));
+  }
 }
 
 }  // namespace esphome::mdns
