@@ -100,7 +100,7 @@ void CaptivePortal::start() {
 }
 
 void CaptivePortal::handleRequest(AsyncWebServerRequest *req) {
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
   StringRef url = req->url_to(url_buf);
 #else
