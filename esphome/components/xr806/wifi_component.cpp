@@ -172,6 +172,11 @@ void XR806WiFiComponent::standby_preflight(bool requested) {
       return;
     }
     this->network_suspending_ = true;
+    // The network bridge must not advertise a stale DHCP-connected state
+    // while the station has been intentionally disabled for this PM epoch.
+    this->connected_ = false;
+    this->ip_address_.clear();
+    this->rssi_valid_ = false;
   }
   const auto snapshot = read_xr806_network_snapshot(wlan_netif_get(WLAN_MODE_STA));
   if (snapshot.associated || snapshot.link_up)
