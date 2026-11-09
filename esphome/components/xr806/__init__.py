@@ -30,6 +30,7 @@ CONF_SOCKET_FACADE_PROBE = "socket_facade_probe"
 CONF_STANDBY_TRIAL = "standby_trial"
 CONF_STANDBY = "standby"
 CONF_OTA_GUARD_ID = "ota_guard_id"
+CONF_OTA_DIAGNOSTIC_READONLY = "ota_diagnostic_readonly"
 CONF_QUIET_MS = "quiet_ms"
 CONF_MIN_AWAKE_MS = "min_awake_ms"
 CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
@@ -206,6 +207,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_XR806_WLAN_SETTINGS): XR806_WLAN_SETTINGS_SCHEMA,
             cv.Optional(CONF_STANDBY_TRIAL): STANDBY_TRIAL_SCHEMA,
             cv.Optional(CONF_STANDBY): STANDBY_SCHEMA,
+            # Read SDK ROM image/FDCM geometry and log it once. No flash writer.
+            cv.Optional(CONF_OTA_DIAGNOSTIC_READONLY, default=False): cv.boolean,
         }
     ),
     _update_core_data,
@@ -213,6 +216,8 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
+    if config[CONF_OTA_DIAGNOSTIC_READONLY]:
+        cg.add_define("USE_XR806_OTA_RUNTIME_PROBE")
     # XR806_LOWPOWER_FLAG_V1: activate future XR806 PM policy
     if config["lowpower"]:
         cg.add_define("USE_XR806_LOWPOWER")
