@@ -8,7 +8,7 @@
 
 namespace esphome::web_server {
 
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
 ListEntitiesIterator::ListEntitiesIterator(const WebServer *ws, AsyncEventSource *es) : web_server_(ws), events_(es) {}
 #elif USE_ARDUINO
 ListEntitiesIterator::ListEntitiesIterator(const WebServer *ws, DeferredUpdateEventSource *es)
