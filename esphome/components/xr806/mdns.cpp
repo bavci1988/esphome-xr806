@@ -160,7 +160,15 @@ void refresh_mdns(void *context) {
 // call raw mDNS unregister. The polling owner checks the atomic ACK next loop.
 void pause_mdns(void *context) {
   auto *state = static_cast<Backend *>(context);
+  // A pause callback can run after main-loop cancellation. Never publish an
+  // idle vote for a cancelled generation or undo its resumed registration.
+  if (!state->standby_pause_requested.load(std::memory_order_acquire)) {
+    return;
+  }
   remove_netif(state);
+  if (!state->standby_pause_requested.load(std::memory_order_acquire)) {
+    return;
+  }
   state->standby_paused.store(true, std::memory_order_release);
   xr806::lowpower_policy().set_mdns_idle(true);
 }
