@@ -23,8 +23,8 @@ class TuyaLowPowerSleepWindow {
       return type == BOOLEAN_TYPE && size == 1 && value != nullptr && value[0] <= 1;
     }
     if (id == WINDOW_DP) {
-      return type == RAW_TYPE && size == 4 && value != nullptr && value[0] < 24 &&
-             value[1] < 60 && value[2] < 24 && value[3] < 60;
+      return type == RAW_TYPE && size == 4 && value != nullptr && value[0] < 24 && value[1] < 60 && value[2] < 24 &&
+             value[3] < 60;
     }
     if (id == HEATING_SCHEDULE_DP) {
       // A distinct HC32 handler reads eight 4-byte heating-program slots
@@ -43,13 +43,13 @@ class TuyaLowPowerSleepWindow {
 
   // Mirrors the emulated HC32 RTC service for host regression tests only.
   // The firmware NEVER evaluates this to fabricate a new product 'sm'.
-  static bool rtc_marker(bool previous, bool time_valid, bool enabled, uint8_t hour, uint8_t minute,
-                         uint8_t start_hour, uint8_t start_minute, uint8_t end_hour, uint8_t end_minute) {
+  static bool rtc_marker(bool previous, bool time_valid, bool enabled, uint8_t hour, uint8_t minute, uint8_t start_hour,
+                         uint8_t start_minute, uint8_t end_hour, uint8_t end_minute) {
     if (!time_valid) {
       return previous;
     }
-    if (!enabled || hour >= 24 || minute >= 60 || start_hour >= 24 || start_minute >= 60 ||
-        end_hour >= 24 || end_minute >= 60) {
+    if (!enabled || hour >= 24 || minute >= 60 || start_hour >= 24 || start_minute >= 60 || end_hour >= 24 ||
+        end_minute >= 60) {
       return false;
     }
     const unsigned now = static_cast<unsigned>(hour) * 60 + minute;
@@ -90,8 +90,8 @@ class TuyaLowPowerSleepWindow {
       enabled_ = new_enabled;
       seen_enable_ = true;
     } else if (id == WINDOW_DP) {
-      if (seen_window_ && (value[0] != hours_[0] || value[1] != hours_[1] ||
-                           value[2] != hours_[2] || value[3] != hours_[3])) {
+      if (seen_window_ &&
+          (value[0] != hours_[0] || value[1] != hours_[1] || value[2] != hours_[2] || value[3] != hours_[3])) {
         invalidate_product();
       }
       for (size_t i = 0; i < 4; ++i) {
