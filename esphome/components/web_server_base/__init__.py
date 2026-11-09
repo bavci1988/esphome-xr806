@@ -26,7 +26,9 @@ def AUTO_LOAD() -> list[str]:
 
 
 web_server_base_ns = cg.esphome_ns.namespace("web_server_base")
-WebServerBase = web_server_base_ns.class_("WebServerBase")
+# XR806 registers its socket-polled WebServerBase in the main application loop.
+# The other platform implementations are not registered as components.
+WebServerBase = web_server_base_ns.class_("WebServerBase", cg.Component)
 
 CONF_WEB_SERVER_BASE_ID = "web_server_base_id"
 
