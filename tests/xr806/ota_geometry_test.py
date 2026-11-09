@@ -18,7 +18,13 @@ boot = struct.pack(
     0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF
 )
 flash[:len(boot)] = boot
-flash[0x177000:0x177004] = bytes.fromhex("A55A5AA5")
+flash[0x177000:0x177008] = struct.pack("<IHH", 0xA55A5AA5, 124, 4)
+flash[0x177008] = 0xF8  # three committed FDCM records
+flash[0x177084:0x177090] = (
+    struct.pack("<HH", 0x5555, 0x9669)
+    + struct.pack("<HH", 0xAAAA, 0x9669)
+    + struct.pack("<HH", 0x5555, 0x9669)
+)
 image = bytearray(flash)
 report = module.parse(image)
 assert report["flash_bytes"] == 2097152
@@ -29,6 +35,9 @@ assert report["boot_header"]["image_max_kib"] == 1496
 assert report["boot_header"]["xz_max_kib"] == 400
 assert report["evidence"]["proposed_compressed_slot_start"] == "0x178000"
 assert report["evidence"]["proposed_compressed_slot_end"] == "0x1dc000"
+assert report["fdcm_selection"]["record_count"] == 3
+assert report["fdcm_selection"]["latest_selected_seq"] == 0
+assert [r["seq"] for r in report["fdcm_selection"]["records"]] == [0, 1, 0]
 assert not report["write_authorized"]
 
 try:
