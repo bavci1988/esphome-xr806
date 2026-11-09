@@ -102,6 +102,10 @@ void XR806StandbyController::loop() {
     return;
 
   auto &p = lowpower_policy();
+  // Services cannot release API/mDNS/WLAN votes if preflight runs only
+  // after all votes are already idle. No PM call is made here.
+  for (size_t i = 0; i < this->participant_count_; ++i)
+    this->participants_[i]->standby_preflight(p.standby_requested());
   const uint32_t blockers = p.blockers();
   constexpr uint32_t OWNED_BY_COORDINATOR =
       XR806LowPowerPolicy::SCHEDULER_BUSY | XR806LowPowerPolicy::WAKE_NOT_READY | XR806LowPowerPolicy::NOT_REQUESTED;
@@ -199,11 +203,14 @@ void XR806StandbyController::attempt_standby_() {
 
   p.set_wake_source_ready(true);
   p.set_scheduler_idle(true);
-  // The last software check is deliberately adjacent to the PM request.
-  // Platform/transport owners must ALSO hold SDK PM wakelocks while busy.
-  if (!p.can_enter_standby()) {
+  // The lock-free policy fence rejects any activity/vote transition during
+  // final admission. Physical producers still require SDK PM wake locks:
+  // this is NOT a replacement for atomic HAL/RTOS critical sections.
+  const uint32_t commit_epoch = p.generation();
+  if (!p.begin_commit(commit_epoch))
     goto abort;
-  }
+  if (!p.commit_valid(commit_epoch))
+    goto abort;
 
   HAL_Wakeup_SetEvent(0);
   pm_called = true;
@@ -214,6 +221,7 @@ void XR806StandbyController::attempt_standby_() {
   event = HAL_Wakeup_GetEvent();
 
 abort:
+  p.end_commit();
   p.set_scheduler_idle(false);
   p.set_wake_source_ready(false);
   p.request_standby(false);
