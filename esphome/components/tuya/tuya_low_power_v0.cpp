@@ -386,6 +386,13 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
     case 0x38: {  // MCU asks whether WXU can enter low-power.
       if (len != 1 || data[0] != 0)
         return;
+      // Repeated CMD38 during a previously accepted handoff may mean the
+      // HC32 did not see our ACK. Cancel, respond busy, and resynchronize.
+      if (this->lp_standby_.requested()) {
+        this->cancel_low_power_standby_();
+        this->send_low_power_direct_(0x38, {0x00, 0x01});
+        return;
+      }
       uint8_t flags = 0x01;  // Default: network/bus not safely suspended.
 #ifdef USE_XR806_STANDBY_CONTROLLER
       auto *controller = esphome::xr806::standby_controller();
