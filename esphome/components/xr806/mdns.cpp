@@ -99,8 +99,11 @@ void refresh_mdns(void *context) {
     // Removing the registered responder on the *lwIP thread* is the actual
     // completion event. A scheduled callback is not proof it has drained.
     remove_netif(state);
-    state->suspended.store(true, std::memory_order_release);
-    xr806::lowpower_policy().set_mdns_idle(true);
+    // A cancelled suspend can race this TCP/IP callback. Publish only the
+    // completion ACK here; the main-loop participant owns the PM vote.
+    if (state->suspend_requested.load(std::memory_order_acquire)) {
+      state->suspended.store(true, std::memory_order_release);
+    }
     return;
   }
   state->suspended.store(false, std::memory_order_release);
@@ -249,8 +252,14 @@ void MDNSComponent::standby_preflight(bool requested) {
   auto &state = backend();
   if (!state.configured)
     return;
-  if (state.suspend_requested.load(std::memory_order_acquire) == requested)
+  if (state.suspend_requested.load(std::memory_order_acquire) == requested) {
+    if (requested && state.suspended.load(std::memory_order_acquire)) {
+      // Acknowledged on the lwIP thread, but PM vote released only by the
+      // ESPHome loop. A delayed callback after cancellation cannot clear it.
+      xr806::lowpower_policy().set_mdns_idle(true);
+    }
     return;
+  }
   if (!requested) {
     // Busy must be asserted before scheduling a new multicast responder.
     xr806::lowpower_policy().set_mdns_idle(false);
