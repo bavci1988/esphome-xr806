@@ -1,5 +1,8 @@
 #pragma once
 #include "esphome/core/defines.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/standby_controller.h"
+#endif
 #ifdef USE_MDNS
 #include <string>
 #include "esphome/core/automation.h"
@@ -72,6 +75,9 @@ struct MDNSService {
 };
 
 class MDNSComponent final : public Component
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    , public xr806::XR806StandbyServiceOwner
+#endif
 #ifdef USE_MDNS_WIFI_LISTENER
     ,
                             public wifi::WiFiIPStateListener
@@ -136,6 +142,11 @@ class MDNSComponent final : public Component
 #endif
 
   void on_shutdown() override;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  bool pause_for_standby() override;
+  void cancel_standby_pause() override;
+  void resume_after_standby() override;
+#endif
 
 #ifdef USE_MDNS_DYNAMIC_TXT
   /// Add a dynamic TXT value and return pointer to it for use in MDNSTXTRecord
