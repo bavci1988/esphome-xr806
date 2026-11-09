@@ -147,9 +147,8 @@ bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
   const bool guard_elapsed = static_cast<int32_t>(millis() - this->lp_wake_guard_until_) >= 0;
   const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
   return this->lp_v0_.ready() && this->lp_wire_.idle() && this->lp_sleep_window_.standby_mode_stable() &&
-         !this->lp_product_retry_.active() &&
-         guard_elapsed && baud_locked && this->parent_ != nullptr && this->parent_->is_connected() &&
-         !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
+         !this->lp_product_retry_.active() && guard_elapsed && baud_locked && this->parent_ != nullptr &&
+         this->parent_->is_connected() && !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
          !this->expected_response_.has_value() && (in_cmd38_handler || this->rx_message_.empty());
 }
 
@@ -200,8 +199,8 @@ void Tuya::poll_low_power_sleep_preflight_() {
   const auto &policy = esphome::xr806::lowpower_policy();
   const bool ota_busy = (policy.blockers() & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
   if (controller == nullptr || !controller->preflight_requested() ||
-      static_cast<int32_t>(millis() - this->lp_cmd38_deadline_ms_) >= 0 ||
-      ota_busy || !controller->may_quiesce() || !this->low_power_ready_for_sleep_()) {
+      static_cast<int32_t>(millis() - this->lp_cmd38_deadline_ms_) >= 0 || ota_busy || !controller->may_quiesce() ||
+      !this->low_power_ready_for_sleep_()) {
     this->cancel_low_power_preflight_(true);
     this->lp_cmd38_cooldown_until_ = millis() + 500;
     return;
@@ -334,14 +333,13 @@ void Tuya::process_low_power_queue_() {
     const size_t dropped = this->command_queue_.size();
     this->command_queue_.clear();
     if (dropped > 0) {
-      ESP_LOGW(LP_TAG, "Discarded %u queued MCU commands after ambiguous ACK timeout",
-               static_cast<unsigned>(dropped));
+      ESP_LOGW(LP_TAG, "Discarded %u queued MCU commands after ambiguous ACK timeout", static_cast<unsigned>(dropped));
     }
   }
 
   if (this->lp_v0_.busy() || this->lp_wire_.active() || this->lp_wire_.faulted() ||
-      this->expected_response_.has_value() || !this->rx_message_.empty() ||
-      this->command_queue_.empty() || static_cast<uint32_t>(now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS)
+      this->expected_response_.has_value() || !this->rx_message_.empty() || this->command_queue_.empty() ||
+      static_cast<uint32_t>(now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS)
     return;
   if (!this->lp_v0_.has_product() && this->command_queue_.front().cmd != TuyaCommandType::PRODUCT_QUERY)
     return;
@@ -576,8 +574,7 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         this->lp_cmd38_cooldown_until_ = millis() + 500;
         return;
       }
-      if (this->lp_standby_.requested() ||
-          static_cast<int32_t>(millis() - this->lp_cmd38_cooldown_until_) < 0) {
+      if (this->lp_standby_.requested() || static_cast<int32_t>(millis() - this->lp_cmd38_cooldown_until_) < 0) {
         this->cancel_low_power_standby_();
         this->send_low_power_direct_(0x38, {0x00, 0x01});
         return;
@@ -587,8 +584,8 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       auto *controller = esphome::xr806::standby_controller();
       const auto blockers = esphome::xr806::lowpower_policy().blockers();
       const bool ota_veto = (blockers & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
-      const bool supported = controller != nullptr && this->lp_bridge_registered_ &&
-                             controller->has_wake_pin() && controller->requires_external_sync() &&
+      const bool supported = controller != nullptr && this->lp_bridge_registered_ && controller->has_wake_pin() &&
+                             controller->requires_external_sync() &&
                              controller->wake_pin() == this->lp_product_.wake_gpio &&
                              this->lp_product_.sleep_mode == 1 && controller->may_quiesce();
       const bool transport_ready = this->low_power_ready_for_sleep_(true) && this->available() == 0;
