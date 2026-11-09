@@ -1,4 +1,5 @@
 #pragma once
+#include "esphome/core/defines.h"
 #ifdef USE_XR806
 
 #include <cstdint>
