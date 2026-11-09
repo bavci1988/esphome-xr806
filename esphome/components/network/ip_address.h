@@ -9,7 +9,8 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/macros.h"
 
-#if defined(USE_ESP32) || defined(USE_LIBRETINY) || USE_ARDUINO_VERSION_CODE > VERSION_CODE(3, 0, 0)
+#if defined(USE_ESP32) || defined(USE_LIBRETINY) || defined(USE_XR806) || \
+    USE_ARDUINO_VERSION_CODE > VERSION_CODE(3, 0, 0)
 #include <lwip/ip_addr.h>
 #endif
 #if USE_ARDUINO

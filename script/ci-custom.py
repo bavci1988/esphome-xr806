@@ -928,12 +928,14 @@ def lint_relative_py_import(fname: Path, line, col, content):
         "esphome/components/libretiny/core.cpp",
         "esphome/components/host/core.cpp",
         "esphome/components/zephyr/core.cpp",
+        "esphome/components/xr806/hal.cpp",
         "esphome/components/esp32/helpers.cpp",
         "esphome/components/esp8266/helpers.cpp",
         "esphome/components/rp2/helpers.cpp",
         "esphome/components/libretiny/helpers.cpp",
         "esphome/components/host/helpers.cpp",
         "esphome/components/zephyr/helpers.cpp",
+        "esphome/components/xr806/helpers.cpp",
         "esphome/components/http_request/httplib.h",
         # Global extern "C" esp_now_* linker symbols + shared C wire header;
         # neither can live in a C++ namespace.

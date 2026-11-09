@@ -59,6 +59,7 @@ class Platform(StrEnum):
     # Scheduled for removal in 2027.7.0.
     RP2040 = "rp2"
     RTL87XX = "rtl87xx"
+    XR806 = "xr806"
 
 
 class Framework(StrEnum):
@@ -67,6 +68,7 @@ class Framework(StrEnum):
     ARDUINO = "arduino"
     ESP_IDF = "esp-idf"
     NATIVE = "host"
+    XRADIO = "xradio"
     ZEPHYR = "zephyr"
 
 
@@ -124,6 +126,9 @@ class PlatformFramework(Enum):
     # Host platform (native)
     HOST_NATIVE = (Platform.HOST, Framework.NATIVE)
 
+    # XRadio vendor SDK platforms
+    XR806_XRADIO = (Platform.XR806, Framework.XRADIO)
+
 
 # Maintain backward compatibility by reassigning after enum definition
 PLATFORM_BK72XX = Platform.BK72XX
@@ -138,6 +143,7 @@ PLATFORM_RP2 = Platform.RP2
 # scheduled for removal in 2027.7.0.
 PLATFORM_RP2040 = Platform.RP2040
 PLATFORM_RTL87XX = Platform.RTL87XX
+PLATFORM_XR806 = Platform.XR806
 
 
 BUNDLE_EXTENSION = ".esphomebundle.tar.gz"

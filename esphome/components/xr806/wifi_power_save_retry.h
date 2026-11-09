@@ -11,8 +11,7 @@ class XR806WiFiPowerSaveRetry {
   static constexpr uint32_t RETRY_INTERVAL_MS = 30000U;
 
   bool due(uint32_t now) const {
-    return !applied_ &&
-           (!attempted_ || static_cast<uint32_t>(now - last_attempt_ms_) >= RETRY_INTERVAL_MS);
+    return !applied_ && (!attempted_ || static_cast<uint32_t>(now - last_attempt_ms_) >= RETRY_INTERVAL_MS);
   }
 
   void record(uint32_t now, bool success) {
