@@ -817,6 +817,9 @@ void APIServer::on_camera_image(const std::shared_ptr<camera::CameraImage> &imag
 
 #ifdef USE_XR806_STANDBY_CONTROLLER
 bool APIServer::can_pause_for_standby() const {
+  if (this->standby_paused_) {
+    return true;
+  }
 #ifdef USE_API_OUTGOING_CONNECTION
   return false;
 #else
