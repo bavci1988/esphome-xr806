@@ -177,8 +177,23 @@ OTAResponseTypes XR806OTABackend::end() {
       return OTA_RESPONSE_ERROR_MD5_MISMATCH;
     }
   }
-  // ROM/SDK re-reads and checks the written AWIH data, then publishes FDCM.
+  // ota_push_finish() verifies flash bytes but DOES NOT select a boot image.
+  // The SDK requires an explicit FDCM write of sequence 1 after verification.
   if (ota_push_finish() != OTA_STATUS_OK) {
+    this->abort();
+    return OTA_RESPONSE_ERROR_UPDATE_END;
+  }
+  image_cfg_t next{};
+  next.seq = this->plan_.candidate_seq;
+  next.state = IMAGE_STATE_VERIFIED;
+  if (image_set_cfg(&next) != 0) {
+    ESP_LOGE(TAG, "OTA verified, but FDCM update to staging seq1 failed");
+    this->abort();
+    return OTA_RESPONSE_ERROR_UPDATE_END;
+  }
+  image_cfg_t confirmed{};
+  if (image_get_cfg(&confirmed) != 0 || confirmed.seq != next.seq || confirmed.state != next.state) {
+    ESP_LOGE(TAG, "OTA FDCM readback failed; next boot state is uncertain");
     this->abort();
     return OTA_RESPONSE_ERROR_UPDATE_END;
   }
@@ -199,8 +214,9 @@ void XR806OTABackend::stop_() {
     ota_deinit();
   }
   if (this->pm_held_) {
-    if (pm_wake_unlock(&ota_native_wakelock) != 0)
+    if (pm_wake_unlock(&ota_native_wakelock) != 0) {
       ESP_LOGE(TAG, "Native OTA wakelock release failed");
+    }
     this->pm_held_ = false;
   }
 }
