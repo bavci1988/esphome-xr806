@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <new>
 
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
@@ -398,21 +399,31 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         this->mark_failed();
         return;
       }
+      std::unique_ptr<char[]> raw_product(new (std::nothrow) char[len + 1]);
+      if (!raw_product) {
+        // Unlike the original WXU caller, keep initialization incomplete
+        // when the product descriptor cannot be allocated.
+        this->invalidate_low_power_mode_epoch_();
+        this->lp_v0_.command_timeout();
+        this->lp_product_retry_.begin(millis());
+        ESP_LOGE(LP_TAG, "CMD01 product descriptor allocation failed; bounded retry");
+        return;
+      }
+      std::memcpy(raw_product.get(), data, len);
+      raw_product[len] = '\0';
       const bool had_product = this->lp_v0_.has_product();
       this->lp_product_ = incoming;
       this->lp_product_retry_.success();
       this->lp_mode_requery_pending_ = false;
       this->lp_sleep_window_.product_validated();
       if (had_product) {
-        // The HC32 could have changed sm via its RTC and PA3 pulse, or reset.
-        // Require a NEW complete status series, not stale cached DP reports.
+        // HC32 RTC/DP101/DP102 may have changed the requested PM mode.
+        // Subsequent CMD01 never proves MCU status is still synchronized.
         this->lp_v0_.reset_status();
         this->lp_sleep_window_.reset_reports();
         this->lp_network_status_ = 0xFF;
       }
-      this->product_ = std::make_unique<char[]>(len + 1);
-      std::memcpy(this->product_.get(), data, len);
-      this->product_[len] = '\0';
+      this->product_ = std::move(raw_product);
       this->lp_v0_.product_received();
       this->init_state_ = TuyaInitState::INIT_DATAPOINT;
       ESP_LOGI(LP_TAG, "TRV16 PID %s version %s wk=%d mwk=%d sm=%d", this->lp_product_.pid.c_str(),
