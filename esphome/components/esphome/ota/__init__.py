@@ -325,7 +325,7 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(ESPHomeOTAComponent),
             cv.Optional(CONF_VERSION, default=2): cv.one_of(1, 2, int=True),
-            cv.SplitDefault(CONF_PORT, **DEFAULT_OTA_PORTS): cv.port,
+            cv.SplitDefault(CONF_PORT, **DEFAULT_OTA_PORTS, xr806=3232): cv.port,
             cv.Optional(CONF_ALLOW_PARTITION_ACCESS, default=False): cv.boolean,
             cv.Optional(CONF_PASSWORD): cv.sensitive(),
             cv.Optional(CONF_ENCRYPTION): _encryption_schema,
