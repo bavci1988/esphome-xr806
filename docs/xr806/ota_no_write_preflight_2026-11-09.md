@@ -63,3 +63,31 @@ The updated read-only `inspect_ota_geometry.py` decodes this selection with stri
 ## Safety note
 
 Host tests validate the admission math and PM lock state only. No working ESPHome OTA upgrade or hardware resume is claimed. Do not flash the only TRV16 with any of these experiments.
+
+
+## Stage B: read-only vendor runtime and simulated transfer (2026-11-09)
+
+- `ota_vendor_runtime_preflight.h` checks live image parameters, selected FDCM sequence, VERIFIED state, flash IDs, alignment, ranges, overflows and explicit image-format/recovery proofs. Even a successful result has `can_erase=false`.
+- `ota_vendor_sdk_snapshot.h` reads `image_get_ota_param()`, `image_get_running_seq()` and `image_get_cfg()` behind an explicit opt-in define. It never calls `image_set_cfg` or OTA push/flash erase/write.
+- `runtime.cpp` optionally logs these values with `xr806.ota_diagnostic_readonly: true` after platform initialization. The snapshot deliberately uses unknown flash size and upload size (zero); this is a diagnostic, not permission to erase.
+- `ota_dry_run_session.h` and `ota_vendor_runtime_test.cpp` simulate stream sizes, partial uploads, timeouts, checksum failure, power loss and cancellation. The simulator has no flash writer or boot-selection interface.
+- `inspect_ota_geometry.py` now verifies 16-bit AWIH header and payload checksums according to the vendor ROM; its synthetic fixture includes corruption tests. These checksums DO NOT authenticate firmware.
+
+Read-only bench YAML on an isolated spare WXU:
+
+```yaml
+xr806:
+  board: wxu
+  lowpower: true
+  ota_diagnostic_readonly: true
+```
+
+Do not configure `ota:` on XR806 at this stage: ESPHome lacks a real XR806 flash backend and continues to reject it. The optional diagnostics have not yet been tested on actual hardware; first cross-compile against the pinned XR806 SDK.
+
+### Why the writer remains disabled
+
+The vendor's `ota_push_start()` erases the inactive image slot IMMEDIATELY; with `CONFIG_OTA_POLICY_IMAGE_COMPRESSION` its length is `img_xz_max_size` in KiB. The vendor `ota_push_data()` expects the correct XRadio packaged update bytes. A generic ESPHome application `.bin` is not automatically interchangeable with AWIH/XZ. The FDCM VERIFIED bit and additive AWIH checksums do not prove verified rollback, bootloader trust or cryptographic authenticity. Hardware power-loss tests at erase, mid-stream, finish and image selection boundaries remain mandatory.
+
+### Parallel USE_TUYA_LOW_POWER_V0 work
+
+The separate `claude/serene-franklin-jgpjuw` branch gates the Tuya V0 setup/loop/driver through `USE_TUYA_LOW_POWER_V0`. Its changes also touch XR806 HAL, mDNS, network and build files. This OTA branch intentionally does not blindly merge those unrelated changes. The OTA PM update writer lock lives in the shared `ota::UpdateLock`, outside the Tuya protocol component. Future integration must run both Standard Tuya and low_power_v0 regression tests and real CMD38/network/OTA standby races.
