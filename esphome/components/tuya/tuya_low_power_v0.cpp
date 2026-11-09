@@ -560,52 +560,52 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
     case 0x38: {  // MCU asks whether WXU can enter low-power.
       if (len != 1 || data[0] != 0)
         return;
-      // Repeated CMD38 during a previously accepted handoff may mean the
-      // HC32 did not see our ACK. Cancel, respond busy, and resynchronize.
-      if (this->lp_standby_.requested()) {
+      // Never confuse a repeated sleep request with a completion ACK.
+      if (this->lp_standby_.requested() || this->lp_cmd38_pending_ ||
+          static_cast<int32_t>(millis() - this->lp_cmd38_cooldown_until_) < 0) {
+        this->cancel_low_power_preflight_(true);
         this->cancel_low_power_standby_();
         this->send_low_power_direct_(0x38, {0x00, 0x01});
         return;
       }
-      uint8_t flags = 0x01;  // Default: network/bus not safely suspended.
+      uint8_t flags = 0x01;  // Default is *busy*, not a provisional grant.
 #ifdef USE_XR806_STANDBY_CONTROLLER
       auto *controller = esphome::xr806::standby_controller();
       const auto blockers = esphome::xr806::lowpower_policy().blockers();
       const bool ota_veto = (blockers & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
-      // Connected API/WLAN/mDNS may be still active at CMD38 receive,
-      // but can be parked during the bounded *provisional* handoff only
-      // when all concrete owners advertise an audited lifecycle. Active
-      // OTA work and unregistered owners always veto.
-      const bool owner_veto = ota_veto || controller == nullptr || !controller->may_quiesce();
-      const bool wake_matches_mcu = controller != nullptr && controller->has_wake_pin() &&
-                                    controller->requires_external_sync() &&
-                                    controller->wake_pin() == this->lp_product_.wake_gpio;
-      const bool accepted =
-          wake_matches_mcu && this->lp_bridge_registered_ &&
-          this->lp_standby_.accept_request(this->lp_product_.sleep_mode == 1, this->low_power_ready_for_sleep_(true),
-                                           this->parent_ != nullptr && this->parent_->is_connected(), !owner_veto);
-      if (accepted) {
-        flags = 0x00;
-      } else if (ota_veto) {
-        flags |= 0x02;
+      const bool supported = controller != nullptr && this->lp_bridge_registered_ &&
+                             controller->has_wake_pin() && controller->requires_external_sync() &&
+                             controller->wake_pin() == this->lp_product_.wake_gpio &&
+                             this->lp_product_.sleep_mode == 1 && controller->may_quiesce();
+      const bool transport_ready = this->low_power_ready_for_sleep_(true) && this->available() == 0;
+      if (supported && !ota_veto && transport_ready) {
+        if (!controller->services_quiesced()) {
+          // Start *service* preparation without requesting CPU PM. Do not
+          // tell HC32 that WXU accepted sleep before every network owner
+          // has actually closed/drained its resources.
+          this->lp_cmd38_pending_ = true;
+          this->lp_cmd38_deadline_ms_ = millis() + 1800;
+          controller->request_preflight(true);
+          return;  // A bounded later busy/accept response will be sent.
+        }
+        const bool accepted = this->lp_standby_.accept_request(true, true, true, true);
+        if (accepted) {
+          this->send_low_power_direct_(0x38, {0x00, 0x00});
+          if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS)
+            controller->request_standby(true);
+          else
+            this->lp_standby_.transport_fault();
+          this->update_low_power_sleep_lock_();
+          return;
+        }
       }
+      if (ota_veto)
+        flags |= 0x02;
 #elif defined(USE_XR806_LOWPOWER)
       if (esphome::xr806::lowpower_policy().blockers() & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY)
         flags |= 0x02;
 #endif
       this->send_low_power_direct_(0x38, {0x00, flags});
-#ifdef USE_XR806_STANDBY_CONTROLLER
-      if (accepted) {
-        // CMD38/00 is only a provisional consent. Request the PM controller
-        // once the ACK is fully on the wire; it will still verify ALL votes.
-        if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
-          controller->request_standby(true);
-        } else {
-          this->lp_standby_.transport_fault();
-          this->update_low_power_sleep_lock_();
-        }
-      }
-#endif
       return;
     }
 
