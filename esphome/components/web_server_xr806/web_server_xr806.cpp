@@ -324,6 +324,7 @@ void AsyncWebServer::process_(Client &c) {
         break;
       }
       c.input.append(buf, static_cast<size_t>(n));
+      c.started = now;  // Timeout is an idle timer, not a total download budget.
       if (c.header_end == 0) {
         const size_t marker = c.input.find("\r\n\r\n");
         if (marker != std::string::npos) c.header_end = marker + 4;
@@ -363,6 +364,7 @@ void AsyncWebServer::process_(Client &c) {
     }
     if (n == 0) return;
     c.output_sent += static_cast<size_t>(n);
+    c.started = now;
   }
   const size_t body_size = c.response->get_content_size();
   const char *body_data = c.response->get_content_data();
@@ -376,6 +378,7 @@ void AsyncWebServer::process_(Client &c) {
     }
     if (n == 0) return;
     c.body_sent += static_cast<size_t>(n);
+    c.started = now;
   }
   c.socket.reset();
 }
