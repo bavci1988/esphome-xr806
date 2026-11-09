@@ -450,14 +450,12 @@ def run_compile(args, config) -> bool:
             capture_output=True,
             check=False,
         )
-        if pack.returncode:
-            print(
-                "[XR806] OTA package unavailable (no firmware write will be attempted): "
-                + (pack.stderr.strip() or pack.stdout.strip()),
-                flush=True,
+        if pack.returncode or not ota_output.is_file() or ota_output.stat().st_size == 0:
+            raise EsphomeError(
+                "XR806 OTA packager FAILED. Firmware build is not OTA-ready: "
+                + (pack.stderr.strip() or pack.stdout.strip() or "no usable OTA artifact")
             )
-        else:
-            print(f"[XR806] Native XZ OTA package: {ota_output}", flush=True)
+        print(f"[XR806] Native XZ OTA package: {ota_output}", flush=True)
 
     return True
 
