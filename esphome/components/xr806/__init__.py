@@ -1,8 +1,8 @@
 """Native ESPHome platform for the Allwinner/XRadio XR806 SoC."""
 
 import esphome.codegen as cg
-import esphome.config_validation as cv
 from esphome.components.const import CONF_ENABLED
+import esphome.config_validation as cv
 from esphome.const import (
     CONF_BOARD,
     KEY_CORE,
@@ -124,24 +124,14 @@ STANDBY_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(XR806StandbyController),
         cv.GenerateID(CONF_OTA_GUARD_ID): cv.declare_id(XR806OTAStandbyGuard),
         cv.Required(CONF_ENABLED): cv.boolean,
-        cv.Optional(CONF_WAKE_AFTER_MS, default=3000): cv.int_range(
-            min=500, max=60000
-        ),
-        cv.Optional(CONF_QUIET_MS, default=250): cv.int_range(
-            min=200, max=30000
-        ),
-        cv.Optional(CONF_MIN_AWAKE_MS, default=5000): cv.int_range(
-            min=1000, max=60000
-        ),
+        cv.Optional(CONF_WAKE_AFTER_MS, default=3000): cv.int_range(min=500, max=60000),
+        cv.Optional(CONF_QUIET_MS, default=250): cv.int_range(min=200, max=30000),
+        cv.Optional(CONF_MIN_AWAKE_MS, default=5000): cv.int_range(min=1000, max=60000),
         cv.Optional(CONF_WAKE_PIN): cv.one_of(
             "PA11", "PA12", "PA13", "PA19", "PA20", upper=True
         ),
-        cv.Optional(CONF_WAKE_EDGE): cv.one_of(
-            "falling", "rising", lower=True
-        ),
-        cv.Optional(
-            CONF_REQUIRE_EXTERNAL_SYNC, default=False
-        ): cv.boolean,
+        cv.Optional(CONF_WAKE_EDGE): cv.one_of("falling", "rising", lower=True),
+        cv.Optional(CONF_REQUIRE_EXTERNAL_SYNC, default=False): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -160,7 +150,10 @@ def _update_core_data(config):
             raise cv.Invalid(
                 "xr806.wifi.network_suspend requires xr806.standby and full PM gating"
             )
-        if config[CONF_XR806_WIFI][CONF_SOCKET_PROBE] or config[CONF_XR806_WIFI][CONF_SOCKET_FACADE_PROBE]:
+        if (
+            config[CONF_XR806_WIFI][CONF_SOCKET_PROBE]
+            or config[CONF_XR806_WIFI][CONF_SOCKET_FACADE_PROBE]
+        ):
             raise cv.Invalid(
                 "xr806.wifi.network_suspend cannot share ad-hoc socket probes"
             )
@@ -235,7 +228,9 @@ async def to_code(config):
         cg.add(controller.set_min_awake_ms(cfg[CONF_MIN_AWAKE_MS]))
         if CONF_WAKE_PIN in cfg:
             cg.add(controller.set_wake_pin(int(cfg[CONF_WAKE_PIN][2:])))
-        cg.add(controller.set_wake_falling(cfg.get(CONF_WAKE_EDGE, "falling") == "falling"))
+        cg.add(
+            controller.set_wake_falling(cfg.get(CONF_WAKE_EDGE, "falling") == "falling")
+        )
         # Transports which are absent can never have work in flight. Present
         # transports retain their initial busy vote until their own driver
         # explicitly votes idle; no hardcoded MCU or Tuya protocol assumption.
@@ -251,11 +246,7 @@ async def to_code(config):
         cg.add(controller.set_no_api("api" not in CORE.config))
         cg.add(controller.set_no_ota("ota" not in CORE.config))
         cg.add(controller.set_no_mdns("mdns" not in CORE.config))
-        cg.add(
-            controller.set_external_sync_required(
-                cfg[CONF_REQUIRE_EXTERNAL_SYNC]
-            )
-        )
+        cg.add(controller.set_external_sync_required(cfg[CONF_REQUIRE_EXTERNAL_SYNC]))
         cg.add(controller.set_require_uart_participant("uart" in CORE.config))
         await cg.register_component(controller, cfg)
         if "ota" in CORE.config:
