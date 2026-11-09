@@ -48,6 +48,32 @@ bool XR806StandbyController::register_participant(XR806StandbyParticipant *parti
   return true;
 }
 
+bool XR806StandbyController::acquire_service_wakelock_() {
+  if (!this->services_pm_wakelock_required_ || this->services_pm_wakelock_held_) {
+    return true;
+  }
+  if (pm_wake_lock(&this->services_pm_wakelock_) != 0) {
+    ESP_LOGE(TAG, "Cannot acquire native SDK network-owner PM wakelock");
+    this->mark_failed();
+    return false;
+  }
+  this->services_pm_wakelock_held_ = true;
+  return true;
+}
+
+bool XR806StandbyController::release_service_wakelock_() {
+  if (!this->services_pm_wakelock_held_) {
+    return !this->services_pm_wakelock_required_;
+  }
+  if (pm_wake_unlock(&this->services_pm_wakelock_) != 0) {
+    ESP_LOGE(TAG, "Cannot release native SDK network-owner PM wakelock");
+    this->mark_failed();
+    return false;
+  }
+  this->services_pm_wakelock_held_ = false;
+  return true;
+}
+
 bool XR806StandbyController::register_service_owner(XR806StandbyService service, XR806StandbyServiceOwner *owner) {
   const auto index = static_cast<size_t>(service);
   if (owner == nullptr || index >= SERVICE_COUNT || this->service_owners_[index] != nullptr || this->busy_ ||
@@ -102,12 +128,28 @@ bool XR806StandbyController::prepare_service_owners() {
     }
   }
 
+  constexpr uint32_t OWNER_BITS =
+      XR806LowPowerPolicy::NETWORK_BUSY | XR806LowPowerPolicy::API_BUSY |
+      XR806LowPowerPolicy::OTA_BUSY | XR806LowPowerPolicy::MDNS_BUSY;
+  const auto snapshot = lowpower_policy().snapshot();
+  if (!snapshot.stable || (snapshot.blockers & OWNER_BITS) != 0) {
+    return false;
+  }
+  // Release the native SDK lock only after EVERY owner has published its
+  // idle vote. UART still owns a separate PM wakelock until TX TEMT/RX idle.
+  if (!this->release_service_wakelock_()) {
+    this->cancel_service_owners();
+    return false;
+  }
   return this->services_.ready(true);
 }
 
 void XR806StandbyController::resume_service_owners_() {
   if (this->services_.active()) {
     return;
+  }
+  if (!this->acquire_service_wakelock_()) {
+    return;  // Permanent PM failure; never proceed with an unguarded resume.
   }
   this->services_.resume();
   // Reverse the teardown, restoring WLAN before mDNS/OTA/API listeners.
@@ -121,6 +163,9 @@ void XR806StandbyController::resume_service_owners_() {
 
 void XR806StandbyController::cancel_service_owners() {
   if (this->services_.active() || this->busy_) {
+    return;
+  }
+  if (!this->acquire_service_wakelock_()) {
     return;
   }
   this->services_.resume();
@@ -144,6 +189,11 @@ void XR806StandbyController::setup() {
     return;
   }
   active_controller = this;
+  this->services_pm_wakelock_required_ = !this->no_network_ || !this->no_api_ || !this->no_ota_ || !this->no_mdns_;
+  this->services_pm_wakelock_.name = const_cast<char *>("esphome.xr806.services");
+  if (!this->acquire_service_wakelock_()) {
+    return;
+  }
   auto &p = lowpower_policy();
   p.request_standby(false);
   p.set_scheduler_idle(false);
@@ -254,6 +304,7 @@ void XR806StandbyController::attempt_standby_() {
   bool pm_called = false;
   int result = -1;
   uint32_t event = 0;
+  XR806LowPowerPolicy::Snapshot pm_snapshot{};
 
   // Always retain a hardware wake timer as fallback, including on PA20 wake.
   if (HAL_Wakeup_SetTimer_mS(this->wake_after_ms_) != 0) {
@@ -300,11 +351,19 @@ void XR806StandbyController::attempt_standby_() {
   p.set_scheduler_idle(true);
   // The last software check is deliberately adjacent to the PM request.
   // Platform/transport owners must ALSO hold SDK PM wakelocks while busy.
-  if (!p.can_enter_standby() ||
+  pm_snapshot = p.snapshot();
+  if (!pm_snapshot.stable || pm_snapshot.blockers != 0 ||
+      !p.can_enter_standby(pm_snapshot.generation) ||
       (this->services_.quiesced() && !this->services_.enter())) {
     goto abort;
   }
 
+  // The second epoch check guards activity observed between vote release and
+  // final HAL setup. Native SDK UART/owner/OTA wakelocks cover the remaining
+  // asynchronous activity boundary.
+  if (!p.can_enter_standby(pm_snapshot.generation)) {
+    goto abort;
+  }
   HAL_Wakeup_SetEvent(0);
   pm_called = true;
   // '500' is the SDK wakelock-touch deadline, NOT an upper bound on the
