@@ -73,6 +73,19 @@ int main() {
   assert(xr806_validate_ota_flash_plan(p) == XR806OTAFlashPlanError::INVALID_GEOMETRY);
   p.candidate_image.offset = 0x1ff000U;
   assert(xr806_validate_ota_flash_plan(p) == XR806OTAFlashPlanError::INVALID_GEOMETRY);
+  // Original WXU BOOT header says metadata at 0x177000, 4KiB,
+  // xz_max=400KiB, and the second AWIH sequence starts at 0x178000.
+  // That identifies candidate geometry, NOT active-slot or recovery proof.
+  XR806OTAFlashPlan original{
+      2U * 1024U * 1024U,
+      {0x000000U, 0x131000U},  // Conservative span of first AWIH section series.
+      {0x178000U, 0x64000U},  // Candidate compressed update slot.
+      {0x177000U, 0x1000U},
+      0x50000U,
+      false, false, false};
+  assert(xr806_validate_ota_flash_plan(original) == XR806OTAFlashPlanError::UNVERIFIED_LAYOUT);
+  original.image_bytes = 0x65000U;
+  assert(xr806_validate_ota_flash_plan(original) == XR806OTAFlashPlanError::INVALID_IMAGE_SIZE);
   // Deliberately never calls HAL_Flash_Open/Erase/Write or ota_push_start.
   return 0;
 }
