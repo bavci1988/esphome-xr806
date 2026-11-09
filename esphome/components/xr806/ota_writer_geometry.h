@@ -38,10 +38,10 @@ constexpr WriterPlan validate_writer(const WriterGeometry &g) {
     p.error = WriterError::FLASH;
     return p;
   }
-  constexpr uint32_t SECTOR = 4096;
-  if (!g.flash_size || (g.flash_size % SECTOR) || !g.bootloader_bytes || (g.bootloader_bytes % SECTOR) ||
-      (g.metadata_addr % SECTOR) || !g.metadata_size || (g.metadata_size % SECTOR) || (g.image_addr[0] % SECTOR) ||
-      (g.image_addr[1] % SECTOR) || !g.image_max_kib || !g.compressed_max_kib || g.image_max_kib > UINT32_MAX / 1024u ||
+  constexpr uint32_t sector = 4096;
+  if (!g.flash_size || (g.flash_size % sector) || !g.bootloader_bytes || (g.bootloader_bytes % sector) ||
+      (g.metadata_addr % sector) || !g.metadata_size || (g.metadata_size % sector) || (g.image_addr[0] % sector) ||
+      (g.image_addr[1] % sector) || !g.image_max_kib || !g.compressed_max_kib || g.image_max_kib > UINT32_MAX / 1024u ||
       g.compressed_max_kib > UINT32_MAX / 1024u) {
     p.error = WriterError::GEOMETRY;
     return p;
