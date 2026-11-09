@@ -166,6 +166,13 @@ void XR806StandbyController::attempt_standby_() {
   if (this->has_wake_pin_) {
     const auto pin = static_cast<GPIO_Pin>(this->wake_pin_);
     HAL_GPIO_GetConfig(GPIO_PORT_A, pin, &previous_gpio);
+    // We cannot snapshot another component's IRQ callback via
+    // HAL_GPIO_GetConfig(). Never hijack an already active EINT/output mux.
+    if (previous_gpio.mode == GPIOx_Pn_F6_EINT || previous_gpio.mode == GPIOx_Pn_F1_OUTPUT) {
+      ESP_LOGE(TAG, "Wake PA%u already owned by IRQ/output client; refusing standby",
+               static_cast<unsigned>(this->wake_pin_));
+      goto abort;
+    }
     GPIO_InitParam eint = previous_gpio;
     eint.mode = GPIOx_Pn_F6_EINT;
     eint.pull = this->wake_falling_ ? GPIO_PULL_UP : GPIO_PULL_DOWN;
