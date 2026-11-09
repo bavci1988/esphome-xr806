@@ -1,4 +1,7 @@
 #include "ota_backend.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/lowpower_policy.h"
+#endif
 
 #ifdef ESPHOME_THREAD_MULTI_ATOMICS
 #include <atomic>
@@ -73,9 +76,25 @@ static void update_lock_clear() {
 }
 #endif
 
+bool global_update_active() {
+#ifdef ESPHOME_THREAD_MULTI_ATOMICS
+  return update_locked.load(std::memory_order_acquire) != 0;
+#else
+  return update_locked;
+#endif
+}
+
 bool UpdateLock::try_acquire() {
-  if (!this->held_)
+  if (!this->held_) {
     this->held_ = update_lock_test_and_set();
+  }
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (this->held_) {
+    // A flash write from *any* OTA frontend wins over standby, including
+    // writes not serviced by the native OTA TCP listener.
+    xr806::lowpower_policy().set_ota_idle(false);
+  }
+#endif
   return this->held_;
 }
 
