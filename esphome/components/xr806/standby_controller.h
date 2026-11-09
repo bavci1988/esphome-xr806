@@ -47,6 +47,12 @@ class XR806StandbyController final : public Component {
   void set_external_sync_required(bool value) { external_sync_required_ = value; }
   void set_require_uart_participant(bool value) { require_uart_participant_ = value; }
 
+  // Read-only platform capabilities; protocol participants validate their
+  // own MCU product-info fields against these hardware settings.
+  bool has_wake_pin() const { return this->has_wake_pin_; }
+  uint8_t wake_pin() const { return this->wake_pin_; }
+  bool requires_external_sync() const { return this->external_sync_required_; }
+
   bool register_participant(XR806StandbyParticipant *participant);
   void request_standby(bool requested);
 
