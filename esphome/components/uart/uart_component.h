@@ -189,6 +189,11 @@ class UARTComponent {
   // Apply a new physical UART speed without recreating the pinmux.
   // Probing policy (CMD01/autobaud) remains in the MCU protocol layer.
   virtual bool reconfigure_baud_rate(uint32_t) { return false; }
+
+  // The protocol owner may temporarily permit expected RX framing errors
+  // while testing different physical baud rates. This is NOT UART autobaud:
+  // rate selection and validated frame detection belong to the MCU driver.
+  virtual void set_baud_probe_mode(bool) {}
 #endif
 
   // Set the baud rate for UART communication.
