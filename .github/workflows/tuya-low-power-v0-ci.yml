@@ -8,7 +8,7 @@ on:
       - "tests/tuya_low_power_v0_session_test.cpp"
       - "tests/tuya_low_power_standby_state_test.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
-      - "tests/yaml/tuya_low_power_v0_xr806.yaml"
+      - "tests/yaml/tuya_low_power_*.yaml"
   pull_request:
     branches: [dev]
     paths:
@@ -53,7 +53,17 @@ jobs:
       - name: Validate native XR806 Tuya YAML
         run: python -m esphome config tests/yaml/tuya_low_power_v0_xr806.yaml
       - name: Generate XR806 C++ without a hardware SDK build
-        run: python -m esphome compile tests/yaml/tuya_low_power_v0_xr806.yaml --only-generate
+        run: |
+          python -m esphome compile tests/yaml/tuya_low_power_v0_xr806.yaml --only-generate
+          python -m esphome config tests/yaml/tuya_low_power_pb04_optin_codegen.yaml
+          python -m esphome compile tests/yaml/tuya_low_power_pb04_optin_codegen.yaml --only-generate
+      - name: Reject PB04 MCU wake without explicit verified wiring
+        run: |
+          if python -m esphome config tests/yaml/tuya_low_power_pb04_rejected.yaml > /tmp/pb04-invalid.log 2>&1; then
+            echo "PB04 unexpectedly accepted without owner confirmation" >&2
+            exit 1
+          fi
+          grep -q "Explicit physical pin-ownership" /tmp/pb04-invalid.log
       - name: Syntax-check Tuya C++ against generated ESPHome headers (SDK neutral)
         run: |
           set -euo pipefail
