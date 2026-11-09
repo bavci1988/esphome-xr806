@@ -180,6 +180,55 @@ void Tuya::send_low_power_awake_notification_() {
   this->update_low_power_sleep_lock_();
 }
 
+void Tuya::cancel_low_power_preflight_(bool notify_mcu) {
+  if (!this->lp_cmd38_pending_)
+    return;
+  this->lp_cmd38_pending_ = false;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr)
+    controller->request_preflight(false);
+#endif
+  if (notify_mcu)
+    this->send_low_power_direct_(0x38, {0x00, 0x01});
+}
+
+void Tuya::poll_low_power_sleep_preflight_() {
+  if (!this->lp_cmd38_pending_)
+    return;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  auto *controller = esphome::xr806::standby_controller();
+  const auto &policy = esphome::xr806::lowpower_policy();
+  const bool ota_busy = (policy.blockers() & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
+  if (controller == nullptr || !controller->preflight_requested() ||
+      static_cast<int32_t>(millis() - this->lp_cmd38_deadline_ms_) >= 0 ||
+      ota_busy || !controller->may_quiesce() || !this->low_power_ready_for_sleep_()) {
+    this->cancel_low_power_preflight_(true);
+    this->lp_cmd38_cooldown_until_ = millis() + 500;
+    return;
+  }
+  if (!controller->services_quiesced())
+    return;
+  if (this->available() != 0 || this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS ||
+      !this->lp_standby_.accept_request(this->lp_product_.sleep_mode == 1, true, true, true)) {
+    this->cancel_low_power_preflight_(true);
+    return;
+  }
+  // Never grant CMD38 while network owners still have live sockets, OTA,
+  // mDNS callbacks or a WLAN wakelock. The MCU receives its ACK only NOW.
+  this->lp_cmd38_pending_ = false;
+  this->send_low_power_direct_(0x38, {0x00, 0x00});
+  if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
+    controller->request_standby(true);
+  } else {
+    this->lp_standby_.transport_fault();
+    this->update_low_power_sleep_lock_();
+  }
+  controller->request_preflight(false);
+#else
+  this->cancel_low_power_preflight_(true);
+#endif
+}
+
 void Tuya::cancel_low_power_standby_() {
   const bool compensate = this->lp_standby_.force_cancel();
 #ifdef USE_XR806_STANDBY_CONTROLLER
