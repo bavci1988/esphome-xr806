@@ -53,6 +53,11 @@ static std::atomic<bool> s_connect_failed{false};
 // Main loop only.
 static bool s_observer_attached = false;
 static bool s_sta_enabled = false;
+#ifdef USE_WIFI_AP
+static bool s_ap_mode = false;
+static bool s_ap_enabled = false;
+static uint32_t s_last_ap_clients_poll = 0;
+#endif
 static bool s_connect_requested = false;
 static bool s_sta_was_connected = false;
 static bool s_power_save_requested = false;
@@ -84,6 +89,18 @@ static bool sta_ready() { return xr806::read_xr806_network_snapshot(sta_netif())
 static bool sta_enable() {
   if (s_sta_enabled)
     return true;
+#ifdef USE_WIFI_AP
+  if (s_ap_mode) {
+    // XR806 uses a single radio/netif: a fallback AP must be completely stopped
+    // before a station attempt, including the vendor DHCP server and old netif.
+    if (s_ap_enabled && wlan_ap_disable() != 0)
+      return false;
+    s_ap_enabled = false;
+    if (net_switch_mode(WLAN_MODE_STA) != 0)
+      return false;
+    s_ap_mode = false;
+  }
+#endif
   if (wlan_sta_enable() != 0)
     return false;
   s_sta_enabled = true;
@@ -105,8 +122,6 @@ void WiFiComponent::wifi_pre_setup_() {
 }
 
 bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
-  if (ap.has_value() && ap.value())
-    return false;  // Validation rejects ap: on XR806; the radio runs one interface at a time.
   if (sta.has_value()) {
     if (sta.value())
       return sta_enable();
@@ -115,10 +130,79 @@ bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
       return false;
     s_sta_enabled = false;
   }
+#ifdef USE_WIFI_AP
+  if (ap.has_value()) {
+    if (ap.value()) {
+      if (!s_ap_mode) {
+        if (s_sta_enabled && wlan_sta_disable() != 0)
+          return false;
+        s_sta_enabled = false;
+        if (net_switch_mode(WLAN_MODE_HOSTAP) != 0)
+          return false;
+        s_ap_mode = true;
+      }
+    } else if (s_ap_mode) {
+      if (s_ap_enabled && wlan_ap_disable() != 0)
+        return false;
+      s_ap_enabled = false;
+      this->ap_started_ = false;
+      this->ap_clients_ = 0;
+      if (net_switch_mode(WLAN_MODE_STA) != 0)
+        return false;
+      s_ap_mode = false;
+    }
+  }
+#endif
   return true;
 }
 
 bool WiFiComponent::wifi_sta_pre_setup_() { return this->wifi_mode_(true, {}); }
+
+#ifdef USE_WIFI_AP
+bool WiFiComponent::wifi_ap_ip_config_(const optional<ManualIP> &manual_ip) {
+  // No AP manual_ip on XR806 yet. The vendor's sysinfo/net_ctrl sets its
+  // own static subnet and starts DHCP on NET_CTRL_MSG_NETWORK_UP.
+  return !manual_ip.has_value();
+}
+
+bool WiFiComponent::wifi_start_ap_(const WiFiAP &ap) {
+  if (!this->wifi_mode_(false, true))
+    return false;
+
+  if (ap.ssid_.empty() || ap.ssid_.size() > WLAN_SSID_MAX_LEN || ap.password_.size() > 63 ||
+      (!ap.password_.empty() && ap.password_.size() < 8))
+    return false;
+  if (!this->wifi_ap_ip_config_({}))
+    return false;
+  uint8_t ssid[WLAN_SSID_MAX_LEN]{};
+  uint8_t psk[65]{};
+  std::memcpy(ssid, ap.ssid_.data(), ap.ssid_.size());
+  if (!ap.password_.empty())
+    std::memcpy(psk, ap.password_.data(), ap.password_.size());
+  if (wlan_ap_set(ssid, static_cast<uint8_t>(ap.ssid_.size()), ap.password_.empty() ? nullptr : psk) != 0)
+    return false;
+  if (ap.has_channel()) {
+    wlan_ap_config_t cfg{};
+    cfg.field = WLAN_AP_FIELD_CHANNEL;
+    cfg.u.channel = ap.get_channel();
+    if (wlan_ap_set_config(&cfg) != 0)
+      return false;
+  }
+  if (wlan_ap_enable() != 0)
+    return false;
+  s_ap_enabled = true;
+  this->ap_started_ = true;
+  ESP_LOGI(TAG, "XRadio SoftAP enabled (exclusive STA/AP radio mode)");
+  return true;
+}
+
+network::IPAddress WiFiComponent::wifi_soft_ap_ip() {
+  struct netif *nif = wlan_netif_get(WLAN_MODE_HOSTAP);
+  if (nif == nullptr || ip4_addr_isany(netif_ip4_addr(nif)))
+    return {};
+  return network::IPAddress(netif_ip_addr4(nif));
+}
+#endif  // USE_WIFI_AP
 
 bool WiFiComponent::wifi_apply_output_power_(float /*output_power*/) { return true; }
 
@@ -200,13 +284,22 @@ bool WiFiComponent::wifi_scan_start_(bool passive) {
     this->scan_result_.clear();
   }
   this->scan_done_ = false;
+#ifdef USE_WIFI_AP
+  if (!s_ap_enabled && !sta_enable())
+    return false;
+#else
   if (!sta_enable())
     return false;
+#endif
   s_scan_failed.store(false, std::memory_order_relaxed);
   s_scan_finished.store(false, std::memory_order_release);
   wlan_sta_scan_param_t param{};
   param.scan_passive = passive ? 1 : 0;
   param.scan_ssid = this->all_networks_hidden_() ? 1 : 0;
+#ifdef USE_WIFI_AP
+  if (s_ap_enabled)
+    return wlan_ap_scan(&param) == 0;
+#endif
   return wlan_sta_scan(&param) == 0;
 }
 
@@ -219,7 +312,12 @@ void WiFiComponent::wifi_scan_done_callback_() {
     return;
   }
   int found = 0;
-  if (wlan_sta_get_scan_result_num(&found) != 0 || found <= 0)
+#ifdef USE_WIFI_AP
+  const int count_status = s_ap_enabled ? wlan_ap_get_scan_result_num(&found) : wlan_sta_get_scan_result_num(&found);
+#else
+  const int count_status = wlan_sta_get_scan_result_num(&found);
+#endif
+  if (count_status != 0 || found <= 0)
     return;
   const size_t capacity = std::min(static_cast<size_t>(found), MAX_SCAN_RESULTS);
   // Freed at the end of this function; scans are rare and short-lived.
@@ -227,7 +325,12 @@ void WiFiComponent::wifi_scan_done_callback_() {
   wlan_sta_scan_results_t results{};
   results.ap = aps.get();
   results.size = static_cast<int>(capacity);
-  if (wlan_sta_scan_result(&results) != 0)
+#ifdef USE_WIFI_AP
+  const int scan_status = s_ap_enabled ? wlan_ap_scan_result(&results) : wlan_sta_scan_result(&results);
+#else
+  const int scan_status = wlan_sta_scan_result(&results);
+#endif
+  if (scan_status != 0)
     return;
   const size_t num = std::min(static_cast<size_t>(std::max(results.num, 0)), capacity);
 
@@ -323,6 +426,15 @@ network::IPAddress WiFiComponent::wifi_gateway_ip_() {
 network::IPAddress WiFiComponent::wifi_dns_ip_(int num) { return network::IPAddress(dns_getserver(num)); }
 
 bool WiFiComponent::wifi_loop_() {
+#ifdef USE_WIFI_AP
+  const uint32_t now_ms = App.get_loop_component_start_time();
+  if (s_ap_enabled && now_ms - s_last_ap_clients_poll >= 500) {
+    s_last_ap_clients_poll = now_ms;
+    int clients = 0;
+    if (wlan_ap_sta_num(&clients) == 0)
+      this->ap_clients_ = static_cast<uint8_t>(std::clamp(clients, 0, 255));
+  }
+#endif
   if (this->state_ == WIFI_COMPONENT_STATE_STA_SCANNING && s_scan_finished.load(std::memory_order_acquire)) {
     s_scan_finished.store(false, std::memory_order_relaxed);
     this->wifi_scan_done_callback_();
