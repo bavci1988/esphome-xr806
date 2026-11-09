@@ -30,35 +30,41 @@ void Tuya::send_low_power_product_query_(bool direct_probe) {
   have_wake_output = have_wake_output || this->trv16_pb04_.claimed();
 #endif
   if (have_wake_output) {
-    if (this->mcu_wake_pin_ != nullptr)
+    if (this->mcu_wake_pin_ != nullptr) {
       this->mcu_wake_pin_->digital_write(true);
+    }
 #ifdef USE_XR806
-    if (this->trv16_pb04_.claimed())
+    if (this->trv16_pb04_.claimed()) {
       this->trv16_pb04_.drive(true);
+    }
 #endif
     this->set_timeout("tuya_mcu_preprobe_wake", 10, [this, direct_probe]() {
-      if (this->mcu_wake_pin_ != nullptr)
+      if (this->mcu_wake_pin_ != nullptr) {
         this->mcu_wake_pin_->digital_write(false);
+      }
 #ifdef USE_XR806
       this->trv16_pb04_.drive(false);
 #endif
-      if (direct_probe)
+      if (direct_probe) {
         this->send_low_power_direct_(0x01, {});
-      else
+      } else {
         this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
+      }
     });
     return;
   }
-  if (direct_probe)
+  if (direct_probe) {
     this->send_low_power_direct_(0x01, {});
-  else
+  } else {
     this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
+  }
 }
 
 void Tuya::poll_low_power_autobaud_() {
   const uint32_t now = millis();
-  if (!this->lp_autobaud_.probe_due(now))
+  if (!this->lp_autobaud_.probe_due(now)) {
     return;
+  }
 
 #ifdef USE_XR806
   const uint32_t baud = this->lp_autobaud_.baud();
@@ -100,15 +106,17 @@ void Tuya::invalidate_low_power_mode_epoch_() {
 }
 
 void Tuya::poll_low_power_product_recovery_() {
-  if (this->init_failed_)
+  if (this->init_failed_) {
     return;
+  }
   const uint32_t now = millis();
   // Never inject an autonomous CMD01 during a report burst or a write ACK.
   const bool idle = !this->lp_v0_.busy() && this->command_queue_.empty() &&
                     !this->expected_response_.has_value() && this->rx_message_.empty();
   if (this->lp_product_retry_.active()) {
-    if (!this->lp_product_retry_.due(now) || !idle)
+    if (!this->lp_product_retry_.due(now) || !idle) {
       return;
+    }
     if (this->lp_product_retry_.exhausted()) {
       this->init_failed_ = true;
       this->lp_mode_requery_pending_ = false;
