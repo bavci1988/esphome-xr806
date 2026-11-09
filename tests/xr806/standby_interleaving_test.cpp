@@ -53,7 +53,7 @@ void test_uart_ack_and_reports() {
   mcu.begin_write(3, 2, value, sizeof(value), 1000);
   assert(mcu.busy() && !mcu.ready());
   assert(!wire.begin(0x02, 1001));  // New CMD02 cannot overlap CMD09.
-  assert(!wire.complete(0x05, 6)); // A CMD05 is NOT an ACK.
+  assert(!wire.complete(0x05, 6));  // A CMD05 is NOT an ACK.
   assert(wire.complete(0x09, 0));
   mcu.write_ack();
   assert(mcu.busy() && !mcu.ready());  // Write adopted only on matching report.
@@ -87,8 +87,8 @@ void test_uart_ack_and_reports() {
 }
 
 void test_wake_and_owner_interleavings() {
-  constexpr std::array<uint32_t, 5> OWNER_BITS{
-      Policy::UART_BUSY, Policy::NETWORK_BUSY, Policy::API_BUSY, Policy::MDNS_BUSY, Policy::OTA_BUSY};
+  constexpr std::array<uint32_t, 5> OWNER_BITS{Policy::UART_BUSY, Policy::NETWORK_BUSY, Policy::API_BUSY,
+                                               Policy::MDNS_BUSY, Policy::OTA_BUSY};
   for (uint32_t bit : OWNER_BITS) {
     Policy policy;
     release_all_owner_votes(policy);
@@ -98,12 +98,24 @@ void test_wake_and_owner_interleavings() {
 
     // Cross-task owner activity lands after final admission began.
     switch (bit) {
-      case Policy::UART_BUSY: policy.set_uart_idle(false); break;
-      case Policy::NETWORK_BUSY: policy.set_network_idle(false); break;
-      case Policy::API_BUSY: policy.set_api_idle(false); break;
-      case Policy::MDNS_BUSY: policy.set_mdns_idle(false); break;
-      case Policy::OTA_BUSY: policy.set_ota_idle(false); break;
-      default: assert(false); break;
+      case Policy::UART_BUSY:
+        policy.set_uart_idle(false);
+        break;
+      case Policy::NETWORK_BUSY:
+        policy.set_network_idle(false);
+        break;
+      case Policy::API_BUSY:
+        policy.set_api_idle(false);
+        break;
+      case Policy::MDNS_BUSY:
+        policy.set_mdns_idle(false);
+        break;
+      case Policy::OTA_BUSY:
+        policy.set_ota_idle(false);
+        break;
+      default:
+        assert(false);
+        break;
     }
     assert(!policy.commit_valid(epoch));
     assert((policy.blockers() & bit) != 0);
@@ -180,12 +192,29 @@ void test_exhaustive_owner_permutations() {
     assert(p.begin_commit(observed));
     for (uint8_t event : events) {
       switch (event) {
-        case 0: p.set_uart_idle(false); p.set_uart_idle(true); break;
-        case 1: p.set_network_idle(false); p.set_network_idle(true); break;
-        case 2: p.set_api_idle(false); p.set_api_idle(true); break;
-        case 3: p.set_mdns_idle(false); p.set_mdns_idle(true); break;
-        case 4: p.set_ota_idle(false); p.set_ota_idle(true); break;
-        default: assert(false); break;
+        case 0:
+          p.set_uart_idle(false);
+          p.set_uart_idle(true);
+          break;
+        case 1:
+          p.set_network_idle(false);
+          p.set_network_idle(true);
+          break;
+        case 2:
+          p.set_api_idle(false);
+          p.set_api_idle(true);
+          break;
+        case 3:
+          p.set_mdns_idle(false);
+          p.set_mdns_idle(true);
+          break;
+        case 4:
+          p.set_ota_idle(false);
+          p.set_ota_idle(true);
+          break;
+        default:
+          assert(false);
+          break;
       }
       assert(!p.commit_valid(observed));  // Releasing work cannot resurrect the old claim.
     }
