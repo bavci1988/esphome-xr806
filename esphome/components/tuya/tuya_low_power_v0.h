@@ -71,32 +71,41 @@ class TuyaLowPowerV0Session {
   }
 
   void observe_dp(uint8_t id, uint8_t type, const uint8_t *value, size_t len) {
-    for (size_t i = 0; i < FULL_STATUS_DPS.size(); ++i)
-      if (status_mask_ && FULL_STATUS_DPS[i] == id)
+    for (size_t i = 0; i < FULL_STATUS_DPS.size(); ++i) {
+      if (status_mask_ && FULL_STATUS_DPS[i] == id) {
         status_mask_ &= ~(1u << i);
+      }
+    }
     if (status_started_() && status_mask_ == 0) {
       full_status_active_ = false;
       synced_ = true;
       fault_ = false;
     }
 
-    if (!write_pending_)
+    if (!write_pending_) {
       return;
+    }
     if (write_refresh_) {
-      for (size_t i = 0; i < REFRESH_DPS.size(); ++i)
-        if (REFRESH_DPS[i] == id)
+      for (size_t i = 0; i < REFRESH_DPS.size(); ++i) {
+        if (REFRESH_DPS[i] == id) {
           refresh_mask_ &= ~(1u << i);
-      if (refresh_mask_ == 0)
+        }
+      }
+      if (refresh_mask_ == 0) {
         write_seen_ = true;
+      }
     } else if (id == write_id_ && type == write_type_ && len == expected_.size()) {
       bool equal = true;
-      for (size_t i = 0; i < len; ++i)
-        if (expected_[i] != value[i])
+      for (size_t i = 0; i < len; ++i) {
+        if (expected_[i] != value[i]) {
           equal = false;
+        }
+      }
       // Mismatched/clamped MCU reports are published as *actual* state by
       // Tuya, but are not mistaken for confirmation of the requested value.
-      if (equal)
+      if (equal) {
         write_seen_ = true;
+      }
     }
     finish_write_();
   }
