@@ -119,8 +119,8 @@ jobs:
       - name: Admit XR806 OTA transport but reject flash writes in the platform backend
         run: |
           set -euo pipefail
-          python -m esphome config tests/yaml/tuya_low_power_v0_xr806_ota_rejected.yaml
-          python -m esphome compile tests/yaml/tuya_low_power_v0_xr806_ota_rejected.yaml --only-generate
+          python -m esphome config tests/yaml/tuya_low_power_v0_xr806_ota_transport.yaml
+          python -m esphome compile tests/yaml/tuya_low_power_v0_xr806_ota_transport.yaml --only-generate
           # Codegen acceptance is not a flash-write authorization. The backend
           # intentionally contains no vendor OTA push or flash erase/write calls.
           test -s esphome/components/ota/ota_backend_xr806.cpp
