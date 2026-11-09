@@ -18,7 +18,7 @@ Wake-, Stromverbrauchs- oder Resetmessung an der TRV16-Platine vor.
 | 101 | BOOL, genau 1 Byte mit 0/1 | Dormant-/Schlafzeitfenster aktivieren | Typ, Wert und Länge vor CMD09 sowie CMD05 prüfen |
 | 102 | RAW, genau 4 Byte `[Start-H, Start-M, Ende-H, Ende-M]` | Tägliches Schlaffenster; kein Heizprogramm | Länge 4, Stunde 0..23, Minute 0..59 vor TX/RX prüfen |
 | 107 | RAW, genau 32 Byte; achtmal `[H, M, Temperatur_BE16]` | Separates Heiz-Wochenprogramm | Länge und Zeitfelder validieren; **keine unbelegte Temperaturspanne** |
- 
+
 Die vier DP102-Bytes sind binär, nicht BCD; `16 1E 06 2D` bedeutet
 22:30–06:45. Der HC32-RTC-Service verwendet
 `Start <= aktuelle Zeit < Ende`; für ein Mitternacht überschreitendes
@@ -68,10 +68,13 @@ Rückgaberegister von LP-/IoT-Initialisierung nicht; ein gesetztes
 Init-Merkmal beweist also **keine** erfolgreiche Inbetriebnahme.
 
 Der Ersatz trennt:
-- **malformed/recoverable:** Null/fehlerhafte Produktmetadaten oder
-  fehlgeschlagene Deskriptorallokation → nonblocking CMD01-Retry
-  alle 500 ms, **höchstens fünf Anfragen** (lokales Sicherheitslimit,
-  nicht aus dem Original als globaler Höchstwert bewiesen).
+- **malformed/recoverable:** Null/fehlerhafte Produktmetadaten
+  → nonblocking CMD01-Retry alle 500 ms, **höchstens fünf Anfragen**
+  (lokales Sicherheitslimit, nicht aus dem Original als globaler
+  Höchstwert bewiesen). Die rohe Produktinfo wird in einem festen
+  513-Byte-Diagnosepuffer abgelegt; eine *zusätzliche* dynamische
+  Deskriptorallokation samt Fehlerrisiko entfällt. Das schließt
+  nicht alle möglichen Heapfehler im allgemeinen JSON-/String-Parser aus.
 - **fremdes Produkt/wrong pins:** JSON syntaktisch gültig,
   aber PID/`wk`/`mwk` abweichend → endgültige Ablehnung.
 - **gültiges Produkt:** separate UART-Gesundheit, MCU-Statusserie und
