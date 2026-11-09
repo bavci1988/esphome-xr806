@@ -227,8 +227,7 @@ bool Tuya::validate_message_() {
   uint16_t length = encode_uint16(data[4], data[5]);
   // Keep the low-power MCU parser bounded. Corrupted length bytes on a
   // sleeping UART must not accumulate a 64-KiB heap buffer.
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 &&
-      (length > 512 || version != 0)) {
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && (length > 512 || version != 0)) {
     ESP_LOGW(TAG, "Invalid low-power MCU frame length/version: %u/%u", length, version);
     return false;
   }
@@ -285,10 +284,8 @@ void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buff
     // CMD02/CMD09 are only acknowledged by an *empty* reply. CMD05 reports
     // never consume a queued command, and any unsolicited matching command ID
     // must not release an unrelated transaction.
-    const bool valid_reply = (command == 0x01 && len > 0) ||
-                             ((command == 0x02 || command == 0x09) && len == 0);
-    if (valid_reply && this->expected_response_.has_value() &&
-        this->expected_response_ == command_type) {
+    const bool valid_reply = (command == 0x01 && len > 0) || ((command == 0x02 || command == 0x09) && len == 0);
+    if (valid_reply && this->expected_response_.has_value() && this->expected_response_ == command_type) {
       this->expected_response_.reset();
       if (!this->command_queue_.empty())
         this->command_queue_.erase(this->command_queue_.begin());
@@ -633,21 +630,21 @@ void Tuya::send_raw_command_(TuyaCommand command) {
     this->update_low_power_sleep_lock_();
   } else {
     switch (command.cmd) {
-    case TuyaCommandType::HEARTBEAT:
-      this->expected_response_ = TuyaCommandType::HEARTBEAT;
-      break;
-    case TuyaCommandType::PRODUCT_QUERY:
-      this->expected_response_ = TuyaCommandType::PRODUCT_QUERY;
-      break;
-    case TuyaCommandType::CONF_QUERY:
-      this->expected_response_ = TuyaCommandType::CONF_QUERY;
-      break;
-    case TuyaCommandType::DATAPOINT_DELIVER:
-    case TuyaCommandType::DATAPOINT_QUERY:
-      this->expected_response_ = TuyaCommandType::DATAPOINT_REPORT_ASYNC;
-      break;
-    default:
-      break;
+      case TuyaCommandType::HEARTBEAT:
+        this->expected_response_ = TuyaCommandType::HEARTBEAT;
+        break;
+      case TuyaCommandType::PRODUCT_QUERY:
+        this->expected_response_ = TuyaCommandType::PRODUCT_QUERY;
+        break;
+      case TuyaCommandType::CONF_QUERY:
+        this->expected_response_ = TuyaCommandType::CONF_QUERY;
+        break;
+      case TuyaCommandType::DATAPOINT_DELIVER:
+      case TuyaCommandType::DATAPOINT_QUERY:
+        this->expected_response_ = TuyaCommandType::DATAPOINT_REPORT_ASYNC;
+        break;
+      default:
+        break;
     }
   }
 
@@ -958,9 +955,8 @@ void Tuya::send_datapoint_command_(uint8_t datapoint_id, TuyaDatapointType datap
   buffer.push_back(data.size() >> 0);
   buffer.insert(buffer.end(), data.begin(), data.end());
 
-  const auto cmd = this->protocol_ == TuyaProtocol::LOW_POWER_V0
-                       ? static_cast<TuyaCommandType>(0x09)
-                       : TuyaCommandType::DATAPOINT_DELIVER;
+  const auto cmd = this->protocol_ == TuyaProtocol::LOW_POWER_V0 ? static_cast<TuyaCommandType>(0x09)
+                                                                 : TuyaCommandType::DATAPOINT_DELIVER;
   this->send_command_(TuyaCommand{.cmd = cmd, .payload = buffer});
 }
 
