@@ -18,8 +18,11 @@ class XR806OTABackend final {
   void abort();
   // ESPHome gzip/deflate is not XRadio's XZ OTA container.
   static constexpr bool supports_compression() { return false; }
+
  private:
   bool push_(uint8_t *data, size_t bytes);
+  bool probe_staged_image_();
+  bool read_commit_();
   void stop_();
   UpdateLock update_lock_{};
   md5::MD5Digest digest_{};
@@ -27,6 +30,8 @@ class XR806OTABackend final {
   uint8_t preface_[xr806::XR806_OTA_PREFACE_BYTES]{};
   uint8_t expected_md5_[16]{};
   uint32_t received_{0}, declared_{0}, required_{0};
+  uint32_t image_base_{0};  // ROM bl_size: section next_addr values are relative to it
+  uint8_t staging_flash_{0};
   size_t preface_len_{0};
   bool md5_supplied_{false}, md5_valid_{false};
   bool sdk_initialized_{false}, writing_{false}, pm_held_{false}, committed_{false};

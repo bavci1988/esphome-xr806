@@ -1,6 +1,7 @@
 #include "esphome/core/defines.h"
 #ifdef USE_XR806
 #include "ota_backend_xr806.h"
+#include "esphome/core/application.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 #include <algorithm>
@@ -12,7 +13,9 @@ extern "C" {
 #include "ota/ota.h"
 #include "pm/pm.h"
 #include "driver/chip/hal_flash.h"
+#include "image/flash.h"
 }
+#include "xz/xz.h"
 #if !defined(CONFIG_OTA) || !defined(CONFIG_OTA_POLICY_IMAGE_COMPRESSION)
 #error "XR806 native OTA requires SDK compression OTA policy and AWIH/XZ images"
 #endif
@@ -54,9 +57,8 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
     this->update_lock_.release();
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
   }
-  // Serial-flashed AWIH images do not contain an initialized FDCM sector.
-  // Read now; initialize a VERIFIED seq0 record only after the ROM/flash
-  // geometry check and native PM wakelock have succeeded.
+  // A wired AWIH flash leaves FDCM empty. ROM and bootloader then boot seq0, and the
+  // first ota_push_finish() writes the FDCM header itself, so it is not initialized here.
   image_cfg_t cfg{};
   const bool has_cfg = image_get_cfg(&cfg) == 0;
   const image_seq_t running = image_get_running_seq();
@@ -87,8 +89,8 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
   g.bootloader_bytes = runtime->bl_size;
   g.upload_bytes = static_cast<uint32_t>(image_size);
   g.running_seq = running;
-  // A missing first-install FDCM is admissible only for a verified seq0
-  // runtime/layout. A known but corrupt/unsupported selection remains blocked.
+  // image_get_cfg() fails for an empty FDCM, which boots seq0. A selection that reads
+  // back as anything other than verified seq0 remains blocked.
   g.selected_seq = has_cfg ? cfg.seq : 0;
   g.selected_verified = has_cfg ? cfg.state == IMAGE_STATE_VERIFIED : true;
   this->plan_ = xr806::validate_writer(g);
@@ -109,31 +111,17 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
     return OTA_RESPONSE_ERROR_UPDATE_BUSY;
   }
   this->pm_held_ = true;
-  if (!has_cfg) {
-    // First authenticated OTA after a wired RX/TX AWIH flash. Only FDCM at
-    // the newly validated metadata address is touched; never the active app.
-    image_cfg_t initial{};
-    initial.seq = 0;
-    initial.state = IMAGE_STATE_VERIFIED;
-    image_cfg_t confirmed{};
-    if (image_set_cfg(&initial) != 0 || image_get_cfg(&confirmed) != 0 ||
-        confirmed.seq != initial.seq || confirmed.state != initial.state) {
-      ESP_LOGE(TAG, "Serial-install FDCM initialization/readback failed");
-      this->stop_();
-      return OTA_RESPONSE_ERROR_UPDATE_PREPARE;
-    }
-    ESP_LOGI(TAG, "Initialized empty FDCM for serial-installed seq0");
-  }
   if (ota_push_init() != OTA_STATUS_OK || ota_set_skip_size(0) != OTA_STATUS_OK) {
     this->stop_();
     return OTA_RESPONSE_ERROR_UPDATE_PREPARE;
   }
   this->sdk_initialized_ = true;
+  this->image_base_ = runtime->bl_size;
+  this->staging_flash_ = runtime->flash[this->plan_.candidate_seq];
   this->declared_ = static_cast<uint32_t>(image_size);
   this->digest_.init();
-  ESP_LOGI(TAG, "Writable OTA: seq1=0x%X (%u bytes), active seq0=0x%X, FDCM=0x%X",
-           this->plan_.candidate.start, this->plan_.candidate.size, this->plan_.active.start,
-           this->plan_.metadata.start);
+  ESP_LOGI(TAG, "Writable OTA: seq1=0x%X (%u bytes), active seq0=0x%X, FDCM=0x%X", this->plan_.candidate.start,
+           this->plan_.candidate.size, this->plan_.active.start, this->plan_.metadata.start);
   return OTA_RESPONSE_OK;
 }
 
@@ -175,8 +163,8 @@ OTAResponseTypes XR806OTABackend::write(uint8_t *data, size_t bytes) {
     if (this->preface_len_ < sizeof(this->preface_))
       return OTA_RESPONSE_OK;
 
-    const auto image = xr806::validate_xz_preface(this->preface_, sizeof(this->preface_),
-                                                  this->plan_.candidate.size, this->declared_);
+    const auto image =
+        xr806::validate_xz_preface(this->preface_, sizeof(this->preface_), this->plan_.candidate.size, this->declared_);
     if (!image.valid) {
       ESP_LOGE(TAG, "Wrong OTA image: require single AWIH/XZ APP wrapper, no erase performed");
       this->abort();
@@ -205,8 +193,7 @@ OTAResponseTypes XR806OTABackend::write(uint8_t *data, size_t bytes) {
 
 OTAResponseTypes XR806OTABackend::end() {
   if (!this->sdk_initialized_ || !this->writing_ || this->committed_ || !this->required_ ||
-      this->received_ != this->required_ ||
-      (this->declared_ && this->received_ != this->declared_)) {
+      this->received_ != this->required_ || (this->declared_ && this->received_ != this->declared_)) {
     this->abort();
     return OTA_RESPONSE_ERROR_UPDATE_END;
   }
@@ -217,33 +204,99 @@ OTAResponseTypes XR806OTABackend::end() {
       return OTA_RESPONSE_ERROR_MD5_MISMATCH;
     }
   }
-  // ota_push_finish() verifies flash bytes but DOES NOT select a boot image.
-  // The SDK requires an explicit FDCM write of sequence 1 after verification.
-  if (ota_push_finish() != OTA_STATUS_OK) {
+  // The bootloader erases the active image before it decompresses the staged one and does not
+  // stop on a decode error, so prove here that the stream decodes to a valid image.
+  if (!this->probe_staged_image_()) {
     this->abort();
     return OTA_RESPONSE_ERROR_UPDATE_END;
   }
-  image_cfg_t next{};
-  next.seq = this->plan_.candidate_seq;
-  next.state = IMAGE_STATE_VERIFIED;
-  if (image_set_cfg(&next) != 0) {
-    ESP_LOGE(TAG, "OTA verified, but FDCM update to staging seq1 failed");
+  // ota_push_finish() checks the wrapper sections and, through ota_verify_image(), writes
+  // FDCM seq1=VERIFIED. That write is the commit: the next boot installs the update.
+  const bool finished = ota_push_finish() == OTA_STATUS_OK;
+  const bool selected = this->read_commit_();
+  if (!finished && !selected) {
     this->abort();
     return OTA_RESPONSE_ERROR_UPDATE_END;
   }
-  image_cfg_t confirmed{};
-  if (image_get_cfg(&confirmed) != 0 || confirmed.seq != next.seq || confirmed.state != next.state) {
-    ESP_LOGE(TAG, "OTA FDCM readback failed; next boot state is uncertain");
-    this->abort();
-    return OTA_RESPONSE_ERROR_UPDATE_END;
-  }
+  // From here FDCM may select seq1, so no further upload may touch the staging slot.
   this->committed_ = true;
   ota_push_stop();
   this->sdk_initialized_ = false;
   this->update_lock_.hold_until_reboot();
-  // Intentionally keep native wakelock until restart after successful commit.
+  // The wakelock is kept until the restart as well.
+  if (!finished || !selected) {
+    ESP_LOGE(TAG, "OTA commit incomplete (finish=%d, FDCM readback=%d); next boot state uncertain",
+             static_cast<int>(finished), static_cast<int>(selected));
+    return OTA_RESPONSE_ERROR_UPDATE_END;
+  }
   ESP_LOGI(TAG, "XRadio OTA firmware committed; reboot required to install seq1 into seq0");
   return OTA_RESPONSE_OK;
+}
+
+bool XR806OTABackend::read_commit_() {
+  image_cfg_t confirmed{};
+  return image_get_cfg(&confirmed) == 0 && confirmed.seq == this->plan_.candidate_seq &&
+         confirmed.state == IMAGE_STATE_VERIFIED;
+}
+
+bool XR806OTABackend::probe_staged_image_() {
+  // Same decoder (ROM xz-embedded) and dictionary limit as the bootloader.
+  constexpr size_t IN_CHUNK = 2048;
+  constexpr size_t OUT_CHUNK = 4096;
+  xz_crc32_init();
+  struct xz_dec *dec = xz_dec_init(XZ_PREALLOC, xr806::XR806_BOOTLOADER_XZ_DICT);
+  RAMAllocator<uint8_t> allocator;
+  uint8_t *in = allocator.allocate(IN_CHUNK + OUT_CHUNK);
+  if (dec == nullptr || in == nullptr) {
+    if (dec != nullptr)
+      xz_dec_end(dec);
+    if (in != nullptr)
+      allocator.deallocate(in, IN_CHUNK + OUT_CHUNK);
+    ESP_LOGE(TAG, "Not enough memory to check the staged image");
+    return false;
+  }
+  uint8_t *out = in + IN_CHUNK;
+  xr806::DecompressedImageCheck check(this->image_base_, this->plan_.active.size);
+  const uint32_t start = this->plan_.candidate.start + xr806::AWIH_HEADER_BYTES;
+  const uint32_t length = this->required_ - xr806::AWIH_HEADER_BYTES;
+  uint32_t offset = 0;
+  xz_buf b{};
+  b.out = out;
+  b.out_size = OUT_CHUNK;
+  enum xz_ret ret = XZ_OK;
+  bool valid = true;
+  while (valid && ret == XZ_OK) {
+    if (b.in_pos == b.in_size && offset < length) {
+      const uint32_t count = std::min<uint32_t>(IN_CHUNK, length - offset);
+      if (flash_read(this->staging_flash_, start + offset, in, count) != count) {
+        valid = false;
+        break;
+      }
+      offset += count;
+      b.in = in;
+      b.in_pos = 0;
+      b.in_size = count;
+    }
+    ret = xz_dec_run(dec, &b);
+    if (b.out_pos != 0) {
+      valid = check.add(out, b.out_pos);
+      b.out_pos = 0;
+    }
+    // A truncated stream ends with XZ_BUF_ERROR: multi-call mode reports it on the second call without progress.
+    App.feed_wdt();
+  }
+  xz_dec_end(dec);
+  allocator.deallocate(in, IN_CHUNK + OUT_CHUNK);
+  const bool ok = valid && ret == XZ_STREAM_END && offset == length && b.in_pos == b.in_size && check.complete();
+  if (!ok) {
+    ESP_LOGE(TAG, "Staged image check failed (xz=%d, in=%u/%u, out=%u, sections=%u)", static_cast<int>(ret),
+             static_cast<unsigned>(offset), static_cast<unsigned>(length), static_cast<unsigned>(check.total()),
+             static_cast<unsigned>(check.sections()));
+    return false;
+  }
+  ESP_LOGI(TAG, "Staged image decodes to %u bytes in %u sections", static_cast<unsigned>(check.total()),
+           static_cast<unsigned>(check.sections()));
+  return true;
 }
 
 void XR806OTABackend::stop_() {
