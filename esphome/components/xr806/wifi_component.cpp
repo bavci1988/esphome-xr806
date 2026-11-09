@@ -278,6 +278,11 @@ bool XR806WiFiComponent::pause_for_standby() {
   if (!this->can_pause_for_standby()) {
     return false;
   }
+  wlan_sta_states_t current = WLAN_STA_STATE_DISCONNECTED;
+  if (wlan_sta_state(&current) != 0 || current == WLAN_STA_STATE_CONNECTED) {
+    // The periodic ESPHome connected_ cache is not a safe suspend oracle.
+    return false;
+  }
   lowpower_policy().set_network_idle(false);
   if (wlan_sta_disable() != 0) {
     ESP_LOGE(TAG, "Cannot disable offline WLAN station; standby vetoed");
