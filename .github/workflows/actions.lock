@@ -92,6 +92,8 @@ workflows:
         - 'actions/create-github-app-token@v3.3.0'
         - 'actions/setup-python@v7.1.0'
         - 'peter-evans/create-pull-request@v8.1.1'
+    '.github/workflows/xr806-ota-writer-tests.yml':
+        - 'actions/checkout@v7.0.1'
     '.github/workflows/verify-lockfile.yml':
         - 'actions/checkout@v7.0.1'
     '.github/workflows/tuya-low-power-v0-ci.yml':
