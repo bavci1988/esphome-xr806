@@ -12,6 +12,7 @@
 #include "esphome/components/tuya/tuya_low_power_wire_transactions.h"
 #include "esphome/components/tuya/tuya_low_power_standby_state.h"
 #include "esphome/components/xr806/lowpower_policy.h"
+#include "esphome/components/xr806/standby_async_epoch.h"
 #include "esphome/components/xr806/standby_coordinator_state.h"
 
 namespace {
@@ -197,6 +198,51 @@ void test_exhaustive_owner_permutations() {
   assert(permutations == 120);
 }
 
+void test_async_lwip_suspend_epochs() {
+  using Gate = esphome::xr806::XR806StandbyAsyncEpoch;
+  Gate gate;
+  assert(!gate.requested() && gate.epoch() == 0);
+  assert(!gate.request(false));
+  assert(gate.request(true));
+  const uint32_t first = gate.epoch();
+  assert(gate.current(first));
+  assert(!gate.request(true));  // Duplicate callback cannot create a new epoch.
+  assert(gate.current(first));
+  // A late lwIP callback from a cancelled suspend must be rejected.
+  assert(gate.request(false));
+  assert(!gate.current(first));
+  assert(gate.request(true));
+  assert(!gate.current(first));  // ABA: true->false->true is NOT the old request.
+  const uint32_t second = gate.epoch();
+  assert(gate.current(second));
+  // Completing an old callback is never authorization to release MDNS_BUSY.
+  Policy owner;
+  owner.set_mdns_idle(false);
+  if (gate.current(first)) {
+    owner.set_mdns_idle(true);
+  }
+  assert((owner.blockers() & Policy::MDNS_BUSY) != 0);
+  if (gate.current(second)) {
+    owner.set_mdns_idle(true);
+  }
+  assert((owner.blockers() & Policy::MDNS_BUSY) == 0);
+  gate.request(false);
+  owner.set_mdns_idle(false);
+  assert(!gate.current(second));
+  assert((owner.blockers() & Policy::MDNS_BUSY) != 0);
+
+  // A producer on another task can cancel a pending epoch. Once joined,
+  // no stale completion is allowed to authorize the old epoch.
+  gate.request(true);
+  const uint32_t old = gate.epoch();
+  std::thread cancel([&gate]() {
+    gate.request(false);
+    gate.request(true);
+  });
+  cancel.join();
+  assert(!gate.current(old));
+}
+
 void test_quiet_window_and_expiration() {
   using State = esphome::xr806::XR806StandbyCoordinatorState;
   State state;
@@ -222,6 +268,7 @@ int main() {
   test_uart_ack_and_reports();
   test_wake_and_owner_interleavings();
   test_exhaustive_owner_permutations();
+  test_async_lwip_suspend_epochs();
   test_quiet_window_and_expiration();
   return 0;
 }
