@@ -8,14 +8,14 @@ int main() {
 
   State s;
   assert(!s.accept_request(false, true, true, true));  // sm=0 => hibernation, not retained standby
-  assert(!s.accept_request(true, false, true, true));   // unconfirmed DP write/status
-  assert(!s.accept_request(true, true, false, true));   // UART transport fault
-  assert(!s.accept_request(true, true, true, false));   // WLAN/API/OTA veto
+  assert(!s.accept_request(true, false, true, true));  // unconfirmed DP write/status
+  assert(!s.accept_request(true, true, false, true));  // UART transport fault
+  assert(!s.accept_request(true, true, true, false));  // WLAN/API/OTA veto
   assert(s.accept_request(true, true, true, true));
-  assert(!s.accept_request(true, true, true, true));    // repeated CMD38 cannot restart request
+  assert(!s.accept_request(true, true, true, true));  // repeated CMD38 cannot restart request
   assert(s.needs_notification());
   assert(!s.ready_for_pm());
-  assert(!s.cancelled());                                // request without CMD12 needs no compensation
+  assert(!s.cancelled());  // request without CMD12 needs no compensation
   assert(!s.requested());
 
   assert(s.accept_request(true, true, true, true));
@@ -24,7 +24,7 @@ int main() {
   assert(!s.cancelled());  // intentional retry after physical UART drain
   assert(s.ready_for_pm());
   assert(s.notified());
-  assert(s.cancelled());   // veto after CMD12: must send compensating CMD12/00
+  assert(s.cancelled());  // veto after CMD12: must send compensating CMD12/00
   assert(!s.requested() && !s.notified());
 
   assert(s.accept_request(true, true, true, true));
