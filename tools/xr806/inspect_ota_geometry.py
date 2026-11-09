@@ -23,6 +23,16 @@ SECTION_IDS = {
 }
 
 
+def awih_checksum16(data: bytes) -> int:
+    """Vendor image_checksum16(): sum of LE 16-bit words modulo 65536."""
+    result = 0
+    for offset in range(0, len(data) - 1, 2):
+        result += data[offset] | (data[offset + 1] << 8)
+    if len(data) & 1:
+        result += data[-1]
+    return result & 0xFFFF
+
+
 def decode_fdcm_selection(data: bytes, start: int, size: int) -> dict:
     """Decode the vendor ROM's append-only 4-byte FDCM image selection records.
 
@@ -71,6 +81,13 @@ def parse(data: bytes) -> dict:
     boot = HEADER.unpack_from(data)
     if boot[0] != MAGIC or boot[10] != BOOT_ID:
         raise ValueError("flash start is not an expected XR806 AWIH BOOT header")
+    if awih_checksum16(data[:HEADER.size]) != 0xFFFF:
+        raise ValueError("invalid vendor AWIH BOOT header checksum")
+    boot_payload_end = HEADER.size + boot[4]
+    if boot_payload_end > len(data) or (
+        (boot[3] + awih_checksum16(data[HEADER.size:boot_payload_end])) & 0xFFFF
+    ) != 0xFFFF:
+        raise ValueError("invalid vendor AWIH BOOT payload checksum")
     private = boot[11:17]
     packed_ota = private[0]
     metadata_size = packed_ota >> 8
@@ -92,13 +109,21 @@ def parse(data: bytes) -> dict:
             break
         if at + HEADER.size <= len(data):
             h = HEADER.unpack_from(data, at)
-            if h[0] == MAGIC and h[10] in SECTION_IDS and h[4] < len(data):
+            payload_end = at + HEADER.size + h[4]
+            if (h[0] == MAGIC and h[10] in SECTION_IDS and
+                    payload_end <= len(data) and
+                    awih_checksum16(data[at:at + HEADER.size]) == 0xFFFF):
+                valid_payload = (
+                    (h[3] + awih_checksum16(data[at + HEADER.size:payload_end])) & 0xFFFF
+                ) == 0xFFFF
                 sections.append({
                     "offset": f"0x{at:06x}",
                     "kind": SECTION_IDS[h[10]],
                     "id": f"0x{h[10]:08x}",
                     "payload_bytes": h[4],
                     "next_relative": f"0x{h[9]:08x}",
+                    "header_checksum_valid": True,
+                    "payload_checksum_valid": valid_payload,
                 })
         at += 4
     return {
@@ -122,7 +147,7 @@ def parse(data: bytes) -> dict:
             "sections": sections,
         },
         "write_authorized": False,
-        "warning": "Offline FDCM selection is inferred from matching vendor ROM code; physical running slot, signature and rollback are not proven.",
+        "warning": "AWIH 16-bit checksums detect accidental corruption, NOT cryptographic authenticity; physical running slot, signature and rollback remain unproven.",
     }
 
 
