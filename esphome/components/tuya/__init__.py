@@ -69,10 +69,19 @@ def _validate_time_options(config: ConfigType) -> ConfigType:
             "status_pin is unsupported for low_power_v0; wake is configured separately",
             path=[CONF_STATUS_PIN],
         )
-    if CONF_MCU_WAKE_PIN in config and config[CONF_PROTOCOL] != "low_power_v0":
-        raise cv.Invalid(
-            "mcu_wake_pin requires protocol: low_power_v0", path=[CONF_MCU_WAKE_PIN]
-        )
+    if CONF_MCU_WAKE_PIN in config:
+        if config[CONF_PROTOCOL] != "low_power_v0":
+            raise cv.Invalid(
+                "mcu_wake_pin requires protocol: low_power_v0", path=[CONF_MCU_WAKE_PIN]
+            )
+        if CORE.target_platform == "xr806":
+            raise cv.Invalid(
+                "XR806 TRV16 MCU wake is physically PB04 (WXU pad 2), not an "
+                "arbitrary GPIO. PB04 pinmux/Flash ownership and pulse polarity "
+                "are not yet verified; disable mcu_wake_pin until a dedicated "
+                "hardware-safe PB04 implementation is validated.",
+                path=[CONF_MCU_WAKE_PIN],
+            )
     if config[CONF_AUTO_BAUD]:
         if config[CONF_PROTOCOL] != "low_power_v0":
             raise cv.Invalid(
