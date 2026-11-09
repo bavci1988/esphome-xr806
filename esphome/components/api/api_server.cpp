@@ -871,6 +871,15 @@ void APIServer::on_camera_image(const std::shared_ptr<camera::CameraImage> &imag
 #endif
 
 void APIServer::on_shutdown() {
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  // Reboot/shutdown is NEW work even when the API listener was already
+  // parked. Veto PM before any socket/connection teardown starts.
+  xr806::lowpower_policy().set_api_idle(false);
+  if (auto *controller = xr806::standby_controller(); controller != nullptr) {
+    controller->request_standby(false);
+    controller->request_preflight(false);
+  }
+#endif
   this->shutting_down_ = true;
 
   // Close the listening socket to prevent new connections
