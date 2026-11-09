@@ -106,8 +106,7 @@ void Tuya::loop() {
 #ifdef USE_XR806_STANDBY_CONTROLLER
     if (this->lp_standby_.requested()) {
       const auto &policy = esphome::xr806::lowpower_policy();
-      const bool ota_busy =
-          (policy.blockers() & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
+      const bool ota_busy = (policy.blockers() & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
       auto *controller = esphome::xr806::standby_controller();
       if (!policy.standby_requested() || ota_busy || controller == nullptr || !controller->may_quiesce() ||
           !this->low_power_ready_for_sleep_()) {
