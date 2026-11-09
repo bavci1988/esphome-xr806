@@ -261,6 +261,19 @@ void Tuya::standby_resumed(const xr806::XR806StandbyResume &event) {
 }
 #endif
 
+void Tuya::schedule_low_power_resync_() {
+  // Failed/ambiguous replies have no transaction ID on the HC32 wire.
+  // Discard queued writes rather than executing them after a lost ACK.
+  this->lp_transaction_.reset(millis());
+  this->expected_response_.reset();
+  this->command_queue_.clear();
+  this->lp_v0_.command_timeout();
+  this->lp_network_status_ = 0xFF;
+  this->lp_resync_pending_ = true;
+  this->lp_resync_due_ms_ = millis() + TuyaLowPowerTransactionGate::REPLY_QUARANTINE_MS;
+  this->update_low_power_sleep_lock_();
+}
+
 void Tuya::process_low_power_queue_() {
   const uint32_t now = millis();
   if (static_cast<uint32_t>(now - this->last_rx_char_timestamp_) > LP_RX_TIMEOUT_MS)
@@ -270,13 +283,7 @@ void Tuya::process_low_power_queue_() {
   // delayed CMD05 report. ACK and report have separate timeouts.
   if (this->expected_response_.has_value() && static_cast<uint32_t>(now - this->last_command_timestamp_) >= 1500) {
     const bool product_query = *this->expected_response_ == TuyaCommandType::PRODUCT_QUERY;
-    this->lp_transaction_.timeout(now);
-    this->expected_response_.reset();
-    if (!this->command_queue_.empty()) {
-      this->command_queue_.erase(this->command_queue_.begin());
-    }
-    this->lp_v0_.command_timeout();
-    this->lp_network_status_ = 0xFF;
+    this->schedule_low_power_resync_();
     ESP_LOGW(LP_TAG, "MCU command ACK timeout (product=%s); scheduling resync", YESNO(product_query));
     if (product_query && !this->auto_baud_) {
       if (++this->init_retries_ >= LP_MAX_RETRIES) {
@@ -287,6 +294,14 @@ void Tuya::process_low_power_queue_() {
                                     {.cmd = TuyaCommandType::PRODUCT_QUERY, .payload = {}});
       }
     }
+  }
+
+  if (this->lp_resync_pending_ && !this->lp_product_retry_.active() && this->lp_v0_.has_product() &&
+      this->rx_message_.empty() && this->lp_transaction_.can_send(now) &&
+      static_cast<int32_t>(now - this->lp_resync_due_ms_) >= 0) {
+    this->lp_resync_pending_ = false;
+    this->lp_last_resync_ms_ = now;
+    this->send_low_power_network_();  // CMD02/04 forces the 17-DP status series.
   }
 
   if (this->lp_v0_.busy() || this->expected_response_.has_value() ||
