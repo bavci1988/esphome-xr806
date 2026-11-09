@@ -6,6 +6,9 @@
 #include <string>
 
 #include "esphome/core/component.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/standby_controller.h"
+#endif
 #include "esphome/components/xr806/wlan_reconnect.h"
 #include "esphome/components/xr806/wifi_power_save_retry.h"
 
@@ -13,7 +16,11 @@ namespace esphome::xr806 {
 
 // XR806 STA/DTIM backend for standard ESPHome wifi: and legacy probes.
 // WLAN is initialized by the vendor platform_init() before ESPHome setup().
-class XR806WiFiComponent final : public Component {
+class XR806WiFiComponent final : public Component
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    , public XR806StandbyServiceOwner
+#endif
+{
  public:
   void set_ssid(const std::string &ssid) { this->ssid_ = ssid; }
   void set_password(const std::string &password) { this->password_ = password; }
@@ -26,6 +33,12 @@ class XR806WiFiComponent final : public Component {
   void setup() override;
   void loop() override;
   void dump_config() override;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  bool can_pause_for_standby() const override;
+  bool pause_for_standby() override;
+  void cancel_standby_pause() override;
+  void resume_after_standby() override;
+#endif
 
   bool is_connected() const { return this->connected_; }
   const std::string &get_ip_address() const { return this->ip_address_; }
@@ -46,6 +59,11 @@ class XR806WiFiComponent final : public Component {
   uint8_t listen_interval_{0};
   bool power_save_{false};
   bool connected_{false};
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  bool standby_paused_{false};
+  bool standby_registered_{false};
+  void register_standby_owner_();
+#endif
   XR806WiFiPowerSaveRetry power_save_retry_{};
   bool socket_probe_enabled_{false};
   bool socket_probe_done_{false};
