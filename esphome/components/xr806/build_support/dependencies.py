@@ -14,7 +14,7 @@ CACHE_ROOT = Path.home() / ".cache/esphome-xr806/dependencies"
 DEPENDENCIES = {
     "xr806_sdk": {
         "url": "git@github.com:bavci1988/xr806-sdk.git",
-        "commit": "74820f7adb8534272c9c947a85ac9def80f9335b",
+        "commit": "41a6d71cdf037904f9f794a276156126635b6c28",
         "required": (
             "gcc.mk",
             ".config",
