@@ -5,6 +5,20 @@ The XR806 platform does not know Tuya commands or HC32 datapoints.
 The MCU dialect implements its own `XR806StandbyParticipant` and calls
 the generic XR806 controller only after protocol-level checks.
 
+## Neueste HC32-/WXU-Rekonstruktion (2026-11-09)
+
+Die neue [Analyse von DP101/102, Produktinfo-Recovery und
+PM-Veto-Pfaden](trv16_rtc_sleep_window_recovery.md) wurde im
+Tuya-MCU-Teil integriert. DP101/102 können eine RTC-abhängige
+`sm`-Neuaushandlung bewirken; der XR806 darf den alten Produktstatus
+nicht dauerhaft als stabil ansehen. Ein eigener bounded CMD01-Retry
+behandelt malformed/fehlende Produktinfo, ohne fremde PIDs zuzulassen.
+
+Die Plattform bleibt protokollneutral. Weder eine durch SDK-PM-Masken
+herabgesetzte Stufe noch ein Wake-Event beweisen physisch erreichten
+Standby. Für den angeschlossenen TRV16 bleiben sämtliche
+Netzwerk-/API-/Hardware-Sperren unverändert fail-closed.
+
 ## Ownership matrix
 
 | Owner | Responsibility |
