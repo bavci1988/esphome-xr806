@@ -38,10 +38,11 @@ inline XZImageInfo validate_xz_preface(const uint8_t *p, size_t n, uint32_t slot
       load_le32(p + 32) != AWIH_NO_NEXT || body < 6 || load_le32(p + 24) != body || body > slot - 64 ||
       (expected != 0 && expected != body + 64))
     return {};
-  constexpr uint8_t XZ_MAGIC[6] = {0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00};
-  for (size_t i = 0; i < 6; ++i)
-    if (p[64 + i] != XZ_MAGIC[i])
+  constexpr uint8_t xz_magic[6] = {0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00};
+  for (size_t i = 0; i < 6; ++i) {
+    if (p[64 + i] != xz_magic[i])
       return {};
+  }
   return {true, body + 64};
 }
 
@@ -109,10 +110,11 @@ class DecompressedImageCheck {
   void header_done_(uint32_t pos) {
     const uint8_t *h = this->header_;
     if (load_le32(h) != AWIH_MAGIC || load_le32(h + 4) != AWIH_VERSION || sum16(h, AWIH_HEADER_BYTES) != 0xFFFF ||
-        (this->sections_ == 0 && load_le32(h + 36) != AWIH_APP_ID) || ++this->sections_ > 32) {
+        (this->sections_ == 0 && load_le32(h + 36) != AWIH_APP_ID) || this->sections_ >= 32) {
       this->fail_();
       return;
     }
+    ++this->sections_;
     this->body_sum_ = static_cast<uint16_t>(h[10] | (h[11] << 8));  // data_chksum
     this->body_left_ = load_le32(h + 12);                           // data_size
     this->next_ = load_le32(h + 32);
