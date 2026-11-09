@@ -65,8 +65,7 @@ void XR806WiFiComponent::setup() {
     return;
   }
 
-  if (wlan_sta_set(reinterpret_cast<uint8_t *>(this->ssid_.data()),
-                   static_cast<uint8_t>(this->ssid_.size()),
+  if (wlan_sta_set(reinterpret_cast<uint8_t *>(this->ssid_.data()), static_cast<uint8_t>(this->ssid_.size()),
                    this->password_.empty() ? nullptr : reinterpret_cast<uint8_t *>(this->password_.data())) != 0) {
     ESP_LOGE(TAG, "Could not configure station credentials");
     this->mark_failed();
@@ -103,18 +102,14 @@ void XR806WiFiComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  SSID: %s", this->ssid_.c_str());
   ESP_LOGCONFIG(TAG, "  Power save requested: %s", this->power_save_ ? "yes" : "no");
   if (this->power_save_) {
-    ESP_LOGCONFIG(TAG, "  DTIM: %u; listen interval: %u",
-                  static_cast<unsigned>(this->dtim_),
+    ESP_LOGCONFIG(TAG, "  DTIM: %u; listen interval: %u", static_cast<unsigned>(this->dtim_),
                   static_cast<unsigned>(this->listen_interval_));
   }
   ESP_LOGCONFIG(TAG, "  Native API: available when api: is configured");
   ESP_LOGCONFIG(TAG, "  CPU standby: not enabled");
-  ESP_LOGCONFIG(TAG, "  TCP socket probe: %s",
-                this->socket_probe_enabled_ ? "enabled" : "disabled");
-  ESP_LOGCONFIG(TAG, "  ESPHome socket facade probe: %s",
-                this->socket_facade_probe_enabled_ ? "enabled" : "disabled");
+  ESP_LOGCONFIG(TAG, "  TCP socket probe: %s", this->socket_probe_enabled_ ? "enabled" : "disabled");
+  ESP_LOGCONFIG(TAG, "  ESPHome socket facade probe: %s", this->socket_facade_probe_enabled_ ? "enabled" : "disabled");
 }
-
 
 #ifdef USE_XR806_STANDBY_CONTROLLER
 bool XR806WiFiComponent::claim_network_lock_() {
@@ -160,8 +155,8 @@ void XR806WiFiComponent::standby_preflight(bool requested) {
   if (this->network_parked_)
     return;
   auto &policy = lowpower_policy();
-  const uint32_t other_services = XR806LowPowerPolicy::API_BUSY | XR806LowPowerPolicy::OTA_BUSY |
-                                   XR806LowPowerPolicy::MDNS_BUSY;
+  const uint32_t other_services =
+      XR806LowPowerPolicy::API_BUSY | XR806LowPowerPolicy::OTA_BUSY | XR806LowPowerPolicy::MDNS_BUSY;
   if ((policy.blockers() & other_services) != 0)
     return;  // Never disable Wi-Fi while API/mDNS/OTA still own sockets.
   if (!this->network_suspending_) {
@@ -193,8 +188,7 @@ void XR806WiFiComponent::standby_preflight(bool requested) {
 }
 
 bool XR806WiFiComponent::prepare_for_standby() {
-  return this->network_suspend_opt_in_ && this->network_parked_ &&
-         !this->network_pm_lock_held_;
+  return this->network_suspend_opt_in_ && this->network_parked_ && !this->network_pm_lock_held_;
 }
 
 void XR806WiFiComponent::standby_cancelled() { this->restore_network_(); }
@@ -223,8 +217,7 @@ void XR806WiFiComponent::probe_socket_() {
 
   bool success = true;
 
-  if (lwip_bind(fd, reinterpret_cast<sockaddr *>(&addr),
-                sizeof(addr)) != 0) {
+  if (lwip_bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
     ESP_LOGW(TAG, "TCP probe: bind() failed");
     success = false;
   }
@@ -238,14 +231,11 @@ void XR806WiFiComponent::probe_socket_() {
     sockaddr_in bound{};
     socklen_t length = sizeof(bound);
 
-    if (lwip_getsockname(
-            fd, reinterpret_cast<sockaddr *>(&bound),
-            &length) != 0) {
+    if (lwip_getsockname(fd, reinterpret_cast<sockaddr *>(&bound), &length) != 0) {
       ESP_LOGW(TAG, "TCP probe: getsockname() failed");
       success = false;
     } else {
-      ESP_LOGI(TAG, "TCP probe: listener opened on port %u",
-               static_cast<unsigned>(lwip_ntohs(bound.sin_port)));
+      ESP_LOGI(TAG, "TCP probe: listener opened on port %u", static_cast<unsigned>(lwip_ntohs(bound.sin_port)));
     }
   }
 
@@ -258,11 +248,9 @@ void XR806WiFiComponent::probe_socket_() {
     ESP_LOGI(TAG, "TCP probe: PASS (socket/bind/listen/close)");
 }
 
-
 #ifdef USE_XR806_SOCKET_FACADE_PROBE
 void XR806WiFiComponent::probe_socket_facade_() {
-  auto listener = esphome::socket::socket_ip_loop_monitored(
-      SOCK_STREAM, IPPROTO_TCP);
+  auto listener = esphome::socket::socket_ip_loop_monitored(SOCK_STREAM, IPPROTO_TCP);
 
   if (!listener) {
     ESP_LOGW(TAG, "ESPHome socket facade: allocation failed");
@@ -276,9 +264,8 @@ void XR806WiFiComponent::probe_socket_facade_() {
 
   sockaddr_in address{};
 
-  const socklen_t length = esphome::socket::set_sockaddr_any(
-      reinterpret_cast<sockaddr *>(&address),
-      sizeof(address), 0);
+  const socklen_t length =
+      esphome::socket::set_sockaddr_any(reinterpret_cast<sockaddr *>(&address), sizeof(address), 0);
 
   if (length != sizeof(address)) {
     ok = false;
@@ -287,9 +274,7 @@ void XR806WiFiComponent::probe_socket_facade_() {
     address.sin_len = sizeof(address);
   }
 
-  if (ok && listener->bind(
-          reinterpret_cast<sockaddr *>(&address),
-          length) != 0) {
+  if (ok && listener->bind(reinterpret_cast<sockaddr *>(&address), length) != 0) {
     ok = false;
     ESP_LOGW(TAG, "ESPHome socket facade: bind failed");
   }
@@ -303,15 +288,11 @@ void XR806WiFiComponent::probe_socket_facade_() {
     sockaddr_in bound{};
     socklen_t len = sizeof(bound);
 
-    if (listener->getsockname(
-            reinterpret_cast<sockaddr *>(&bound),
-            &len) != 0) {
+    if (listener->getsockname(reinterpret_cast<sockaddr *>(&bound), &len) != 0) {
       ok = false;
       ESP_LOGW(TAG, "ESPHome socket facade: getsockname failed");
     } else {
-      ESP_LOGI(TAG, "ESPHome socket facade: port %u",
-               static_cast<unsigned>(
-                   lwip_ntohs(bound.sin_port)));
+      ESP_LOGI(TAG, "ESPHome socket facade: port %u", static_cast<unsigned>(lwip_ntohs(bound.sin_port)));
     }
   }
 
@@ -350,8 +331,7 @@ void XR806WiFiComponent::apply_power_save_(void *opaque_netif, uint32_t now) {
   }
 
   this->power_save_retry_.record(now, true);
-  ESP_LOGI(TAG, "WLAN power save configured: DTIM=%u, listen interval=%u",
-           static_cast<unsigned>(this->dtim_),
+  ESP_LOGI(TAG, "WLAN power save configured: DTIM=%u, listen interval=%u", static_cast<unsigned>(this->dtim_),
            static_cast<unsigned>(this->listen_interval_));
 }
 
@@ -382,14 +362,12 @@ void XR806WiFiComponent::loop() {
 #if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
       const auto esp_ips = ::esphome::network::get_ip_addresses();
       char ipbuf[::esphome::network::IP_ADDRESS_BUFFER_SIZE]{};
-      ESP_LOGI(TAG, "ESPHome network bridge: connected=%s ip=%s",
-               ::esphome::network::is_connected() ? "yes" : "no",
+      ESP_LOGI(TAG, "ESPHome network bridge: connected=%s ip=%s", ::esphome::network::is_connected() ? "yes" : "no",
                esp_ips[0].str_to(ipbuf));
 #endif
       this->last_rssi_poll_ms_ = now - 30000U;
 
-      ESP_LOGI(TAG, "WLAN connected: IP=%s GW=%s MASK=%s",
-               network.ipv4, network.gateway, network.netmask);
+      ESP_LOGI(TAG, "WLAN connected: IP=%s GW=%s MASK=%s", network.ipv4, network.gateway, network.netmask);
     } else {
       this->ip_address_.clear();
       this->rssi_valid_ = false;
@@ -407,9 +385,7 @@ void XR806WiFiComponent::loop() {
         this->rssi_dbm_ = ap.level;
         this->rssi_valid_ = true;
 
-        ESP_LOGD(TAG, "WLAN RSSI: %d dBm, channel: %u",
-                 this->rssi_dbm_,
-                 static_cast<unsigned>(ap.channel));
+        ESP_LOGD(TAG, "WLAN RSSI: %d dBm, channel: %u", this->rssi_dbm_, static_cast<unsigned>(ap.channel));
       }
     }
 
@@ -422,8 +398,7 @@ void XR806WiFiComponent::loop() {
     }
 
 #ifdef USE_XR806_SOCKET_FACADE_PROBE
-    if (this->socket_facade_probe_enabled_ &&
-        !this->socket_facade_probe_done_) {
+    if (this->socket_facade_probe_enabled_ && !this->socket_facade_probe_done_) {
       this->socket_facade_probe_done_ = true;
       this->probe_socket_facade_();
     }
