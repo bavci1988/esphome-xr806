@@ -22,6 +22,7 @@ static XR806OTARuntimeGeometry example() {
   g.fdcm_selected_seq = 0;
   g.compression_policy = true;
   g.runtime_snapshot_observed = true;
+  g.fdcm_state_verified = true;
   return g;
 }
 
@@ -45,7 +46,13 @@ int main() {
   c.fdcm_selected_seq = 1;
   assert(xr806_preflight_runtime_ota(c, proof).error == XR806OTARuntimeError::SELECTION_MISMATCH);
   c = g;
+  c.fdcm_state_verified = false;
+  assert(xr806_preflight_runtime_ota(c, proof).error == XR806OTARuntimeError::FDCM_UNVERIFIED);
+  c = g;
   c.image_flash[1] = 0x23;
+  assert(xr806_preflight_runtime_ota(c, proof).error == XR806OTARuntimeError::FLASH_ID_UNSUPPORTED);
+  c = g;
+  c.metadata_flash = 0x23;
   assert(xr806_preflight_runtime_ota(c, proof).error == XR806OTARuntimeError::FLASH_ID_UNSUPPORTED);
   c = g;
   c.image_addr[1] = 0x108001;
