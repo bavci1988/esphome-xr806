@@ -1,5 +1,13 @@
 #include "ota_backend.h"
 
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/lowpower_policy.h"
+#include "esphome/components/xr806/ota_update_pm_gate.h"
+extern "C" {
+#include "pm/pm.h"
+}
+#endif
+
 #ifdef ESPHOME_THREAD_MULTI_ATOMICS
 #include <atomic>
 #endif
@@ -73,20 +81,63 @@ static void update_lock_clear() {
 }
 #endif
 
+#ifdef USE_XR806_STANDBY_CONTROLLER
+// The global OTA backend update lock serializes users of this PM gate.
+// A successful update hold_until_reboot() deliberately keeps both locks held.
+static xr806::XR806OTAUpdatePMGate &xr806_update_pm_gate() {
+  static xr806::XR806OTAUpdatePMGate gate;
+  return gate;
+}
+
+static struct wakelock &xr806_ota_pm_wakelock() {
+  static struct wakelock lock{};  // NOLINT
+  lock.name = const_cast<char *>("esphome.xr806.ota-update");
+  return lock;
+}
+
+static void xr806_ota_pm_veto(void *) { xr806::lowpower_policy().set_ota_idle(false); }
+static bool xr806_ota_pm_take(void *) { return pm_wake_lock(&xr806_ota_pm_wakelock()) == 0; }
+static bool xr806_ota_pm_give(void *) { return pm_wake_unlock(&xr806_ota_pm_wakelock()) == 0; }
+#endif
+
 bool UpdateLock::try_acquire() {
-  if (!this->held_)
-    this->held_ = update_lock_test_and_set();
-  return this->held_;
+  if (this->held_)
+    return true;
+  if (!update_lock_test_and_set())
+    return false;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  // Never begin a flash update without both a software veto and native PM
+  // wakelock. Failure poisons the gate for this boot; no flash is touched.
+  if (!xr806_update_pm_gate().acquire(xr806_ota_pm_veto, xr806_ota_pm_take, nullptr)) {
+    update_lock_clear();
+    return false;
+  }
+#endif
+  this->held_ = true;
+  return true;
 }
 
 void UpdateLock::release() {
   if (!this->held_)
     return;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (!xr806_update_pm_gate().release(xr806_ota_pm_veto, xr806_ota_pm_give, nullptr))
+    return;  // Fail closed: cannot release global flash-writer lock.
+#endif
   update_lock_clear();
   this->held_ = false;
 }
 
-void UpdateLock::force_release() { update_lock_clear(); }
+void UpdateLock::force_release() {
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  auto &gate = xr806_update_pm_gate();
+  if (gate.held() && !gate.release(xr806_ota_pm_veto, xr806_ota_pm_give, nullptr))
+    return;
+  if (gate.faulted())
+    return;
+#endif
+  update_lock_clear();
+}
 
 #ifdef USE_OTA_STATE_LISTENER
 OTAGlobalCallback *global_ota_callback{nullptr};  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
