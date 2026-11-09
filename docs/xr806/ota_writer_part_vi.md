@@ -1,35 +1,39 @@
-# XR806 / WXU: OTA-Part VI – Writable XRadio updater
+# XR806 / WXU – ESPHome OTA Teil VI (UART-Erstflash, dann OTA)
 
-**Status:** Real flash-writing implementation submitted on feature branch. Only host-side checks available so far; ARM build and hardware flash are NOT confirmed. Do not deploy to the only TRV16.
+Status: **schreibfähiger OTA-Backend-Code, erfolgreiche Hosttests; UART- und OTA-Hardwaretests noch offen.**
+Aktive Branches: [ESPHome PR #14](https://github.com/bavci1988/esphome-xr806/pull/14) und [SDK PR #5](https://github.com/bavci1988/xr806-sdk/pull/5).
 
-## Implemented
+## Scope: ausschließlich ESPHome → ESPHome OTA
 
-- Replaces the unconditional no-write OTA backend. Successful admission calls real vendor ota_push_init(), ota_push_start() (flash ERASE), ota_push_data() (WRITE), and ota_push_finish() (flash-read validation and boot selection).
-- Reads image_get_ota_param(), image_get_running_seq(), image_get_cfg(), and probed FlashChip capacity at runtime. Requires verified active seq0, coherent flash-device IDs and disjoint bootloader, active, FDCM and inactive staging ranges.
-- Accumulates and validates 70 bytes of AWIH APP/XZ wrapper before any erase. Rejects invalid format, wrong length, over-sized stream, unverified boot state and unsupported OTA type.
-- Uses native XR806 PM wakelock plus ESPHome global UpdateLock until reboot after commit. Parses the ESPHome transport MD5 and checks it before selecting image.
-- Produces separate firmware.ota.bin with 8 KiB XZ dictionary and XRadio section checksums. Normal firmware.bin remains the full AWIH image for wired recovery.
-- Registers the ESPHome ota_image hook: network OTA selects firmware.ota.bin automatically; no extra flash write lock. Build prints an explicit error when an OTA package does not fit.
+**Erster Flash:** `esphome compile` erzeugt `firmware.bin` im XRadio-AWIH-Format. Das vollständige Boot+App-Image wird **kabelgebunden über den XR806-UART-Downloadmodus (RX/TX)** installiert. Das konkrete UART-Flash-Tool muss die AWIH-Containerstruktur und Flash-Offsets korrekt unterstützen; `firmware.bin` darf nicht ungeprüft als rohes Image an Adresse 0 geschrieben werden.
 
-## 2 MiB layout in matching SDK branch
+**Danach:** `esphome upload ... --device <ip>` wählt durch den `ota_image`-Hook die separat gebaute `firmware.ota.bin`. ESPHome Native OTA authentifiziert den Upload. Das XR806-Backend ermittelt ROM- und JEDEC-Geometrie und schreibt über `ota_push_start`, `ota_push_data`, `ota_push_finish` real in den XZ-Staging-Slot. Danach erfolgt eine **explizite `image_set_cfg(seq1, VERIFIED)`-Aktualisierung inklusive Readback**. Beim Neustart übernimmt der XRadio-Bootloader die Installation.
 
-| Address range | Meaning |
-|---|---|
-| 0x000000–0x007FFF | Bootloader; first APP starts at 32 KiB |
-| 0x008000–0x13EFFF | Active APP, max 1244 KiB |
-| 0x13F000–0x13FFFF | FDCM metadata (4 KiB) |
-| 0x140000–0x1FFFFF | Compressed OTA staging, 768 KiB |
+**Neue serielle Erstinstallation:** Eine seriell geflashte AWIH-Containerdatei enthält möglicherweise noch keine gültige FDCM-Bootauswahl. Beim *ersten authentifizierten ESPHome-OTA-Vorgang* wird deshalb nach bestätigter Flash-Geometrie und aktivem PM-Wakelock über `image_set_cfg(seq0, VERIFIED)` der neue FDCM-Bereich initialisiert und rückgelesen. Hierzu ist kein Tuya-Firmwaredump und kein zweites Migrationsimage nötig.
 
-The active SDK .config and project defconfig select CONFIG_OTA_POLICY_IMAGE_COMPRESSION, not PINGPONG. The default image.cfg was customized for this test device. Runtime checks do not blindly trust this table.
+Eine **direkte Tuya→ESPHome-OTA-Migration** wird *nicht implementiert und nicht getestet*. Sie ist ausdrücklich außerhalb des Umfangs dieses PR-Paares.
 
-## Original TRV16 limitation
+## Testlayout für 2 MiB WXU
 
-The original WXU dump has FDCM at 0x177000 and compressed slot at 0x178000 with only 400 KiB. Packing its full APP chain with the 8 KiB bootloader dictionary gives 754,784 bytes, which does not fit. This firmware requires a wired first migration with matching bootloader/layout, or a different migration scheme. It cannot install the new layout safely through the legacy OTA partition.
+| Bereich | Offset | Größe |
+|---|---|---:|
+| Bootloader | 0x000000–0x007FFF | 32 KiB |
+| Aktives APP-Image | 0x008000–0x13EFFF | 1244 KiB |
+| FDCM Bootstatus | 0x13F000–0x13FFFF | 4 KiB |
+| XZ OTA-Staging | 0x140000–0x1DFFFF | 640 KiB |
+| Vorläufig reservierter NV-/RF-Tail | 0x1E0000–0x1FFFFF | 128 KiB |
 
-## Build, OTA and risk
+Die Tail-Reservierung schützt bisher unvollständig identifizierte Daten aus dem originalen WXU-Dump und wird *nicht* für eine Tuya-In-Place-Migration benötigt. Die Reserve bleibt bis zur Klärung der Datenbelegung erhalten. Die Firmware muss aus dem 640-KiB-OTA-Slot passen und darf das aktive 1244-KiB-Fenster nicht überschreiten. Diese Adressen sind konfiguriert; der Runtime-Writer prüft sie anhand der tatsächlichen Hardware.
 
-Use ordinary ESPHome YAML with xr806 board wxu, wifi, and ota platform esphome with authentication/encryption. Compile using esphome compile. For network update, use esphome upload YOUR.yaml --device TARGET_IP. The platform hook sends firmware.ota.bin. If the package cannot be built, OTA upload is refused before any flash erase. Normal firmware.bin must not be sent as OTA payload.
+## Artefakte und Validierung
 
-**Not atomic A/B:** the XRadio compression bootloader reads seq1 from staging, then erases and expands into ACTIVE seq0 on restart. Power failure during expansion can destroy the previous working image. A valid FDCM selector is not an independent rollback partition. Hardware supply and recovery must be validated.
+- `firmware.bin` – vollständige XRadio-AWIH-Firmware für den kabelgebundenen UART-Erstflash.
+- `firmware.ota.bin` – gültiges AWIH/XZ-OTA-Image mit 8-KiB-LZMA2-Dictionary; darf nur über OTA übertragen werden.
+- `stamp_ota_header.py` – setzt ROM-kompatible OTA-Felder in den Boot-Header des frisch gebauten AWIH-Images. Unpassende Adressen oder eine Überschneidung des reservierten Tail-Bereichs führen zum Fehler.
+- `make_ota_xz.py` – konstruiert den XZ-Stream mit CRC32, prüft AWIH-Prüfsummen, die vollständige APP-Segmentkette und das physische Slotlimit.
+- **Ein fehlgeschlagenes OTA-Paket lässt den `esphome compile`-Vorgang bei aktiviertem OTA inzwischen fehlschlagen**, statt bloß eine Warnung auszugeben.
+- SDK-CI kompiliert ARM-Beispielfirmwares und verlangt zusätzlich ein reproduzierbares `firmware.ota.bin` aus dem OTA-Smoke-Build. Die Host-CI prüft Paket-/Header-/Geometriefehler.
 
-Outstanding: ARM CI build; target image-size proof, runtime PM/wakelock, actual OTA to a separate WXU, readback, controlled interruptions before and after commit, bootloader XZ decompression with WLAN/HC32 resynchronization, and a tested physical recovery procedure.
+## Noch nicht nachgewiesen
+
+Der Flash und der anschließende Boot über RX/TX sowie ein echter OTA-Zyklus auf einer physischen WXU-MCU sind noch nicht getestet. Es gibt **kein atomisches A/B-Rollback**: Bei der Kompressionspolicy wird das aktive APP beim Neustart aus dem XZ-Slot überschrieben. Stromausfall während der Bootloader-Dekompression kann die Firmware zerstören. Hardware-Readback, Recovery, PM/Wake, WLAN und Tuya-MCU-UART sind deshalb vor einer produktiven Freigabe zu prüfen.
