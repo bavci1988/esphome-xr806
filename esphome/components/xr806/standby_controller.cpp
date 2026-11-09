@@ -48,6 +48,18 @@ bool XR806StandbyController::register_participant(XR806StandbyParticipant *parti
   return true;
 }
 
+void XR806StandbyController::request_preflight(bool requested) {
+  if (requested && !this->preflight_requested_)
+    this->preflight_since_ms_ = millis();
+  this->preflight_requested_ = requested;
+}
+
+bool XR806StandbyController::services_quiesced() const {
+  const uint32_t busy = XR806LowPowerPolicy::NETWORK_BUSY | XR806LowPowerPolicy::API_BUSY |
+                        XR806LowPowerPolicy::OTA_BUSY | XR806LowPowerPolicy::MDNS_BUSY;
+  return this->may_quiesce() && (lowpower_policy().blockers() & busy) == 0;
+}
+
 void XR806StandbyController::request_standby(bool requested) {
   // Only the application or MCU driver may request entry, never a periodic
   // platform timer. A preflight must finish within a bounded 10s interval.
@@ -129,6 +141,11 @@ void XR806StandbyController::loop() {
     return;
 
   auto &p = lowpower_policy();
+  if (this->preflight_requested_ &&
+      static_cast<uint32_t>(millis() - this->preflight_since_ms_) > HANDSHAKE_PREFLIGHT_TIMEOUT_MS) {
+    ESP_LOGW(TAG, "MCU CMD38 service preflight expired without confirmed drain");
+    this->request_preflight(false);
+  }
   if (p.standby_requested() &&
       static_cast<uint32_t>(millis() - this->request_since_ms_) > PREFLIGHT_TIMEOUT_MS) {
     ESP_LOGW(TAG, "Suspend preflight timed out; releasing service owners and refusing PM entry");
@@ -137,8 +154,9 @@ void XR806StandbyController::loop() {
   }
   // Services cannot release API/mDNS/WLAN votes if preflight runs only
   // after all votes are already idle. No PM call is made here.
+  const bool draining = p.standby_requested() || this->preflight_requested_;
   for (size_t i = 0; i < this->participant_count_; ++i)
-    this->participants_[i]->standby_preflight(p.standby_requested());
+    this->participants_[i]->standby_preflight(draining);
   const uint32_t blockers = p.blockers();
   constexpr uint32_t OWNED_BY_COORDINATOR =
       XR806LowPowerPolicy::SCHEDULER_BUSY | XR806LowPowerPolicy::WAKE_NOT_READY | XR806LowPowerPolicy::NOT_REQUESTED;
