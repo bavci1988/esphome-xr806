@@ -49,9 +49,12 @@ bool XR806StandbyController::register_participant(XR806StandbyParticipant *parti
 }
 
 void XR806StandbyController::request_standby(bool requested) {
-  // This method is invoked by the requesting application or MCU driver,
-  // never by a periodic background timer in the XR806 platform.
-  lowpower_policy().request_standby(requested);
+  // Only the application or MCU driver may request entry, never a periodic
+  // platform timer. A preflight must finish within a bounded 10s interval.
+  auto &policy = lowpower_policy();
+  if (requested && !policy.standby_requested())
+    this->request_since_ms_ = millis();
+  policy.request_standby(requested);
 }
 
 void XR806StandbyController::setup() {
@@ -106,11 +109,19 @@ bool XR806StandbyController::is_any_transport_unowned_() const {
 bool XR806StandbyController::may_quiesce() const {
   if (this->is_any_transport_unowned_())
     return false;
+  const uint32_t required = (this->no_network_ ? 0u : XR806LowPowerPolicy::NETWORK_BUSY) |
+                            (this->no_api_ ? 0u : XR806LowPowerPolicy::API_BUSY) |
+                            (this->no_ota_ ? 0u : XR806LowPowerPolicy::OTA_BUSY) |
+                            (this->no_mdns_ ? 0u : XR806LowPowerPolicy::MDNS_BUSY);
+  uint32_t registered = 0;
   for (size_t i = 0; i < this->participant_count_; ++i) {
+    registered |= this->participants_[i]->owned_services();
     if (!this->participants_[i]->may_quiesce())
       return false;
   }
-  return true;
+  // If OTA/mDNS/API/WLAN is configured without a real lifecycle owner,
+  // refusing standby is mandatory; a missing owner isn't "idle".
+  return (registered & required) == required;
 }
 
 void XR806StandbyController::loop() {
@@ -118,6 +129,12 @@ void XR806StandbyController::loop() {
     return;
 
   auto &p = lowpower_policy();
+  if (p.standby_requested() &&
+      static_cast<uint32_t>(millis() - this->request_since_ms_) > PREFLIGHT_TIMEOUT_MS) {
+    ESP_LOGW(TAG, "Suspend preflight timed out; releasing service owners and refusing PM entry");
+    this->request_standby(false);
+    this->state_.postpone();
+  }
   // Services cannot release API/mDNS/WLAN votes if preflight runs only
   // after all votes are already idle. No PM call is made here.
   for (size_t i = 0; i < this->participant_count_; ++i)
