@@ -34,12 +34,15 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
     return OTA_RESPONSE_ERROR_UNSUPPORTED_OTA_TYPE;
   if (!this->update_lock_.try_acquire())
     return OTA_RESPONSE_ERROR_UPDATE_BUSY;
-  if (image_size > std::numeric_limits<uint32_t>::max())
+  if (image_size > std::numeric_limits<uint32_t>::max()) {
+    this->update_lock_.release();
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
+  }
 
   const image_ota_param_t *runtime = image_get_ota_param();
   if (runtime == nullptr) {
     ESP_LOGE(TAG, "Cannot read XR806 ROM OTA geometry");
+    this->update_lock_.release();
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
   }
   // Serial-flashed AWIH images do not contain an initialized FDCM sector.
@@ -48,14 +51,18 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
   image_cfg_t cfg{};
   const bool has_cfg = image_get_cfg(&cfg) == 0;
   const image_seq_t running = image_get_running_seq();
-  if (running >= IMAGE_SEQ_NUM || running != runtime->running_seq)
+  if (running >= IMAGE_SEQ_NUM || running != runtime->running_seq) {
+    this->update_lock_.release();
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
+  }
 
   const uint8_t flash_id = runtime->flash[running];
   struct FlashDev *dev = getFlashDev(flash_id);
   struct FlashChip *chip = dev != nullptr ? getFlashChip(dev) : nullptr;
-  if (chip == nullptr || chip->cfg.mSize == 0)
+  if (chip == nullptr || chip->cfg.mSize == 0) {
+    this->update_lock_.release();
     return OTA_RESPONSE_ERROR_WRONG_CURRENT_FLASH_CONFIG;
+  }
 
   xr806::WriterGeometry g{};
   g.flash_size = chip->cfg.mSize;  // JEDEC-probed physical flash capacity
@@ -79,6 +86,7 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
   if (this->plan_.error != xr806::WriterError::OK) {
     ESP_LOGE(TAG, "XR806 OTA runtime layout rejected (%u): active=0x%X staging=0x%X FDCM=0x%X",
              static_cast<unsigned>(this->plan_.error), g.image_addr[0], g.image_addr[1], g.metadata_addr);
+    this->update_lock_.release();
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
   }
 #ifdef USE_XR806_STANDBY_CONTROLLER
@@ -87,8 +95,10 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
     controller->request_standby(false);
 #endif
   ota_native_wakelock.name = const_cast<char *>("xr806.ota.flash");
-  if (pm_wake_lock(&ota_native_wakelock) != 0)
+  if (pm_wake_lock(&ota_native_wakelock) != 0) {
+    this->update_lock_.release();
     return OTA_RESPONSE_ERROR_UPDATE_BUSY;
+  }
   this->pm_held_ = true;
   if (!has_cfg) {
     // First authenticated OTA after a wired RX/TX AWIH flash. Only FDCM at
@@ -240,6 +250,8 @@ void XR806OTABackend::stop_() {
     }
     this->pm_held_ = false;
   }
+  // No permanent "busy" OTA state after an interrupted/invalid update.
+  this->update_lock_.release();
 }
 
 void XR806OTABackend::abort() {
