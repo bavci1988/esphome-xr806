@@ -6,6 +6,9 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/progmem.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/standby_controller.h"
+#endif
 // On ESP8266 and RP2040 the scheduler-backed MDNS.update() polling window is armed by
 // IP state listener events on whichever network interface is configured.
 #if (defined(USE_ESP8266) || defined(USE_RP2)) && \
@@ -72,6 +75,9 @@ struct MDNSService {
 };
 
 class MDNSComponent final : public Component
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    , public xr806::XR806StandbyParticipant
+#endif
 #ifdef USE_MDNS_WIFI_LISTENER
     ,
                             public wifi::WiFiIPStateListener
@@ -87,6 +93,12 @@ class MDNSComponent final : public Component
 {
  public:
   void setup() override;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  void standby_preflight(bool requested) override;
+  bool prepare_for_standby() override;
+  void standby_cancelled() override;
+  void standby_resumed(const xr806::XR806StandbyResume &event) override;
+#endif
   void dump_config() override;
 
   /// Size of buffer required for config hash hex string (8 hex chars + null terminator)
