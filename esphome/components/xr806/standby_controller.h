@@ -4,6 +4,12 @@
 #include <cstddef>
 
 #include "esphome/core/component.h"
+
+#ifdef USE_XR806_STANDBY_CONTROLLER
+extern "C" {
+#include "pm/pm.h"
+}
+#endif
 #include "standby_coordinator_state.h"
 #include "standby_service_lifecycle.h"
 
@@ -98,6 +104,11 @@ class XR806StandbyController final : public Component {
   static constexpr size_t SERVICE_COUNT = static_cast<size_t>(XR806StandbyService::COUNT);
   XR806StandbyServiceOwner *service_owners_[SERVICE_COUNT]{};
   XR806StandbyServiceLifecycle services_{};
+  struct wakelock services_pm_wakelock_{};
+  bool services_pm_wakelock_held_{false};
+  bool services_pm_wakelock_required_{false};
+  bool acquire_service_wakelock_();
+  bool release_service_wakelock_();
   XR806StandbyCoordinatorState state_{};
 
   uint32_t wake_after_ms_{3000};
