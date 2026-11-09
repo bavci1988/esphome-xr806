@@ -34,6 +34,15 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
     return OTA_RESPONSE_ERROR_UNSUPPORTED_OTA_TYPE;
   if (!this->update_lock_.try_acquire())
     return OTA_RESPONSE_ERROR_UPDATE_BUSY;
+  // A previous aborted transfer must not poison the next OTA attempt.
+  this->received_ = 0;
+  this->declared_ = 0;
+  this->required_ = 0;
+  this->preface_len_ = 0;
+  this->md5_supplied_ = false;
+  this->md5_valid_ = false;
+  this->writing_ = false;
+  this->committed_ = false;
   if (image_size > std::numeric_limits<uint32_t>::max()) {
     this->update_lock_.release();
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
@@ -261,6 +270,12 @@ void XR806OTABackend::abort() {
     this->stop_();
   // On cancellation/invalid image, leave FDCM selection unchanged.
   this->writing_ = false;
+  this->received_ = 0;
+  this->declared_ = 0;
+  this->required_ = 0;
+  this->preface_len_ = 0;
+  this->md5_supplied_ = false;
+  this->md5_valid_ = false;
 }
 }  // namespace esphome::ota
 #endif  // USE_XR806
