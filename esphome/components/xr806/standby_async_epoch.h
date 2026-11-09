@@ -20,8 +20,7 @@ class XR806StandbyAsyncEpoch {
         return false;
       }
       const uint32_t next = ((previous + 2u) & ~1u) | (suspend ? 1u : 0u);
-      if (state_.compare_exchange_weak(previous, next, std::memory_order_acq_rel,
-                                       std::memory_order_acquire)) {
+      if (state_.compare_exchange_weak(previous, next, std::memory_order_acq_rel, std::memory_order_acquire)) {
         return true;
       }
     }
@@ -33,9 +32,7 @@ class XR806StandbyAsyncEpoch {
   // numeric generation is intentionally not exposed as a time or counter.
   uint32_t epoch() const { return state_.load(std::memory_order_acquire); }
 
-  bool current(uint32_t token) const {
-    return (token & 1u) != 0u && state_.load(std::memory_order_acquire) == token;
-  }
+  bool current(uint32_t token) const { return (token & 1u) != 0u && state_.load(std::memory_order_acquire) == token; }
 
  private:
   std::atomic<uint32_t> state_{0};

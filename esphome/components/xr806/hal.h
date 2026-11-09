@@ -5,12 +5,12 @@
 #include <cstdint>
 #include "esphome/core/main_task.h"
 
-// XR806: ISR-relevanten Code im SRAM platzieren
+// Place interrupt-time code in SRAM.
 #ifndef IRAM_ATTR
 #define IRAM_ATTR __attribute__((section(".sram_text")))
 #endif
 
-// Implementiert im OpenXR806-SDK
+// Implemented by the vendor SDK port.
 extern "C" uint32_t xr806_millis(void);
 extern "C" uint64_t xr806_micros64(void);
 extern "C" void xr806_delay(uint32_t ms);
@@ -22,14 +22,14 @@ extern "C" uint32_t xr806_cpu_freq_hz(void);
 namespace esphome::xr806 {}
 
 namespace esphome {
-// Prüft, ob wir im registrierten ESPHome-Haupttask laufen.
+// True when called from the ESPHome main loop task.
 __attribute__((always_inline)) inline bool is_main_loop_thread() {
   return esphome_main_task_handle != nullptr && xTaskGetCurrentTaskHandle() == esphome_main_task_handle;
 }
 
 void arch_init();
 
-// Cortex-M33: Interrupt- und Exception-Kontext erkennen
+// Cortex-M33: detect interrupt or exception context.
 __attribute__((always_inline)) inline bool in_isr_context() {
   uint32_t ipsr;
   __asm__ volatile("mrs %0, ipsr" : "=r"(ipsr));

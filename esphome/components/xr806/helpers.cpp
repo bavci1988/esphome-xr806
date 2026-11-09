@@ -24,7 +24,7 @@ bool random_bytes(uint8_t *data, size_t length) {
     uint32_t random_words[4] = {};
     bool success = false;
 
-    // Gleiche maximale Versuchszahl wie beim SDK-PRNG-Seeding.
+    // Same retry limit as the SDK PRNG seeding.
     for (int attempt = 0; attempt < 5; ++attempt) {
       if (HAL_TRNG_Extract(0, random_words) == HAL_OK) {
         success = true;
@@ -33,7 +33,7 @@ bool random_bytes(uint8_t *data, size_t length) {
     }
 
     if (!success) {
-      // Bei Fehlern keine unvollständigen Zufallsdaten zurückgeben.
+      // Never return partially filled random data.
       std::memset(start, 0, original_length);
       return false;
     }

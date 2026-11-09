@@ -15,12 +15,7 @@ struct XR806NetworkSnapshot {
   char gateway[16]{};
   char netmask[16]{};
 
-  bool ready() const {
-    return associated &&
-           interface_up &&
-           link_up &&
-           ipv4_assigned;
-  }
+  bool ready() const { return associated && interface_up && link_up && ipv4_assigned; }
 };
 
 }  // namespace esphome::xr806
@@ -30,7 +25,6 @@ struct netif;
 
 namespace esphome::xr806 {
 
-XR806NetworkSnapshot read_xr806_network_snapshot(
-    struct netif *interface);
+XR806NetworkSnapshot read_xr806_network_snapshot(struct netif *interface);
 
 }  // namespace esphome::xr806

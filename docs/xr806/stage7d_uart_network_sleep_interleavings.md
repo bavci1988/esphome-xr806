@@ -13,7 +13,7 @@ The Stage-7d changes build on existing integration in `dev`:
 | Tuya MCU | One queued CMD01/CMD02/CMD09 transaction at a time; CMD09 ACK and matching CMD05 status are distinct; CMD02/04 requires the complete 17-DP series | Protocol has no transaction ID; an arbitrarily late same-command ACK is ambiguous, so timeouts quarantine writes |
 | XR806 UART0 | Vendor PM wakelock, RX ring/framing health, full TX TEMT, PM idle vote | A hardware TX-empty flag is not an HC32 application ACK |
 | XR806 Wi-Fi | Explicit `network_suspend` opt-in, wait for API/mDNS/OTA owner votes, disable STA, confirm association/link down, release vendor PM wakelock only at completion, re-enable on abort/resume | No claim that all proprietary WLAN driver work or real low current have been hardware-verified |
-| Native API | Reject drain when clients are connected; close TCP listener before publishing idle; reopen on abort/resume | Outgoing dial-out is not quiesceable |
+| Native API | `xr806/api_standby.*` (since 2026-11-09): votes idle only while draining with no client connected; a late client flips the vote back to busy and aborts the attempt; the listener stays open (once WLAN is parked no client can arrive) | Outgoing dial-out is not quiesceable |
 | mDNS | Execute unregister on lwIP thread, not ESPHome main loop, and publish idle only after callback completion | In-flight stale callbacks are epoch-tagged; no power measurement |
 | OTA | `XR806OTAStandbyGuard` tracks OTA activity and holds OTA_BUSY; schema currently rejects unsupported XR806 OTA flash backend | **No real OTA suspend/resume** exists. Never release OTA_BUSY in an OTA-enabled configuration until a complete flash writer + listener lifecycle can be verified |
 
@@ -38,10 +38,10 @@ HC32 GPIO-wake event after timer-only wake.
    lock fails, the transport latches an error, retains its CPU-busy veto and
    skips TX entirely; a software blocker alone must never be used to start
    physical UART traffic while PM admission may already be running.
-4. **Native API shutdown barrier:** If reboot/shutdown begins while the
-   listener is already parked, the API explicitly reasserts API_BUSY and
-   withdraws PM/preflight before closing anything. A paused API listener
-   therefore cannot silently authorize CPU standby during teardown.
+4. **Native API shutdown barrier:** `XR806APIStandby::on_shutdown()`
+   reasserts API_BUSY and withdraws PM/preflight on reboot/shutdown, so a
+   teardown can never authorize CPU standby. (Before 2026-11-09 the API
+   listener was parked inside `api_server.cpp`; that code is gone.)
 5. **mDNS callback generation:** `XR806StandbyAsyncEpoch` is shared by
    the real lwIP-backed mDNS owner and the host tests. A single
    atomic CAS word encodes both the suspension request and its generation;
@@ -64,7 +64,7 @@ HC32 CMD38
   WLAN/API/mDNS/OTA may_quiesce? [OTA if present: NO]
     | no -> CMD38 busy
     v yes
-  Preflight drains API listener -> mDNS lwIP unregister -> WLAN STA disconnect
+  Preflight waits for zero API clients -> mDNS lwIP unregister -> WLAN STA disconnect
     | any new RX/TX, OTA, client, preflight timeout -> cancel, resume owners
     v
   CMD38/00 only after owner votes are idle and UART is drained

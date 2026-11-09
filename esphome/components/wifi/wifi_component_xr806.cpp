@@ -27,15 +27,16 @@ extern "C" {
 #include "lwip/netif.h"
 }
 
-// Radio power settings from xr806: wlan:, used for power_save_mode LIGHT and HIGH.
-#ifndef XR806_WLAN_DTIM
-#define XR806_WLAN_DTIM 1
-#endif
-#ifndef XR806_WLAN_LISTEN_INTERVAL
-#define XR806_WLAN_LISTEN_INTERVAL 0
-#endif
-
 namespace esphome::wifi {
+
+// Radio power settings from xr806: wlan:, used for power_save_mode LIGHT and HIGH.
+#ifdef XR806_WLAN_DTIM
+static constexpr uint8_t WLAN_DTIM = XR806_WLAN_DTIM;
+static constexpr uint8_t WLAN_LISTEN_INTERVAL = XR806_WLAN_LISTEN_INTERVAL;
+#else
+static constexpr uint8_t WLAN_DTIM = 1;
+static constexpr uint8_t WLAN_LISTEN_INTERVAL = 0;
+#endif
 
 ESPHOME_LOG_TAG(TAG, "wifi_xr806");
 
@@ -94,11 +95,13 @@ void WiFiComponent::wifi_pre_setup_() {
     observer_base *observer =
         sys_callback_observer_create(CTRL_MSG_TYPE_NETWORK, NET_CTRL_MSG_ALL, network_event_cb, nullptr);
     s_observer_attached = observer != nullptr && sys_ctrl_attach(observer) == 0;
-    if (!s_observer_attached)
+    if (!s_observer_attached) {
       ESP_LOGW(TAG, "Cannot attach WLAN event observer; scans and failures rely on timeouts");
+    }
   }
-  if (net_switch_mode(WLAN_MODE_STA) != 0)
+  if (net_switch_mode(WLAN_MODE_STA) != 0) {
     ESP_LOGW(TAG, "Cannot switch WLAN to station mode");
+  }
 }
 
 bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
@@ -132,9 +135,9 @@ static bool apply_power_save_now(bool enable) {
   if (nif == nullptr)
     return false;
   if (enable) {
-    if (wlan_ext_request(nif, WLAN_EXT_CMD_SET_PM_DTIM, XR806_WLAN_DTIM) != 0)
+    if (wlan_ext_request(nif, WLAN_EXT_CMD_SET_PM_DTIM, WLAN_DTIM) != 0)
       return false;
-    if (wlan_ext_request(nif, WLAN_EXT_CMD_SET_LISTEN_INTERVAL, XR806_WLAN_LISTEN_INTERVAL) != 0)
+    if (wlan_ext_request(nif, WLAN_EXT_CMD_SET_LISTEN_INTERVAL, WLAN_LISTEN_INTERVAL) != 0)
       return false;
   }
   return wlan_set_ps_mode(nif, enable ? 1 : 0) == 0;
