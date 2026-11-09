@@ -16,6 +16,17 @@ Plattformkomponenten interpretieren keine Tuya-CMD-/DP-Daten.
 | WLAN | `xr806/wifi_component.cpp` | Explizites `network_suspend: true`, API/mDNS/OTA abgearbeitet, STA deaktiviert und Link/Association inaktiv, native WLAN-PM-Sperre freigegeben |
 | OTA | `xr806/standby_ota_guard.h` | **Noch nicht freigabefähig:** OTA-Events werden überwacht, aber keinem bekannten OTA-Backend wird fälschlich ein garantierter Listener-/Flash-Drain zugeschrieben |
 
+**Zusätzliche Build-Grenze:** Der ESPHome-Quellcode in
+`esphome/components/esphome/ota/__init__.py` führt XR806
+derzeit **nicht** unter den Plattformen mit unterstütztem
+`ota: - platform: esphome`-Flash-Backend. Die vorhandene
+XR806-OTA-Integration ist daher nur eine vorbereitete,
+fail-closed State-Listener-/Veto-Schnittstelle und **keine**
+funktionierende XR806-OTA-Update-Implementierung.
+Ein später entwickelter XR806-OTA-Backend-Treiber benötigt
+vor jeder Schlaf-Freigabe einen eigenen nachgewiesenen
+Flash-/Socket-/Listener-Drain.
+
 Die verpflichtende Vollständigkeitsprüfung `XR806StandbyController::may_quiesce()`
 verhindert, dass ein vorhandener, aber nicht registrierter Dienst
 als *idle* gilt. Es gibt keine generische „alle Netzwerkdienste sind
