@@ -392,7 +392,10 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
                        esphome::xr806::XR806LowPowerPolicy::API_BUSY |
                        esphome::xr806::XR806LowPowerPolicy::MDNS_BUSY |
                        esphome::xr806::XR806LowPowerPolicy::OTA_BUSY)) != 0;
-      const bool accepted = controller != nullptr && this->lp_bridge_registered_ &&
+      const bool wake_matches_mcu = controller != nullptr && controller->has_wake_pin() &&
+                                    controller->requires_external_sync() &&
+                                    controller->wake_pin() == this->lp_product_.wake_gpio;
+      const bool accepted = wake_matches_mcu && this->lp_bridge_registered_ &&
                             this->lp_standby_.accept_request(
                                 this->lp_product_.sleep_mode == 1,
                                 this->low_power_ready_for_sleep_(true),
