@@ -13,6 +13,10 @@
 
 extern "C" {
 #include "driver/chip/hal_uart.h"
+#ifdef USE_XR806_LOWPOWER
+#include "xr_config.h"
+#include "pm/pm.h"
+#endif
 }
 
 namespace esphome::uart {
@@ -65,6 +69,8 @@ class XR806UARTComponent final : public UARTComponent, public Component {
   bool tx_hardware_idle_() const;
 
 #ifdef USE_XR806_LOWPOWER
+  struct wakelock uart_pm_wakelock_{};
+  bool uart_pm_wakelock_held_{false};
   uint32_t last_uart_activity_ms_{0};
   static constexpr uint32_t UART_IDLE_GUARD_MS = 200;
 #endif
