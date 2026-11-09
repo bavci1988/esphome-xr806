@@ -2,7 +2,7 @@ name: XR806 Low-Power Policy (MCU-independent)
 
 on:
   push:
-    branches: [dev, test/xr806-lowpower-stage7a, "stage7b/standby-wakeup"]
+    branches: [dev, feature/xr806-standby-race-arbiter]
   pull_request:
     branches: [dev]
     paths:
@@ -15,6 +15,8 @@ on:
       - "tests/xr806/standby_trial_state_test.cpp"
       - "tests/xr806/standby_coordinator_state_test.cpp"
       - "esphome/components/xr806/standby_coordinator_state.h"
+      - "esphome/components/xr806/standby_network_lifecycle.h"
+      - "tests/xr806/standby_race_network_lifecycle_test.cpp"
       - "esphome/components/xr806/standby_controller.h"
       - "esphome/components/xr806/standby_controller.cpp"
       - "tests/xr806/lowpower_stage7a_test.cpp"
@@ -44,4 +46,8 @@ jobs:
             tests/xr806/standby_coordinator_state_test.cpp \
             -o /tmp/xr806-stage7b-production-state-test
           /tmp/xr806-stage7b-production-state-test
-          echo "PASS MCU-independent low-power policy, one-shot trial and production coordinator state"
+          g++ -std=gnu++20 -Wall -Wextra -Werror -pthread -I. \
+            tests/xr806/standby_race_network_lifecycle_test.cpp \
+            -o /tmp/xr806-standby-network-race-test
+          /tmp/xr806-standby-network-race-test
+          echo "PASS low-power admission fence and 120 WLAN/API/OTA/mDNS/UART interleavings"
