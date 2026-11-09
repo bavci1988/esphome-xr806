@@ -3,6 +3,7 @@ on:
   push:
     branches: [dev]
     paths: ['.github/workflows/xr806-post-merge-cleanup-once.yml']
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
