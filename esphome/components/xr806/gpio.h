@@ -30,23 +30,17 @@ class XR806GPIOPin final : public GPIOPin {
   void detach_interrupt() const;
 
   // XR806_IRQ_FALLBACK_V1
-  bool interrupt_attached() const { return interrupt_attached_; }
 
-  template<typename T>
-  void attach_interrupt(void (*func)(T *), T *arg,
-                        gpio::InterruptType type) const {
-    this->attach_interrupt_(
-        reinterpret_cast<void (*)(void *)>(func), arg, type);
+  template<typename T> void attach_interrupt(void (*func)(T *), T *arg, gpio::InterruptType type) const {
+    this->attach_interrupt_(reinterpret_cast<void (*)(void *)>(func), arg, type);
   }
 
  protected:
-  void attach_interrupt_(void (*func)(void *), void *arg,
-                         gpio::InterruptType type) const;
+  void attach_interrupt_(void (*func)(void *), void *arg, gpio::InterruptType type) const;
 
   uint8_t pin_{};
   bool inverted_{};
   gpio::Flags flags_{};
-  mutable bool interrupt_attached_{false};
 };
 
 }  // namespace esphome::xr806

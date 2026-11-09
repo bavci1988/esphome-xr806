@@ -19,7 +19,6 @@ from esphome.const import (
 from . import DOMAIN
 from .boards import WXU_GPIO_PADS
 
-
 xr806_ns = cg.esphome_ns.namespace("xr806")
 
 XR806GPIOPin = xr806_ns.class_(
@@ -27,13 +26,12 @@ XR806GPIOPin = xr806_ns.class_(
     cg.InternalGPIOPin,
 )
 
-# Reserved until board/peripheral ownership is configurable.
+# Reserved until board/peripheral ownership is configurable. UART0 (PB0/PB1) is
+# usable: the uart: component claims it, and ESPHome rejects a pin used twice.
 _RESERVED = {
     ("A", 21): "UART2 RX",
     ("A", 22): "UART2 TX",
     ("A", 23): "Boot/test mode",
-    ("B", 0): "UART0 TX",
-    ("B", 1): "UART0 RX",
     ("B", 14): "UART1 TX",
     ("B", 15): "UART1 RX",
 }
@@ -47,10 +45,7 @@ _AVAILABLE = set(WXU_GPIO_PADS.values())
 def validate_gpio_pin(value):
     """Translate PAx/PBx into the XR806 internal GPIO encoding."""
     if not isinstance(value, str):
-        raise cv.Invalid(
-            "XR806 pins must use PAx or PBx notation, "
-            "for example PA20"
-        )
+        raise cv.Invalid("XR806 pins must use PAx or PBx notation, for example PA20")
 
     value = value.strip().upper()
 
@@ -58,8 +53,7 @@ def validate_gpio_pin(value):
 
     if match is None:
         raise cv.Invalid(
-            f"Invalid XR806 GPIO '{value}': "
-            "expected PA0..PA23 or PB0..PB15"
+            f"Invalid XR806 GPIO '{value}': expected PA0..PA23 or PB0..PB15"
         )
 
     bank = match.group(1)
@@ -67,14 +61,10 @@ def validate_gpio_pin(value):
     pin = (bank, number)
 
     if pin not in _AVAILABLE:
-        raise cv.Invalid(
-            f"GPIO {value} is not exposed on the WXU module"
-        )
+        raise cv.Invalid(f"GPIO {value} is not exposed on the WXU module")
 
     if pin in _RESERVED:
-        raise cv.Invalid(
-            f"GPIO {value} is reserved: {_RESERVED[pin]}"
-        )
+        raise cv.Invalid(f"GPIO {value} is reserved: {_RESERVED[pin]}")
 
     # Internal encoding: PAx=x, PBx=32+x.
     return number + (32 if bank == "B" else 0)
@@ -90,19 +80,13 @@ def validate_gpio_usage(config):
     pulldown = mode[CONF_PULLDOWN]
 
     if is_input == is_output:
-        raise cv.Invalid(
-            "XR806 GPIO must be either INPUT or OUTPUT"
-        )
+        raise cv.Invalid("XR806 GPIO must be either INPUT or OUTPUT")
 
     if pullup and pulldown:
-        raise cv.Invalid(
-            "Pull-up and pull-down cannot both be enabled"
-        )
+        raise cv.Invalid("Pull-up and pull-down cannot both be enabled")
 
     if is_output and (pullup or pulldown):
-        raise cv.Invalid(
-            "XR806 output GPIO does not support pull resistors"
-        )
+        raise cv.Invalid("XR806 output GPIO does not support pull resistors")
 
     return config
 
@@ -129,10 +113,6 @@ async def xr806_pin_to_code(config):
     if config[CONF_INVERTED]:
         cg.add(var.set_inverted(True))
 
-    cg.add(
-        var.set_flags(
-            pins.gpio_flags_expr(config[CONF_MODE])
-        )
-    )
+    cg.add(var.set_flags(pins.gpio_flags_expr(config[CONF_MODE])))
 
     return var

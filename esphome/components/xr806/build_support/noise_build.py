@@ -1,12 +1,13 @@
 """Incremental ARM cross-build of ESPHome's pinned noise-c and libsodium."""
+
 from __future__ import annotations
 
 import fcntl
 import hashlib
 import json
+from pathlib import Path
 import shutil
 import subprocess
-from pathlib import Path
 
 from .dependencies import ensure_dependency
 
@@ -59,22 +60,30 @@ def prepare_noise_build() -> dict[str, str]:
     """Resolve source pins, cross-build archives and provide Make variables."""
     noise = ensure_dependency("noise_c")
     sodium = ensure_dependency("libsodium")
-    cc, ar, ranlib = (_tool(x) for x in (
-        "arm-none-eabi-gcc", "arm-none-eabi-ar", "arm-none-eabi-ranlib"
-    ))
+    cc, ar, ranlib = (
+        _tool(x)
+        for x in ("arm-none-eabi-gcc", "arm-none-eabi-ar", "arm-none-eabi-ranlib")
+    )
     _tool("cmake")
-    digest = hashlib.sha256(json.dumps({
-        "noise": _output("git", "rev-parse", "HEAD", cwd=noise),
-        "sodium": _output("git", "rev-parse", "HEAD", cwd=sodium),
-        "compiler": cc,
-        "compiler_version": _output(cc, "--version").splitlines()[0],
-        "ar": ar,
-        "ranlib": ranlib,
-        "flags": ARM_FLAGS,
-        "cmake_project": CMAKE_PROJECT,
-        "patches": [(p.name, hashlib.sha256(p.read_bytes()).hexdigest())
-                    for p in sorted((sodium / "patches").glob("*.patch"))],
-    }, sort_keys=True).encode()).hexdigest()[:24]
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "noise": _output("git", "rev-parse", "HEAD", cwd=noise),
+                "sodium": _output("git", "rev-parse", "HEAD", cwd=sodium),
+                "compiler": cc,
+                "compiler_version": _output(cc, "--version").splitlines()[0],
+                "ar": ar,
+                "ranlib": ranlib,
+                "flags": ARM_FLAGS,
+                "cmake_project": CMAKE_PROJECT,
+                "patches": [
+                    (p.name, hashlib.sha256(p.read_bytes()).hexdigest())
+                    for p in sorted((sodium / "patches").glob("*.patch"))
+                ],
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()[:24]
 
     if not list((sodium / "patches").glob("*.patch")):
         raise RuntimeError("libsodium port patches missing")
@@ -91,26 +100,38 @@ def prepare_noise_build() -> dict[str, str]:
             _patched_sodium(sodium, patched)
 
             toolchain = project / "arm.cmake"
-            toolchain.write_text("\n".join((
-                "set(CMAKE_SYSTEM_NAME Generic)",
-                "set(CMAKE_SYSTEM_PROCESSOR arm)",
-                "set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)",
-                f'set(CMAKE_C_COMPILER "{cc}")',
-                f'set(CMAKE_ASM_COMPILER "{cc}")',
-                f'set(CMAKE_AR "{ar}")',
-                f'set(CMAKE_RANLIB "{ranlib}")',
-                f'set(CMAKE_C_FLAGS_INIT "{ARM_FLAGS}")',
-                f'set(CMAKE_ASM_FLAGS_INIT "{ARM_FLAGS}")',
-            )) + "\n")
+            toolchain.write_text(
+                "\n".join(
+                    (
+                        "set(CMAKE_SYSTEM_NAME Generic)",
+                        "set(CMAKE_SYSTEM_PROCESSOR arm)",
+                        "set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)",
+                        f'set(CMAKE_C_COMPILER "{cc}")',
+                        f'set(CMAKE_ASM_COMPILER "{cc}")',
+                        f'set(CMAKE_AR "{ar}")',
+                        f'set(CMAKE_RANLIB "{ranlib}")',
+                        f'set(CMAKE_C_FLAGS_INIT "{ARM_FLAGS}")',
+                        f'set(CMAKE_ASM_FLAGS_INIT "{ARM_FLAGS}")',
+                    )
+                )
+                + "\n"
+            )
             (project / "CMakeLists.txt").write_text(CMAKE_PROJECT)
 
-            subprocess.run([
-                "cmake", "-S", str(project), "-B", str(build),
-                "-DCMAKE_TOOLCHAIN_FILE=" + str(toolchain),
-                "-DCMAKE_BUILD_TYPE=MinSizeRel",
-                "-DNOISE_SOURCE=" + str(noise),
-                "-DSODIUM_SOURCE=" + str(patched),
-            ], check=True)
+            subprocess.run(
+                [
+                    "cmake",
+                    "-S",
+                    str(project),
+                    "-B",
+                    str(build),
+                    "-DCMAKE_TOOLCHAIN_FILE=" + str(toolchain),
+                    "-DCMAKE_BUILD_TYPE=MinSizeRel",
+                    "-DNOISE_SOURCE=" + str(noise),
+                    "-DSODIUM_SOURCE=" + str(patched),
+                ],
+                check=True,
+            )
             subprocess.run(
                 ["cmake", "--build", str(build), "--parallel", "4"],
                 check=True,

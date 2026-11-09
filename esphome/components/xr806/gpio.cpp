@@ -4,11 +4,15 @@
 
 #include <cstdio>
 
+#include "esphome/core/log.h"
+
 extern "C" {
 #include "driver/chip/hal_gpio.h"
 }
 
 namespace esphome::xr806 {
+
+ESPHOME_LOG_TAG(TAG, "xr806.gpio");
 
 namespace {
 
@@ -18,21 +22,14 @@ namespace {
 //
 // These are NOT physical WXU module pad numbers.
 
-bool valid_pin(uint8_t number) {
-  return number <= 23 || (number >= 32 && number <= 47);
-}
+bool valid_pin(uint8_t number) { return number <= 23 || (number >= 32 && number <= 47); }
 
-GPIO_Port gpio_port(uint8_t number) {
-  return number >= 32 ? GPIO_PORT_B : GPIO_PORT_A;
-}
+GPIO_Port gpio_port(uint8_t number) { return number >= 32 ? GPIO_PORT_B : GPIO_PORT_A; }
 
-GPIO_Pin gpio_pin(uint8_t number) {
-  return static_cast<GPIO_Pin>(number & 0x1F);
-}
+GPIO_Pin gpio_pin(uint8_t number) { return static_cast<GPIO_Pin>(number & 0x1F); }
 
 bool has_flag(gpio::Flags flags, gpio::Flags flag) {
-  return (static_cast<unsigned>(flags) &
-          static_cast<unsigned>(flag)) != 0U;
+  return (static_cast<unsigned>(flags) & static_cast<unsigned>(flag)) != 0U;
 }
 
 }  // namespace
@@ -46,9 +43,7 @@ void XR806GPIOPin::pin_mode(gpio::Flags flags) {
 
   GPIO_InitParam param{};
 
-  param.mode = has_flag(flags, gpio::FLAG_OUTPUT)
-                   ? GPIOx_Pn_F1_OUTPUT
-                   : GPIOx_Pn_F0_INPUT;
+  param.mode = has_flag(flags, gpio::FLAG_OUTPUT) ? GPIOx_Pn_F1_OUTPUT : GPIOx_Pn_F0_INPUT;
 
   param.driving = GPIO_DRIVING_LEVEL_1;
 
@@ -60,11 +55,7 @@ void XR806GPIOPin::pin_mode(gpio::Flags flags) {
     param.pull = GPIO_PULL_NONE;
   }
 
-  HAL_GPIO_Init(
-      gpio_port(this->pin_),
-      gpio_pin(this->pin_),
-      &param
-  );
+  HAL_GPIO_Init(gpio_port(this->pin_), gpio_pin(this->pin_), &param);
 }
 
 bool XR806GPIOPin::digital_read() {
@@ -72,10 +63,7 @@ bool XR806GPIOPin::digital_read() {
     return false;
   }
 
-  bool value = HAL_GPIO_ReadPin(
-      gpio_port(this->pin_),
-      gpio_pin(this->pin_)
-  ) == GPIO_PIN_HIGH;
+  bool value = HAL_GPIO_ReadPin(gpio_port(this->pin_), gpio_pin(this->pin_)) == GPIO_PIN_HIGH;
 
   return value != this->inverted_;
 }
@@ -87,42 +75,25 @@ void XR806GPIOPin::digital_write(bool value) {
 
   bool physical_value = value != this->inverted_;
 
-  HAL_GPIO_WritePin(
-      gpio_port(this->pin_),
-      gpio_pin(this->pin_),
-      physical_value ? GPIO_PIN_HIGH : GPIO_PIN_LOW
-  );
+  HAL_GPIO_WritePin(gpio_port(this->pin_), gpio_pin(this->pin_), physical_value ? GPIO_PIN_HIGH : GPIO_PIN_LOW);
 }
 
-size_t XR806GPIOPin::dump_summary(
-    char *buffer, size_t len
-) const {
+size_t XR806GPIOPin::dump_summary(char *buffer, size_t len) const {
   const char port = this->pin_ >= 32 ? 'B' : 'A';
   const unsigned pin = this->pin_ & 0x1F;
 
-  const int written = std::snprintf(
-      buffer,
-      len,
-      "P%c%u%s",
-      port,
-      pin,
-      this->inverted_ ? " (inverted)" : ""
-  );
+  const int written = std::snprintf(buffer, len, "P%c%u%s", port, pin, this->inverted_ ? " (inverted)" : "");
 
   return written > 0 ? static_cast<size_t>(written) : 0;
 }
 
 // GPIO interrupts / ISR support are implemented separately.
 
-
 // XR806_NATIVE_INTERRUPT_V1
 
-ISRInternalGPIOPin XR806GPIOPin::to_isr() const {
-  return ISRInternalGPIOPin(this);
-}
+ISRInternalGPIOPin XR806GPIOPin::to_isr() const { return ISRInternalGPIOPin(this); }
 
 void XR806GPIOPin::detach_interrupt() const {
-  this->interrupt_attached_ = false;
   if (!valid_pin(this->pin_)) {
     return;
   }
@@ -147,13 +118,7 @@ void XR806GPIOPin::detach_interrupt() const {
   HAL_GPIO_Init(port, pin, &config);
 }
 
-void XR806GPIOPin::attach_interrupt_(
-    void (*func)(void *),
-    void *arg,
-    gpio::InterruptType type
-) const {
-  this->interrupt_attached_ = false;
-
+void XR806GPIOPin::attach_interrupt_(void (*func)(void *), void *arg, gpio::InterruptType type) const {
   if (!valid_pin(this->pin_) || func == nullptr) {
     return;
   }
@@ -162,15 +127,11 @@ void XR806GPIOPin::attach_interrupt_(
 
   switch (type) {
     case gpio::INTERRUPT_RISING_EDGE:
-      event = this->inverted_
-                  ? GPIO_IRQ_EVT_FALLING_EDGE
-                  : GPIO_IRQ_EVT_RISING_EDGE;
+      event = this->inverted_ ? GPIO_IRQ_EVT_FALLING_EDGE : GPIO_IRQ_EVT_RISING_EDGE;
       break;
 
     case gpio::INTERRUPT_FALLING_EDGE:
-      event = this->inverted_
-                  ? GPIO_IRQ_EVT_RISING_EDGE
-                  : GPIO_IRQ_EVT_FALLING_EDGE;
+      event = this->inverted_ ? GPIO_IRQ_EVT_RISING_EDGE : GPIO_IRQ_EVT_FALLING_EDGE;
       break;
 
     case gpio::INTERRUPT_ANY_EDGE:
@@ -178,15 +139,11 @@ void XR806GPIOPin::attach_interrupt_(
       break;
 
     case gpio::INTERRUPT_LOW_LEVEL:
-      event = this->inverted_
-                  ? GPIO_IRQ_EVT_HIGH_LEVEL
-                  : GPIO_IRQ_EVT_LOW_LEVEL;
+      event = this->inverted_ ? GPIO_IRQ_EVT_HIGH_LEVEL : GPIO_IRQ_EVT_LOW_LEVEL;
       break;
 
     case gpio::INTERRUPT_HIGH_LEVEL:
-      event = this->inverted_
-                  ? GPIO_IRQ_EVT_LOW_LEVEL
-                  : GPIO_IRQ_EVT_HIGH_LEVEL;
+      event = this->inverted_ ? GPIO_IRQ_EVT_LOW_LEVEL : GPIO_IRQ_EVT_HIGH_LEVEL;
       break;
 
     default:
@@ -216,13 +173,11 @@ void XR806GPIOPin::attach_interrupt_(
   irq.arg = arg;
 
   if (HAL_GPIO_EnableIRQ(port, pin, &irq) != HAL_OK) {
-    // Restore input mode if IRQ registration failed.
+    // Restore input mode; the pin keeps its last level until polled again.
     config.mode = GPIOx_Pn_F0_INPUT;
     HAL_GPIO_Init(port, pin, &config);
-    return;
+    ESP_LOGE(TAG, "Cannot attach interrupt to GPIO %u", static_cast<unsigned>(this->pin_));
   }
-
-  this->interrupt_attached_ = true;
 }
 
 }  // namespace esphome::xr806
@@ -237,19 +192,15 @@ bool ISRInternalGPIOPin::digital_read() {
     return false;
   }
 
-  const auto *pin =
-      static_cast<xr806::XR806GPIOPin *>(this->arg_);
+  const auto *pin = static_cast<xr806::XR806GPIOPin *>(this->arg_);
 
   const uint8_t number = pin->get_pin();
 
-  const GPIO_Port port =
-      number >= 32 ? GPIO_PORT_B : GPIO_PORT_A;
+  const GPIO_Port port = number >= 32 ? GPIO_PORT_B : GPIO_PORT_A;
 
-  const GPIO_Pin gpio_number =
-      static_cast<GPIO_Pin>(number & 0x1F);
+  const GPIO_Pin gpio_number = static_cast<GPIO_Pin>(number & 0x1F);
 
-  const bool physical =
-      HAL_GPIO_ReadPin(port, gpio_number) == GPIO_PIN_HIGH;
+  const bool physical = HAL_GPIO_ReadPin(port, gpio_number) == GPIO_PIN_HIGH;
 
   return physical != pin->is_inverted();
 }
@@ -259,24 +210,17 @@ void ISRInternalGPIOPin::digital_write(bool value) {
     return;
   }
 
-  const auto *pin =
-      static_cast<xr806::XR806GPIOPin *>(this->arg_);
+  const auto *pin = static_cast<xr806::XR806GPIOPin *>(this->arg_);
 
   const uint8_t number = pin->get_pin();
 
-  const GPIO_Port port =
-      number >= 32 ? GPIO_PORT_B : GPIO_PORT_A;
+  const GPIO_Port port = number >= 32 ? GPIO_PORT_B : GPIO_PORT_A;
 
-  const GPIO_Pin gpio_number =
-      static_cast<GPIO_Pin>(number & 0x1F);
+  const GPIO_Pin gpio_number = static_cast<GPIO_Pin>(number & 0x1F);
 
   const bool physical = value != pin->is_inverted();
 
-  HAL_GPIO_WritePin(
-      port,
-      gpio_number,
-      physical ? GPIO_PIN_HIGH : GPIO_PIN_LOW
-  );
+  HAL_GPIO_WritePin(port, gpio_number, physical ? GPIO_PIN_HIGH : GPIO_PIN_LOW);
 }
 
 void ISRInternalGPIOPin::clear_interrupt() {
@@ -289,8 +233,7 @@ void ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
     return;
   }
 
-  auto *pin =
-      static_cast<xr806::XR806GPIOPin *>(this->arg_);
+  auto *pin = static_cast<xr806::XR806GPIOPin *>(this->arg_);
 
   pin->pin_mode(flags);
 }

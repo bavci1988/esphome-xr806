@@ -239,7 +239,41 @@ void register_xr806(MDNSComponent *component, StaticVector<MDNSService, MDNS_SER
 
   state.configured = true;
 }
+
+#ifdef USE_XR806_STANDBY_CONTROLLER
+// Standby owner of the mDNS responder; kept here so MDNSComponent needs no XR806 base class.
+class XR806MDNSStandby final : public xr806::XR806StandbyParticipant {
+ public:
+  void standby_preflight(bool requested) override {
+    auto &state = backend();
+    if (!state.configured)
+      return;
+    if (state.suspend_epoch.requested() == requested)
+      return;
+    if (!requested) {
+      // Busy must be asserted before scheduling a new multicast responder.
+      xr806::lowpower_policy().set_mdns_idle(false);
+      state.suspended.store(false, std::memory_order_release);
+    }
+    state.suspend_epoch.request(requested);
+    request_refresh();
+  }
+  uint32_t owned_services() const override { return xr806::XR806LowPowerPolicy::MDNS_BUSY; }
+  bool prepare_for_standby() override {
+    return backend().suspend_epoch.requested() && backend().suspended.load(std::memory_order_acquire);
+  }
+  void standby_cancelled() override { this->standby_preflight(false); }
+  void standby_resumed(const xr806::XR806StandbyResume & /*event*/) override { this->standby_preflight(false); }
+};
+
+XR806MDNSStandby &mdns_standby() {
+  static XR806MDNSStandby participant;
+  return participant;
+}
+#endif
 }  // namespace
+
+static constexpr uint32_t REFRESH_INTERVAL_ID = 0;
 
 void MDNSComponent::setup() {
   this->setup_buffers_and_register_(register_xr806);
@@ -247,9 +281,8 @@ void MDNSComponent::setup() {
     return;
 #ifdef USE_XR806_STANDBY_CONTROLLER
   if (auto *controller = xr806::standby_controller(); controller != nullptr) {
-    if (!controller->register_participant(this)) {
-      ESP_LOGE(TAG, "Cannot register XR806 mDNS standby participant");
-      this->mark_failed();
+    if (!controller->register_participant(&mdns_standby())) {
+      this->mark_failed(LOG_STR("Cannot register mDNS standby participant"));
       return;
     }
     xr806::lowpower_policy().set_mdns_idle(false);
@@ -257,39 +290,11 @@ void MDNSComponent::setup() {
 #endif
 
   request_refresh();
-  this->set_interval("xr806_mdns_refresh", 1000, []() { request_refresh(); });
+  this->set_interval(REFRESH_INTERVAL_ID, 1000, []() { request_refresh(); });
 }
-
-#ifdef USE_XR806_STANDBY_CONTROLLER
-void MDNSComponent::standby_preflight(bool requested) {
-  auto &state = backend();
-  if (!state.configured)
-    return;
-  if (state.suspend_epoch.requested() == requested)
-    return;
-  if (!requested) {
-    // Busy must be asserted before scheduling a new multicast responder.
-    xr806::lowpower_policy().set_mdns_idle(false);
-    state.suspended.store(false, std::memory_order_release);
-  }
-  state.suspend_epoch.request(requested);
-  request_refresh();
-}
-
-bool MDNSComponent::prepare_for_standby() {
-  return backend().suspend_epoch.requested() && backend().suspended.load(std::memory_order_acquire);
-}
-
-void MDNSComponent::standby_cancelled() { this->standby_preflight(false); }
-
-void MDNSComponent::standby_resumed(const xr806::XR806StandbyResume &event) {
-  (void) event;
-  this->standby_preflight(false);
-}
-#endif
 
 void MDNSComponent::on_shutdown() {
-  this->cancel_interval("xr806_mdns_refresh");
+  this->cancel_interval(REFRESH_INTERVAL_ID);
   const err_t err = tcpip_callback(shutdown_mdns, &backend());
   if (err != ERR_OK) {
     ESP_LOGW(TAG, "Cannot schedule mDNS shutdown (%d)", static_cast<int>(err));

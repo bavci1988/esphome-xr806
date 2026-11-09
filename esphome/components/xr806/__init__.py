@@ -1,5 +1,6 @@
 """Native ESPHome platform for the Allwinner/XRadio XR806 SoC."""
 
+from esphome import final_validate as fv
 import esphome.codegen as cg
 from esphome.components.const import CONF_ENABLED
 import esphome.config_validation as cv
@@ -13,6 +14,7 @@ from esphome.const import (
     ThreadModel,
 )
 from esphome.core import CORE
+from esphome.types import ConfigType
 
 CODEOWNERS = []
 DOMAIN = "xr806"
@@ -25,6 +27,7 @@ CONF_LISTEN_INTERVAL = "listen_interval"
 CONF_STANDBY_TRIAL = "standby_trial"
 CONF_STANDBY = "standby"
 CONF_OTA_GUARD_ID = "ota_guard_id"
+CONF_API_STANDBY_ID = "api_standby_id"
 CONF_QUIET_MS = "quiet_ms"
 CONF_MIN_AWAKE_MS = "min_awake_ms"
 CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
@@ -36,6 +39,7 @@ CONF_RESUME_MARKER_PB05 = "resume_marker_pb05"
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
 XR806WiFiStandby = xr806_ns.class_("XR806WiFiStandby", cg.Component)
+XR806APIStandby = xr806_ns.class_("XR806APIStandby", cg.Component)
 XR806StandbyTrial = xr806_ns.class_("XR806StandbyTrial", cg.Component)
 XR806StandbyController = xr806_ns.class_("XR806StandbyController", cg.Component)
 XR806OTAStandbyGuard = xr806_ns.class_("XR806OTAStandbyGuard", cg.Component)
@@ -82,6 +86,7 @@ STANDBY_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(XR806StandbyController),
         cv.GenerateID(CONF_OTA_GUARD_ID): cv.declare_id(XR806OTAStandbyGuard),
+        cv.GenerateID(CONF_API_STANDBY_ID): cv.declare_id(XR806APIStandby),
         cv.Required(CONF_ENABLED): cv.boolean,
         cv.Optional(CONF_WAKE_AFTER_MS, default=3000): cv.int_range(min=500, max=60000),
         cv.Optional(CONF_QUIET_MS, default=250): cv.int_range(min=200, max=30000),
@@ -145,6 +150,34 @@ CONFIG_SCHEMA = cv.All(
 )
 
 
+# The UART backend drives UART0 only, with 8 data bits, no parity and 1 stop bit.
+XR806_UART0_TX = 32  # PB0, WXU pad 15
+XR806_UART0_RX = 33  # PB1, WXU pad 16
+
+
+def _final_validate_uart(config: ConfigType) -> ConfigType:
+    full_config = fv.full_config.get()
+    for index, uart in enumerate(full_config.get("uart", [])):
+        path = ["uart", index]
+        for key, expected, name in (
+            ("tx_pin", XR806_UART0_TX, "PB0"),
+            ("rx_pin", XR806_UART0_RX, "PB1"),
+        ):
+            pin = uart.get(key)
+            if pin is not None and pin["number"] != expected:
+                raise cv.Invalid(f"XR806 UART0 {key} must be {name}", path=[*path, key])
+        if (uart["data_bits"], uart["stop_bits"], str(uart["parity"])) != (
+            8,
+            1,
+            "NONE",
+        ):
+            raise cv.Invalid("XR806 UART supports only 8N1", path=path)
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = _final_validate_uart
+
+
 async def to_code(config):
     # XR806_LOWPOWER_FLAG_V1: activate future XR806 PM policy
     if config["lowpower"]:
@@ -175,6 +208,13 @@ async def to_code(config):
         cg.add(controller.set_external_sync_required(cfg[CONF_REQUIRE_EXTERNAL_SYNC]))
         cg.add(controller.set_require_uart_participant("uart" in CORE.config))
         await cg.register_component(controller, cfg)
+        if "api" in CORE.config:
+            # Votes API_BUSY from the public APIServer state.
+            cg.add_global(
+                cg.RawStatement('#include "esphome/components/xr806/api_standby.h"')
+            )
+            api_standby = cg.new_Pvariable(cfg[CONF_API_STANDBY_ID])
+            await cg.register_component(api_standby, {})
         if "ota" in CORE.config:
             # OTA state updates are informative, NOT evidence that the
             # OTA listener and flash writer are already disarmed.
