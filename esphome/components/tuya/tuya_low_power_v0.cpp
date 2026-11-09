@@ -111,7 +111,10 @@ void Tuya::poll_low_power_product_recovery_() {
   }
   const uint32_t now = millis();
   // Never inject an autonomous CMD01 during a report burst or a write ACK.
-  const bool idle = !this->lp_v0_.busy() && !this->lp_wire_.active() && this->command_queue_.empty() &&
+  // After an ambiguous ACK timeout, queued writes must not block the
+  // direct CMD01 recovery probe used to re-establish the MCU identity.
+  const bool idle = !this->lp_v0_.busy() && !this->lp_wire_.active() &&
+                    (this->lp_wire_.faulted() || this->command_queue_.empty()) &&
                     !this->expected_response_.has_value() && this->rx_message_.empty();
   if (this->lp_product_retry_.active()) {
     if (!this->lp_product_retry_.due(now) || !idle) {
@@ -272,14 +275,13 @@ void Tuya::process_low_power_queue_() {
     this->invalidate_low_power_mode_epoch_();
     ESP_LOGW(LP_TAG, "MCU command ACK timeout (product=%s); quarantining writes until full resync",
              YESNO(product_query));
-    if (product_query && !this->auto_baud_) {
-      if (++this->init_retries_ >= LP_MAX_RETRIES) {
-        this->init_failed_ = true;
-        ESP_LOGE(LP_TAG, "MCU product query failed after %d attempts", this->init_retries_);
-      } else {
-        this->command_queue_.insert(this->command_queue_.begin(),
-                                    {.cmd = TuyaCommandType::PRODUCT_QUERY, .payload = {}});
-      }
+    // A late ACK cannot be distinguished from one for a subsequent write.
+    // Do not silently replay queued commands after an ambiguous timeout.
+    const size_t dropped = this->command_queue_.size();
+    this->command_queue_.clear();
+    if (dropped > 0) {
+      ESP_LOGW(LP_TAG, "Discarded %u queued MCU commands after ambiguous ACK timeout",
+               static_cast<unsigned>(dropped));
     }
   }
 
