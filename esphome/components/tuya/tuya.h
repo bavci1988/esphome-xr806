@@ -174,7 +174,7 @@ class Tuya final : public Component,
   bool validate_message_();
 
   void handle_command_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len);
-  void handle_low_power_command_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len);
+  void handle_low_power_command_(uint8_t command, uint8_t version, const uint8_t *data, size_t len);
   void send_low_power_direct_(uint8_t command, const std::vector<uint8_t> &payload);
   void send_low_power_time_();
   void send_low_power_network_();
