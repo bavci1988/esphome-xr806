@@ -1,6 +1,9 @@
 #pragma once
 
 #include "esphome/core/defines.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/standby_controller.h"
+#endif
 #ifdef USE_OTA
 #include "esphome/components/ota/ota_backend_factory.h"
 #include "esphome/components/socket/socket.h"
@@ -37,7 +40,11 @@
 namespace esphome {
 
 /// ESPHomeOTAComponent provides a simple way to integrate Over-the-Air updates into your app using ArduinoOTA.
-class ESPHomeOTAComponent final : public ota::OTAComponent {
+class ESPHomeOTAComponent final : public ota::OTAComponent
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    , public xr806::XR806StandbyServiceOwner
+#endif
+{
  public:
   enum class OTAState : uint8_t {
     IDLE,
@@ -78,10 +85,16 @@ class ESPHomeOTAComponent final : public ota::OTAComponent {
   void dump_config() override;
   float get_setup_priority() const override;
   void loop() override;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  bool pause_for_standby() override;
+  void cancel_standby_pause() override;
+  void resume_after_standby() override;
+#endif
 
   uint16_t get_port() const { return this->port_; }
 
  protected:
+  void start_listener_();
   void handle_handshake_();
   void handle_data_();
 
@@ -281,6 +294,9 @@ class ESPHomeOTAComponent final : public ota::OTAComponent {
 #endif  // USE_OTA_ENCRYPTION
 
   socket::ListenSocket *server_{nullptr};
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  bool standby_paused_{false};
+#endif
   std::unique_ptr<socket::Socket> client_;
   ota::OTABackendPtr backend_;
 
