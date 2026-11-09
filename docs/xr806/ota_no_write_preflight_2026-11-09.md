@@ -17,6 +17,18 @@ This branch is exploratory. **It does not enable ESPHome `ota: - platform: espho
 
 The provided `WXU_XR806_flash_2MiB.bin` is exactly 2,097,152 bytes. Its bytes at `0x100000` are **not erased** (start `77 8e 4e 00 b7 8f 4e 00`). Scanning the 64-KiB interval `0x100000..0x10FFFF` finds approximately 98.8% bytes different from `0xFF`. Numerous AWIH headers also occur beyond `0x100000`, for example at `0x127C00`, `0x130000`, and `0x178000`. Therefore the vendor *example* 1024-KiB OTA-config location is **not safe to assume** for this original TRV16 image. It may be application or firmware section data; no writable OTA region has been proven.
 
+### Decoded original AWIH OTA geometry (further RE)
+
+The beginning of the **actual** 2-MiB WXU flash image is an AWIH BOOT section with SDK-compatible 64-byte header. The boot section private words decode (per `include/image/image.h` and `project/image_cfg/readme.md`) as:
+
+- `priv[0] = 0x001000FF`: OTA metadata size **4096 bytes**; flash-ID field 0xFF (meaning not yet established).
+- `priv[1] = 0x00177000`: OTA metadata address **`0x177000`**, *not* the template's `0x100000`.
+- `priv[2] = 0x019005D8`: maximum image 1496 KiB, compressed image maximum 400 KiB.
+
+At `0x177000` the dump begins `A5 5A 5A A5` and contains 21 non-FF bytes in the sector. A second AWIH sequence starts at `0x178000`; its APP, APP_XIP, WLAN_BL, WLAN_FW and SYS_SDD sections occur at `0x178000`, `0x17F800`, `0x1BE000`, `0x1BF000`, `0x1D0800`. A *possible* 400-KiB compressed slot would occupy `0x178000..0x1DC000`. These values are more specific than the example config, but **do not prove which slot is active or that writing is safe**.
+
+`tools/xr806/inspect_ota_geometry.py` reports these fields and image headers directly from a local dump without writing any flash or uploading the image.
+
 ### Development delivered in this branch
 
 1. `ota_update_pm_gate.h`: portable fail-closed PM wakelock state machine. `ota_backend.cpp` integrates it with the process-wide `UpdateLock` under `USE_XR806_STANDBY_CONTROLLER`: assert OTA busy before flash work, require native `pm_wake_lock()`, keep native lock until `UpdateLock::release()`, and never release the global flash-write lock after a PM-unlock failure. A successful OTA `hold_until_reboot()` retains the lock until reboot by design.
