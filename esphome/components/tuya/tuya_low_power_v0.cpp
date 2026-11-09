@@ -87,12 +87,54 @@ void Tuya::poll_low_power_autobaud_() {
 #endif
 }
 
+void Tuya::invalidate_low_power_mode_epoch_() {
+  // The HC32's 'sm' is computed by its RTC task, not by the WXU. A write or
+  // changed report for DP101/102 makes the last product-info selection stale.
+  this->lp_sleep_window_.invalidate_product();
+  if (this->lp_v0_.has_product()) {
+    this->lp_mode_requery_pending_ = true;
+    this->lp_mode_requery_after_ms_ = millis() + 500;
+  }
+  this->update_low_power_sleep_lock_();
+}
+
+void Tuya::poll_low_power_product_recovery_() {
+  const uint32_t now = millis();
+  // Never inject an autonomous CMD01 during a report burst or a write ACK.
+  const bool idle = !this->lp_v0_.busy() && this->command_queue_.empty() &&
+                    !this->expected_response_.has_value() && this->rx_message_.empty();
+  if (this->lp_product_retry_.active()) {
+    if (!this->lp_product_retry_.due(now) || !idle)
+      return;
+    if (this->lp_product_retry_.exhausted()) {
+      this->init_failed_ = true;
+      this->lp_v0_.command_timeout();
+      ESP_LOGE(LP_TAG, "Malformed MCU product info: bounded 500ms CMD01 recovery exhausted");
+      this->mark_failed();
+      this->lp_product_retry_.success();
+      return;
+    }
+    this->lp_product_retry_.query_sent(now);
+    this->send_low_power_product_query_(true);
+    return;
+  }
+
+  if (this->lp_mode_requery_pending_ && idle &&
+      static_cast<int32_t>(now - this->lp_mode_requery_after_ms_) >= 0) {
+    this->lp_mode_requery_pending_ = false;
+    // Unlike original cached sm, our MCU component can revalidate a new
+    // product epoch without resetting the generic XR806 platform.
+    this->send_low_power_product_query_(false);
+  }
+}
+
 bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
   // A validated CMD38 frame is still present in rx_message_ until the
   // parser callback returns. Only that specific frame can be disregarded.
   const bool guard_elapsed = static_cast<int32_t>(millis() - this->lp_wake_guard_until_) >= 0;
   const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
-  return this->lp_v0_.ready() && guard_elapsed && baud_locked && this->parent_ != nullptr &&
+  return this->lp_v0_.ready() && this->lp_sleep_window_.standby_mode_stable() && !this->lp_product_retry_.active() &&
+         guard_elapsed && baud_locked && this->parent_ != nullptr &&
          this->parent_->is_connected() && !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
          !this->expected_response_.has_value() && (in_cmd38_handler || this->rx_message_.empty());
 }
@@ -325,19 +367,43 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       return;
 
     case 0x01: {  // Product-info response.
-      if (!this->lp_product_.parse(data, len) || !this->lp_product_.is_verified_trv16()) {
-        ESP_LOGE(LP_TAG, "Unsupported/malformed MCU product info; refusing initialization");
+      TuyaLowPowerProductInfo incoming{};
+      if (!incoming.parse(data, len)) {
+        // Original WXU calls CMD01 again after 500 ms for missing descriptors,
+        // allocation/JSON failures or absent p/v. Retry only malformed data;
+        // never treat its failed initialization marker as a working MCU.
+        this->invalidate_low_power_mode_epoch_();
+        this->lp_v0_.command_timeout();
+        this->lp_product_retry_.begin(millis());
+        ESP_LOGW(LP_TAG, "Malformed CMD01 product info: retrying at 500ms intervals (bounded)");
+        return;
+      }
+      if (!incoming.is_verified_trv16()) {
+        ESP_LOGE(LP_TAG, "MCU PID/wake wiring mismatch; refusing unsupported product");
         this->product_invalid_ = true;
         this->init_failed_ = true;
+        this->lp_sleep_window_.invalidate_product();
 #ifdef USE_XR806
         this->trv16_pb04_.release();
 #endif
         this->mark_failed();
         return;
       }
+      const bool had_product = this->lp_v0_.has_product();
+      this->lp_product_ = incoming;
+      this->lp_product_retry_.success();
+      this->lp_mode_requery_pending_ = false;
+      this->lp_sleep_window_.product_validated();
+      if (had_product) {
+        // The HC32 could have changed sm via its RTC and PA3 pulse, or reset.
+        // Require a NEW complete status series, not stale cached DP reports.
+        this->lp_v0_.reset_status();
+        this->lp_sleep_window_.reset_reports();
+        this->lp_network_status_ = 0xFF;
+      }
       this->product_ = std::make_unique<char[]>(len + 1);
       std::memcpy(this->product_.get(), data, len);
-      this->product_[len] = '\0';
+      this->product_[len] = '\\0';
       this->lp_v0_.product_received();
       this->init_state_ = TuyaInitState::INIT_DATAPOINT;
       ESP_LOGI(LP_TAG, "TRV16 PID %s version %s wk=%d mwk=%d sm=%d", this->lp_product_.pid.c_str(),
