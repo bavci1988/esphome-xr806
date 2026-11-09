@@ -105,10 +105,10 @@ void Tuya::loop() {
 #ifdef USE_XR806_STANDBY_CONTROLLER
     if (this->lp_standby_.requested()) {
       const auto &policy = esphome::xr806::lowpower_policy();
-      const uint32_t busy_owners =
-          esphome::xr806::XR806LowPowerPolicy::NETWORK_BUSY | esphome::xr806::XR806LowPowerPolicy::API_BUSY |
-          esphome::xr806::XR806LowPowerPolicy::OTA_BUSY | esphome::xr806::XR806LowPowerPolicy::MDNS_BUSY;
-      if (!policy.standby_requested() || (policy.blockers() & busy_owners) != 0 ||
+      const bool ota_busy =
+          (policy.blockers() & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
+      auto *controller = esphome::xr806::standby_controller();
+      if (!policy.standby_requested() || ota_busy || controller == nullptr || !controller->may_quiesce() ||
           !this->low_power_ready_for_sleep_()) {
         // Withdraw the HC32 logical-sleep signal on any new protocol,
         // network, OTA or application work, before PM has been entered.
@@ -269,6 +269,11 @@ bool Tuya::validate_message_() {
 }
 
 void Tuya::handle_char_(uint8_t c) {
+  // The first arriving byte, not only a fully checksummed frame, must
+  // preempt a provisional CMD38 -> CMD12 -> CPU standby transaction.
+  // Otherwise partial/noisy UART RX can race the final PM admission check.
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
+    this->cancel_low_power_standby_();
   this->rx_message_.push_back(c);
   if (!this->validate_message_()) {
     this->rx_message_.clear();
