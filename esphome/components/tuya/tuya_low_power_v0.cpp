@@ -24,10 +24,23 @@ void Tuya::send_low_power_product_query_(bool direct_probe) {
   // The original WXU calls its MCU-wake helper *before* CMD01. We pulse
   // only when a wake GPIO is explicitly configured and its polarity verified.
   // The GPIO configuration supports inverted pins for active-low wiring.
-  if (this->mcu_wake_pin_ != nullptr) {
-    this->mcu_wake_pin_->digital_write(true);
+  bool have_wake_output = this->mcu_wake_pin_ != nullptr;
+#ifdef USE_XR806
+  have_wake_output = have_wake_output || this->trv16_pb04_.claimed();
+#endif
+  if (have_wake_output) {
+    if (this->mcu_wake_pin_ != nullptr)
+      this->mcu_wake_pin_->digital_write(true);
+#ifdef USE_XR806
+    if (this->trv16_pb04_.claimed())
+      this->trv16_pb04_.drive(true);
+#endif
     this->set_timeout("tuya_mcu_preprobe_wake", 10, [this, direct_probe]() {
-      this->mcu_wake_pin_->digital_write(false);
+      if (this->mcu_wake_pin_ != nullptr)
+        this->mcu_wake_pin_->digital_write(false);
+#ifdef USE_XR806
+      this->trv16_pb04_.drive(false);
+#endif
       if (direct_probe)
         this->send_low_power_direct_(0x01, {});
       else
@@ -317,6 +330,9 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         ESP_LOGE(LP_TAG, "Unsupported/malformed MCU product info; refusing initialization");
         this->product_invalid_ = true;
         this->init_failed_ = true;
+#ifdef USE_XR806
+        this->trv16_pb04_.release();
+#endif
         this->mark_failed();
         return;
       }
