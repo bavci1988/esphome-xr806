@@ -22,12 +22,14 @@
 #include "esp_netif.h"
 #endif
 
-namespace esphome::network {
-
 #if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
-bool xr806_platform_is_connected();
-IPAddresses xr806_platform_get_ip_addresses();
+namespace esphome::xr806 {
+bool network_is_connected();
+network::IPAddresses network_get_ip_addresses();
+}  // namespace esphome::xr806
 #endif
+
+namespace esphome::network {
 
 #if defined(USE_ESP32) && USE_NETWORK_IPV6
 /// Copies the IPv6 addresses of an esp_netif into `addresses[1..]`, warning once when some do not fit.
@@ -64,7 +66,7 @@ ESPHOME_ALWAYS_INLINE inline bool is_connected() {
 #endif
 
 #if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
-  if (xr806_platform_is_connected())
+  if (xr806::network_is_connected())
     return true;
 #endif
 

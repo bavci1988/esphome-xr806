@@ -4,7 +4,7 @@
 
 #if defined(USE_XR806) && defined(USE_MDNS)
 
-#include "esphome/components/mdns/mdns_component.h"
+#include "mdns_component.h"
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 

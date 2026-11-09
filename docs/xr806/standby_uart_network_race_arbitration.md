@@ -12,7 +12,7 @@ Plattformkomponenten interpretieren keine Tuya-CMD-/DP-Daten.
 | XR806 UART0 | UART-TEMT und native SDK-PM-Wakelock | FIFO + Shiftregister vollständig gesendet, RX abgearbeitet, Ruhefrist, kein sticky fault |
 | XR806 PM | `standby_controller.cpp`, `lowpower_policy.h` | Besitzer aller vorhandenen Dienste registriert und inaktiv, unveränderte Generation, atomarer Admission-Fence, Hardware-Wake korrekt eingerichtet |
 | Native API | `api_server.cpp` | Kein einziger API-Client; Listener wird geschlossen und bei Abbruch/Resume erneut geöffnet |
-| mDNS | `xr806/mdns.cpp` | Registrierter lwIP-Responder tatsächlich im TCP/IP-Thread abgemeldet; Callback wurde **ausgeführt**, nicht nur eingeplant |
+| mDNS | `mdns/mdns_xr806.cpp` | Registrierter lwIP-Responder tatsächlich im TCP/IP-Thread abgemeldet; Callback wurde **ausgeführt**, nicht nur eingeplant |
 | WLAN | `xr806/wifi_component.cpp` | Explizites `network_suspend: true`, API/mDNS/OTA abgearbeitet, STA deaktiviert und Link/Association inaktiv, native WLAN-PM-Sperre freigegeben |
 | OTA | `xr806/standby_ota_guard.h` | **Noch nicht freigabefähig:** OTA-Events werden überwacht, aber keinem bekannten OTA-Backend wird fälschlich ein garantierter Listener-/Flash-Drain zugeschrieben |
 

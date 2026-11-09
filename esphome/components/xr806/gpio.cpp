@@ -1,4 +1,4 @@
-#include "esphome/components/xr806/gpio.h"
+#include "gpio.h"
 
 #ifdef USE_XR806
 

@@ -11,7 +11,7 @@ on:
       - "tests/tuya_low_power_wire_transactions_test.cpp"
       - "tests/xr806/standby_interleaving_test.cpp"
       - "esphome/components/xr806/lowpower_policy.h"
-      - "esphome/components/xr806/mdns.cpp"
+      - "esphome/components/mdns/mdns_xr806.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
       - "tests/yaml/tuya_low_power_*.yaml"
   pull_request:

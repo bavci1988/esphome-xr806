@@ -1,6 +1,10 @@
 # ESPHome XR806 integration with the Allwinner/XRadio vendor SDK.
 # Included after the vendor project's gcc/Makefile.
 
+# Recipe lines in this file start with '>' instead of a tab (the project
+# forbids tab characters). Reset to the default at the end of the file.
+.RECIPEPREFIX := >
+
 # Root of the enclosing ESPHome repository.
 XR806_REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../..)
 
@@ -32,22 +36,22 @@ XR806_ESPHOME_MAIN := $(XR806_OBJDIR)/sdk_main_esphome.o
 
 # Build a separate ELF without overwriting the vendor SDK output.
 $(XR806_OUTPUT): $(XR806_SDK_OBJECTS) $(XR806_ESPHOME_MAIN) $(XR806_ESPHOME_OBJECTS) | lib
-	@mkdir -p $(@D)
-	$(CC) -E -P -CC $(CC_SYMBOLS) \
-	    -I$(ROOT_PATH)/include \
-	    -I$(ROOT_PATH)/lib/xradio_v$(CONFIG_CHIP_ARCH_VER) \
-	    -include generated/autoconf.h \
-	    -o $(PROJECT_LD) - < $(LINKER_SCRIPT)
-	$(XR806_CXX) \
-	    $(LD_FLAGS) \
-	    --specs=nosys.specs \
-	    -T$(PROJECT_LD) \
-	    $(LIBRARY_PATHS) \
-	    -o $@ \
-	    $(XR806_SDK_OBJECTS) \
-	    $(XR806_ESPHOME_MAIN) \
-	    $(XR806_ESPHOME_OBJECTS) \
-	    $(LIBRARIES)
+>@mkdir -p $(@D)
+>$(CC) -E -P -CC $(CC_SYMBOLS) \
+>    -I$(ROOT_PATH)/include \
+>    -I$(ROOT_PATH)/lib/xradio_v$(CONFIG_CHIP_ARCH_VER) \
+>    -include generated/autoconf.h \
+>    -o $(PROJECT_LD) - < $(LINKER_SCRIPT)
+>$(XR806_CXX) \
+>    $(LD_FLAGS) \
+>    --specs=nosys.specs \
+>    -T$(PROJECT_LD) \
+>    $(LIBRARY_PATHS) \
+>    -o $@ \
+>    $(XR806_SDK_OBJECTS) \
+>    $(XR806_ESPHOME_MAIN) \
+>    $(XR806_ESPHOME_OBJECTS) \
+>    $(LIBRARIES)
 
 # ESPHOME_CPP_BUILD_RULES_V1
 # Compile ESPHome C++20 sources using the YAML-generated configuration.
@@ -70,9 +74,9 @@ XR806_CXXFLAGS := \
     -I$(XR806_SRC) \
     -I$(XR806_REPO_ROOT) \
     -include $(XR806_DEFINES) \
-    -include $(XR806_REPO_ROOT)/esphome/components/xr806/network_compat.h \
-    -include $(XR806_REPO_ROOT)/esphome/components/xr806/socket_compat.h \
-    -include $(XR806_REPO_ROOT)/esphome/components/xr806/api_compat.h \
+    -include $(XR806_SRC)/esphome/components/xr806/network_compat.h \
+    -include $(XR806_SRC)/esphome/components/xr806/socket_compat.h \
+    -include $(XR806_SRC)/esphome/components/xr806/api_compat.h \
     -I$(XR806_ARDUINOJSON_SRC) \
     -I$(ROOT_PATH)/include \
     -I$(ROOT_PATH)/project \
@@ -96,8 +100,8 @@ endif
 
 define XR806_COMPILE_CPP
 $(XR806_OBJDIR)/$(1).o: $(2) $(XR806_DEFINES)
-	@mkdir -p $$(@D)
-	$$(XR806_CXX) $$(XR806_CXXFLAGS) -c $$< -o $$@
+>@mkdir -p $$(@D)
+>$$(XR806_CXX) $$(XR806_CXXFLAGS) -c $$< -o $$@
 endef
 
 $(eval $(call XR806_COMPILE_CPP,application,$(XR806_SRC)/esphome/core/application.cpp))
@@ -108,18 +112,18 @@ $(eval $(call XR806_COMPILE_CPP,platform_helpers,$(XR806_SRC)/esphome/components
 $(eval $(call XR806_COMPILE_CPP,hal,$(XR806_SRC)/esphome/components/xr806/hal.cpp))
 $(eval $(call XR806_COMPILE_CPP,wake_freertos,$(XR806_SRC)/esphome/core/wake/wake_freertos.cpp))
 $(eval $(call XR806_COMPILE_CPP,main,$(XR806_SRC)/main.cpp))
-$(eval $(call XR806_COMPILE_CPP,runtime,$(XR806_REPO_ROOT)/esphome/components/xr806/runtime.cpp))
-$(eval $(call XR806_COMPILE_CPP,xr_wifi_component,$(XR806_REPO_ROOT)/esphome/components/xr806/wifi_component.cpp))
+$(eval $(call XR806_COMPILE_CPP,runtime,$(XR806_SRC)/esphome/components/xr806/runtime.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_wifi_component,$(XR806_SRC)/esphome/components/xr806/wifi_component.cpp))
 
-$(eval $(call XR806_COMPILE_CPP,xr_socket_compat,$(XR806_REPO_ROOT)/esphome/components/xr806/socket_compat.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_socket_compat,$(XR806_SRC)/esphome/components/xr806/socket_compat.cpp))
 
 # Compile unchanged ESPHome socket sources with XR806 prototypes.
-XR806_SOCKET_SHIM := $(XR806_REPO_ROOT)/esphome/components/xr806/socket_compat.h
+XR806_SOCKET_SHIM := $(XR806_SRC)/esphome/components/xr806/socket_compat.h
 
 define XR806_COMPILE_SOCKET_CPP
 $(XR806_OBJDIR)/$(1).o: $(2) $(XR806_DEFINES) $(XR806_SOCKET_SHIM)
-	@mkdir -p $$(@D)
-	$$(XR806_CXX) $$(XR806_CXXFLAGS) -include $$(XR806_SOCKET_SHIM) -c $$< -o $$@
+>@mkdir -p $$(@D)
+>$$(XR806_CXX) $$(XR806_CXXFLAGS) -include $$(XR806_SOCKET_SHIM) -c $$< -o $$@
 endef
 
 $(eval $(call XR806_COMPILE_SOCKET_CPP,xr_socket_core,$(XR806_REPO_ROOT)/esphome/components/socket/socket.cpp))
@@ -131,12 +135,12 @@ $(eval $(call XR806_COMPILE_SOCKET_CPP,xr_socket_lwip,$(XR806_REPO_ROOT)/esphome
 # The vendor project's original main.o remains untouched.
 
 $(XR806_ESPHOME_MAIN): $(PRJ_ROOT_PATH)/main.c
-	@mkdir -p $(@D)
-	$(CC) $(CC_FLAGS) $(CC_SYMBOLS) \
-	    -DTRV16_USE_ESPHOME \
-	    -std=gnu99 \
-	    $(INCLUDE_PATHS) \
-	    -o $@ $<
+>@mkdir -p $(@D)
+>$(CC) $(CC_FLAGS) $(CC_SYMBOLS) \
+>    -DTRV16_USE_ESPHOME \
+>    -std=gnu99 \
+>    $(INCLUDE_PATHS) \
+>    -o $@ $<
 
 # ESPHOME_CODEGEN_RULE_V1
 # Regenerate ESPHome sources when YAML or platform configuration changes.
@@ -148,13 +152,13 @@ XR806_PLATFORM_PY ?= $(XR806_REPO_ROOT)/esphome/components/xr806/__init__.py
 ifneq ($(XR806_SKIP_CODEGEN),1)
 # Grouped targets: a single ESPHome invocation generates both files.
 $(XR806_SRC)/main.cpp $(XR806_DEFINES) &: $(XR806_YAML) $(XR806_PLATFORM_PY)
-	@echo "=== Generiere ESPHome-Code aus YAML ==="
-	cd $(XR806_REPO_ROOT) && \
-	    $(XR806_PYTHON) -m esphome compile \
-	    $(XR806_YAML) --only-generate && \
-	    test -s $(XR806_SRC)/main.cpp && \
-	    test -s $(XR806_DEFINES) && \
-	    touch $(XR806_SRC)/main.cpp $(XR806_DEFINES)
+>@echo "=== Generiere ESPHome-Code aus YAML ==="
+>cd $(XR806_REPO_ROOT) && \
+>    $(XR806_PYTHON) -m esphome compile \
+>    $(XR806_YAML) --only-generate && \
+>    test -s $(XR806_SRC)/main.cpp && \
+>    test -s $(XR806_DEFINES) && \
+>    touch $(XR806_SRC)/main.cpp $(XR806_DEFINES)
 endif
 
 # XR806_IMAGE_CONFIG_V1
@@ -163,11 +167,11 @@ endif
 XR806_IMAGE_CFG ?= $(XR806_FW_DIR)/image.cfg
 
 $(XR806_IMAGE_CFG): $(ROOT_PATH)/project/image_cfg/image.cfg
-	@mkdir -p $(@D)
-	$(CC) -E -P -CC $(CC_SYMBOLS) \
-	    -I$(ROOT_PATH)/include \
-	    -include generated/autoconf.h \
-	    -o $@ - < $<
+>@mkdir -p $(@D)
+>$(CC) -E -P -CC $(CC_SYMBOLS) \
+>    -I$(ROOT_PATH)/include \
+>    -include generated/autoconf.h \
+>    -o $@ - < $<
 
 # XR806_AWIH_PACKAGING_V1
 # Build RAM/XIP binaries and package the AWIH firmware image.
@@ -176,35 +180,35 @@ XR806_FW_DIR ?= $(XR806_REPO_ROOT)/.xr806-build/firmware
 XR806_AWIH ?= $(XR806_FW_DIR)/firmware.img
 
 $(XR806_FW_DIR)/app.bin: $(XR806_OUTPUT)
-	@mkdir -p $(@D)
-	$(OBJCOPY) -O binary -R .xip $< $@
+>@mkdir -p $(@D)
+>$(OBJCOPY) -O binary -R .xip $< $@
 
 $(XR806_FW_DIR)/app_xip.bin: $(XR806_OUTPUT)
-	@mkdir -p $(@D)
-	$(OBJCOPY) -O binary -j .xip $< $@
+>@mkdir -p $(@D)
+>$(OBJCOPY) -O binary -j .xip $< $@
 
 $(XR806_FW_DIR)/mkimage: $(ROOT_PATH)/tools/mkimage
-	@mkdir -p $(@D)
-	install -m 0755 $< $@
+>@mkdir -p $(@D)
+>install -m 0755 $< $@
 
 $(XR806_FW_DIR)/boot_40M.bin: $(ROOT_PATH)/bin/xradio_v3/boot/xr806/boot_40M.bin
-	@mkdir -p $(@D)
-	install -m 0644 $< $@
+>@mkdir -p $(@D)
+>install -m 0644 $< $@
 
 $(XR806_FW_DIR)/wlan_bl.bin: $(ROOT_PATH)/bin/xradio_v3/wlan_bl.bin
-	@mkdir -p $(@D)
-	install -m 0644 $< $@
+>@mkdir -p $(@D)
+>install -m 0644 $< $@
 
 $(XR806_FW_DIR)/wlan_fw.bin: $(ROOT_PATH)/bin/xradio_v3/wlan_fw.bin
-	@mkdir -p $(@D)
-	install -m 0644 $< $@
+>@mkdir -p $(@D)
+>install -m 0644 $< $@
 
 $(XR806_FW_DIR)/sys_sdd_40M.bin: $(ROOT_PATH)/bin/xradio_v3/sys_sdd_40M.bin
-	@mkdir -p $(@D)
-	install -m 0644 $< $@
+>@mkdir -p $(@D)
+>install -m 0644 $< $@
 
 $(XR806_AWIH): $(XR806_FW_DIR)/app.bin $(XR806_FW_DIR)/app_xip.bin $(XR806_IMAGE_CFG) $(XR806_FW_DIR)/mkimage $(XR806_FW_DIR)/boot_40M.bin $(XR806_FW_DIR)/wlan_bl.bin $(XR806_FW_DIR)/wlan_fw.bin $(XR806_FW_DIR)/sys_sdd_40M.bin
-	cd $(XR806_FW_DIR) && ./mkimage -c image.cfg -o $(notdir $@)
+>cd $(XR806_FW_DIR) && ./mkimage -c image.cfg -o $(notdir $@)
 
 # XR806_GPIO_BUILD_RULE_V2
 # Additional GPIO object, independent of existing object-list formatting.
@@ -271,8 +275,8 @@ XR806_ESPHOME_OBJECTS += $(XR806_AUTO_COMPONENT_OBJECTS)
 $(XR806_OUTPUT): $(XR806_AUTO_COMPONENT_OBJECTS)
 
 $(XR806_OBJDIR)/auto/components/%.o: $(XR806_SRC)/esphome/components/%.cpp $(XR806_DEFINES)
-	@mkdir -p $(@D)
-	$(XR806_CXX) $(XR806_CXXFLAGS) -c $< -o $@
+>@mkdir -p $(@D)
+>$(XR806_CXX) $(XR806_CXXFLAGS) -c $< -o $@
 
 # === END XR806_AUTO_COMPONENTS_V1 ===
 
@@ -283,7 +287,7 @@ $(XR806_OBJDIR)/auto/components/%.o: $(XR806_SRC)/esphome/components/%.cpp $(XR8
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr806_preferences.o
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr806_preferences.o
 
-$(eval $(call XR806_COMPILE_CPP,xr806_preferences,$(XR806_REPO_ROOT)/esphome/components/xr806/preferences.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr806_preferences,$(XR806_SRC)/esphome/components/xr806/preferences.cpp))
 
 # === END XR806_PREFERENCES_V1 ===
 
@@ -293,37 +297,31 @@ $(eval $(call XR806_COMPILE_CPP,xr806_preferences,$(XR806_REPO_ROOT)/esphome/com
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_network_status.o
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_network_status.o
 
-$(eval $(call XR806_COMPILE_CPP,xr_network_status,$(XR806_REPO_ROOT)/esphome/components/xr806/network_status.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_network_status,$(XR806_SRC)/esphome/components/xr806/network_status.cpp))
 
 
 # XR806_NETWORK_BRIDGE_V1
 # The actual implementation compiles only when USE_XR806_NETWORK_BRIDGE is set.
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_network_bridge.o
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_network_bridge.o
-$(eval $(call XR806_COMPILE_CPP,xr_network_bridge,$(XR806_REPO_ROOT)/esphome/components/xr806/network_bridge.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_network_bridge,$(XR806_SRC)/esphome/components/xr806/network_bridge.cpp))
 
 
 # XR806_API_CORE_LINK_V1
-# ESPHome-generated build metadata + reusable entity iteration + real WLAN MAC.
+# ESPHome-generated build metadata + reusable entity iteration (WLAN MAC: helpers.cpp).
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_core_build_info.o \
-                        $(XR806_OBJDIR)/xr_core_component_iterator.o \
-                        $(XR806_OBJDIR)/xr_mac_address.o
+                        $(XR806_OBJDIR)/xr_core_component_iterator.o
 
 # The original link target's prerequisites were expanded earlier in this file.
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_core_build_info.o \
-                 $(XR806_OBJDIR)/xr_core_component_iterator.o \
-                 $(XR806_OBJDIR)/xr_mac_address.o
+                 $(XR806_OBJDIR)/xr_core_component_iterator.o
 
 $(eval $(call XR806_COMPILE_CPP,xr_core_build_info,$(XR806_SRC)/esphome/core/build_info_data.cpp))
 $(eval $(call XR806_COMPILE_CPP,xr_core_component_iterator,$(XR806_SRC)/esphome/core/component_iterator.cpp))
-$(eval $(call XR806_COMPILE_CPP,xr_mac_address,$(XR806_REPO_ROOT)/esphome/components/xr806/mac_address.cpp))
 
 # XR806_MDNS_PLATFORM_V1
-# Wire the SDK's native lwIP mDNS responder to ESPHome's generated
-# MDNSComponent service/TXT records. The object is inert without USE_MDNS.
-XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_mdns.o
-$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_mdns.o
-$(eval $(call XR806_COMPILE_CPP,xr_mdns,$(XR806_REPO_ROOT)/esphome/components/xr806/mdns.cpp))
+# The lwIP mDNS backend lives in mdns/mdns_xr806.cpp, like the other
+# mdns_<platform>.cpp files, and is built by XR806_AUTO_COMPONENTS_V1.
 
 # XR806_HEADER_DEPENDENCIES_V1
 # Track C++ header dependencies across all ESPHome objects.
@@ -337,11 +335,14 @@ XR806_CXXFLAGS += -MMD -MP
 # Builds to an empty object unless explicitly enabled in xr806.standby_trial.
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_standby_trial.o
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_standby_trial.o
-$(eval $(call XR806_COMPILE_CPP,xr_standby_trial,$(XR806_REPO_ROOT)/esphome/components/xr806/standby_trial.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_standby_trial,$(XR806_SRC)/esphome/components/xr806/standby_trial.cpp))
 -include $(XR806_OBJDIR)/xr_standby_trial.d
 
 # Protocol-neutral production standby coordinator, inert without YAML opt-in.
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_standby_controller.o
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_standby_controller.o
-$(eval $(call XR806_COMPILE_CPP,xr_standby_controller,$(XR806_REPO_ROOT)/esphome/components/xr806/standby_controller.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_standby_controller,$(XR806_SRC)/esphome/components/xr806/standby_controller.cpp))
 -include $(XR806_OBJDIR)/xr_standby_controller.d
+
+# Restore the default tab recipe prefix for any makefile read after this one.
+.RECIPEPREFIX :=

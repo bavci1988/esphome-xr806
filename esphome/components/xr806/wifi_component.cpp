@@ -4,10 +4,10 @@
 
 #ifdef USE_XR806_WLAN_SMOKE
 
-#include "esphome/components/xr806/wifi_component.h"
-#include "esphome/components/xr806/network_status.h"
+#include "wifi_component.h"
+#include "network_status.h"
 #ifdef USE_XR806_STANDBY_CONTROLLER
-#include "esphome/components/xr806/lowpower_policy.h"
+#include "lowpower_policy.h"
 #endif
 #if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
 #include "esphome/components/network/util.h"
@@ -31,12 +31,12 @@ extern "C" {
 
 // Use explicit lwip_* functions, avoiding POSIX compatibility macros.
 #undef LWIP_COMPAT_SOCKETS
-#define LWIP_COMPAT_SOCKETS 0
+#define LWIP_COMPAT_SOCKETS 0  // NOLINT: configures the C lwIP header included next
 #include "lwip/sockets.h"
 }
 
 #ifdef USE_XR806_SOCKET_FACADE_PROBE
-#include "esphome/components/xr806/socket_compat.h"
+#include "socket_compat.h"
 #include "esphome/components/socket/socket.h"
 #endif
 
@@ -45,7 +45,7 @@ namespace esphome::xr806 {
 XR806WiFiComponent *global_xr806_wifi = nullptr;
 #endif
 
-static const char *const TAG = "xr806.wifi";
+ESPHOME_LOG_TAG(TAG, "xr806.wifi");
 
 void XR806WiFiComponent::setup() {
 #if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
@@ -100,15 +100,17 @@ void XR806WiFiComponent::setup() {
 void XR806WiFiComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "XR806 WLAN station:");
   ESP_LOGCONFIG(TAG, "  SSID: %s", this->ssid_.c_str());
-  ESP_LOGCONFIG(TAG, "  Power save requested: %s", this->power_save_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Power save requested: %s", this->power_save_ ? LOG_STR_LITERAL("yes") : LOG_STR_LITERAL("no"));
   if (this->power_save_) {
     ESP_LOGCONFIG(TAG, "  DTIM: %u; listen interval: %u", static_cast<unsigned>(this->dtim_),
                   static_cast<unsigned>(this->listen_interval_));
   }
   ESP_LOGCONFIG(TAG, "  Native API: available when api: is configured");
   ESP_LOGCONFIG(TAG, "  CPU standby: not enabled");
-  ESP_LOGCONFIG(TAG, "  TCP socket probe: %s", this->socket_probe_enabled_ ? "enabled" : "disabled");
-  ESP_LOGCONFIG(TAG, "  ESPHome socket facade probe: %s", this->socket_facade_probe_enabled_ ? "enabled" : "disabled");
+  ESP_LOGCONFIG(TAG, "  TCP socket probe: %s",
+                this->socket_probe_enabled_ ? LOG_STR_LITERAL("enabled") : LOG_STR_LITERAL("disabled"));
+  ESP_LOGCONFIG(TAG, "  ESPHome socket facade probe: %s",
+                this->socket_facade_probe_enabled_ ? LOG_STR_LITERAL("enabled") : LOG_STR_LITERAL("disabled"));
 }
 
 #ifdef USE_XR806_STANDBY_CONTROLLER
@@ -244,8 +246,9 @@ void XR806WiFiComponent::probe_socket_() {
     success = false;
   }
 
-  if (success)
+  if (success) {
     ESP_LOGI(TAG, "TCP probe: PASS (socket/bind/listen/close)");
+  }
 }
 
 #ifdef USE_XR806_SOCKET_FACADE_PROBE
@@ -259,8 +262,9 @@ void XR806WiFiComponent::probe_socket_facade_() {
 
   bool ok = listener->setblocking(false) == 0;
 
-  if (!ok)
+  if (!ok) {
     ESP_LOGW(TAG, "ESPHome socket facade: nonblocking failed");
+  }
 
   sockaddr_in address{};
 
@@ -301,8 +305,9 @@ void XR806WiFiComponent::probe_socket_facade_() {
     ESP_LOGW(TAG, "ESPHome socket facade: close failed");
   }
 
-  if (ok)
+  if (ok) {
     ESP_LOGI(TAG, "ESPHome socket facade: PASS");
+  }
 }
 #endif
 
@@ -362,7 +367,8 @@ void XR806WiFiComponent::loop() {
 #if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
       const auto esp_ips = ::esphome::network::get_ip_addresses();
       char ipbuf[::esphome::network::IP_ADDRESS_BUFFER_SIZE]{};
-      ESP_LOGI(TAG, "ESPHome network bridge: connected=%s ip=%s", ::esphome::network::is_connected() ? "yes" : "no",
+      ESP_LOGI(TAG, "ESPHome network bridge: connected=%s ip=%s",
+               ::esphome::network::is_connected() ? LOG_STR_LITERAL("yes") : LOG_STR_LITERAL("no"),
                esp_ips[0].str_to(ipbuf));
 #endif
       this->last_rssi_poll_ms_ = now - 30000U;
@@ -408,11 +414,13 @@ void XR806WiFiComponent::loop() {
     ESP_LOGW(TAG, "WLAN not ready; restarting station (attempt %u)",
              static_cast<unsigned>(this->reconnect_.attempts()));
 
-    if (wlan_sta_disable() != 0)
+    if (wlan_sta_disable() != 0) {
       ESP_LOGW(TAG, "wlan_sta_disable returned an error");
+    }
 
-    if (wlan_sta_enable() != 0)
+    if (wlan_sta_enable() != 0) {
       ESP_LOGW(TAG, "wlan_sta_enable returned an error");
+    }
   }
 
   // Do not release system-standby blockers here:

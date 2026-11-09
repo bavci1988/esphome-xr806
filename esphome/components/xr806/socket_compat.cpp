@@ -2,20 +2,12 @@
 
 #if defined(USE_XR806) && defined(USE_SOCKET_IMPL_LWIP_SOCKETS)
 
-#include "esphome/components/xr806/socket_compat.h"
+#include "socket_compat.h"
 #include "esphome/components/socket/headers.h"
 
-namespace esphome::socket {
+namespace esphome::xr806 {
 
-// Transitional implementation: no event-driven FD wake yet.
-bool wake_register_fd(int /*fd*/) {
-  return false;
-}
-
-void wake_unregister_fd(int /*fd*/) {}
-
-// Poll readiness without blocking the ESPHome main loop.
-bool socket_ready_fd(int fd, bool /*loop_monitored*/) {
+bool lwip_fd_readable(int fd) {
   if (fd < 0 || fd >= FD_SETSIZE)
     return true;
 
@@ -25,11 +17,22 @@ bool socket_ready_fd(int fd, bool /*loop_monitored*/) {
 
   struct timeval timeout{};
 
-  const int result = lwip_select(
-      fd + 1, &fds, nullptr, nullptr, &timeout);
+  const int result = lwip_select(fd + 1, &fds, nullptr, nullptr, &timeout);
 
   return result != 0;
 }
+
+}  // namespace esphome::xr806
+
+namespace esphome::socket {
+
+// Transitional implementation: no event-driven FD wake yet.
+bool wake_register_fd(int /*fd*/) { return false; }
+
+void wake_unregister_fd(int /*fd*/) {}
+
+// Poll readiness without blocking the ESPHome main loop.
+bool socket_ready_fd(int fd, bool /*loop_monitored*/) { return xr806::lwip_fd_readable(fd); }
 
 }  // namespace esphome::socket
 

@@ -2,7 +2,7 @@
 
 #ifdef USE_XR806_WLAN_SMOKE
 
-#include "esphome/components/xr806/network_status.h"
+#include "network_status.h"
 
 extern "C" {
 #include "xr_config.h"
