@@ -5,6 +5,7 @@
 
 #include "esphome/core/component.h"
 #include "standby_coordinator_state.h"
+#include "standby_service_lifecycle.h"
 
 namespace esphome::xr806 {
 
@@ -27,6 +28,19 @@ class XR806StandbyParticipant {
   virtual bool prepare_for_standby() = 0;
   virtual void standby_cancelled() = 0;
   virtual void standby_resumed(const XR806StandbyResume &event) = 0;
+};
+
+// Service owners are registered independently from MCU participants.
+// Their prepare method must return true ONLY once sockets/radio/TCP callbacks
+// are actually drained or stopped. False may mean still quiescing or vetoed.
+enum class XR806StandbyService : uint8_t { API, OTA, MDNS, WLAN, COUNT };
+
+class XR806StandbyServiceOwner {
+ public:
+  virtual ~XR806StandbyServiceOwner() = default;
+  virtual bool pause_for_standby() = 0;
+  virtual void cancel_standby_pause() = 0;
+  virtual void resume_after_standby() = 0;
 };
 
 class XR806StandbyController final : public Component {
@@ -54,6 +68,11 @@ class XR806StandbyController final : public Component {
   bool requires_external_sync() const { return this->external_sync_required_; }
 
   bool register_participant(XR806StandbyParticipant *participant);
+  bool register_service_owner(XR806StandbyService service, XR806StandbyServiceOwner *owner);
+  bool prepare_service_owners();
+  void cancel_service_owners();
+  bool service_owners_quiesced() const { return this->services_.quiesced(); }
+  bool service_owners_preparing() const { return this->services_.preparing(); }
   void request_standby(bool requested);
 
   void setup() override;
@@ -68,10 +87,14 @@ class XR806StandbyController final : public Component {
   void attempt_standby_();
   void cancel_prepared_(size_t prepared);
   bool is_any_transport_unowned_() const;
+  void resume_service_owners_();
 
   static constexpr size_t MAX_PARTICIPANTS = 4;
   XR806StandbyParticipant *participants_[MAX_PARTICIPANTS]{};
   size_t participant_count_{0};
+  static constexpr size_t SERVICE_COUNT = static_cast<size_t>(XR806StandbyService::COUNT);
+  XR806StandbyServiceOwner *service_owners_[SERVICE_COUNT]{};
+  XR806StandbyServiceLifecycle services_{};
   XR806StandbyCoordinatorState state_{};
 
   uint32_t wake_after_ms_{3000};
