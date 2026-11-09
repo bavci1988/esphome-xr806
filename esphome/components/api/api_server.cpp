@@ -229,8 +229,7 @@ void APIServer::standby_preflight(bool requested) {
 }
 
 bool APIServer::prepare_for_standby() {
-  return this->xr806_listener_paused_ && this->api_connection_count_ == 0 &&
-         !this->shutting_down_;
+  return this->xr806_listener_paused_ && this->api_connection_count_ == 0 && !this->shutting_down_;
 }
 
 void APIServer::standby_cancelled() { this->restore_xr806_listener_(); }
