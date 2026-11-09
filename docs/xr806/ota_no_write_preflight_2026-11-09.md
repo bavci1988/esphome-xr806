@@ -103,3 +103,25 @@ The new `xr806.ota_diagnostic_readonly: true` flag is inserted in the new XR806 
 **Shared OTA backend remains unchanged:** An earlier Stage-A experiment injected a native PM wakelock into the generic `ota_backend.cpp`. That is no longer part of this merged tree: the safe design is to implement the vendor PM owner in the future platform-specific OTA backend, not force platform symbols into shared OTA core. The portable guard stays as a host-tested building block but is not wired to live flash.
 
 Validation matrix: read-only diagnostics codegen; Standard Tuya and `USE_TUYA_LOW_POWER_V0` host compile; WiFi and mDNS integration; OTA negative validation; UART/CMD38 sleep races; offline AWIH checksum and FDCM tests. All full-target and hardware results remain explicitly unverified until pinned-SDK cross-link and spare-WXU measurements.
+
+
+## Stage C: OTA transport admitted, but vendor flash writer not yet implemented
+
+XR806 is now an accepted standard ESPHome OTA **transport/codegen** platform. It uses port 3232 by default and is selected explicitly in the standard `ota_backend_factory.h`. This does **not** mean XR806 firmware updates work yet.
+
+- `esphome/components/ota/ota_backend_xr806.h` and `.cpp` implement the upstream backend contract with no vendor Flash APIs. `begin()` refuses an image with `OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION`; `write()` and `end()` also refuse. This is deliberate until the vendor image format and recovery are proven.
+- `tests/yaml/xr806_ota_transport_noerase.yaml` validates standard Wi-Fi + Native API + mDNS + OTA + read-only ROM diagnostics.
+- `tests/yaml/tuya_low_power_v0_xr806_ota_transport.yaml` validates OTA and Tuya V0 + standby configuration together. The OTA_BUSY standby veto is not bypassed.
+- `xr806-sdk/.github/workflows/xr806-dev-integration.yml` now cross-builds a fourth OTA transport-only firmware alongside UART, IRQ and Wi-Fi. A successful cross-link is not a working update.
+
+### Stage D: what remains before real OTA updates
+
+1. **Image packaging.** Verify the exact vendor AWIH/XZ compressed OTA format, generation from ESPHome firmware, offsets, length, header checksums and image verification. The full AWIH `firmware.bin` is not automatically an acceptable compressed OTA payload.
+2. **Runtime flash geometry.** Use ROM `image_get_ota_param()` and FDCM on spare real hardware, read the running sequence and target flash ID, and prove the target erase interval never overlaps the running image, bootloader or metadata. The original 2-MiB TRV16 dump has OTA metadata at `0x177000`, not the SDK sample `0x100000`.
+3. **Transactional flash backend.** Acquire native XR806 PM and ESPHome update locks before calling the vendor `ota_push_start()`, which erases immediately. Validate size, digest/signature and image layout before the first erase; only publish the new boot sequence after full verification.
+4. **Rollback and power-loss tests.** Interrupt erase, write, verify, FDCM commit and first reboot on a spare WXU with UART recovery available. Confirm that a broken update cannot destroy the only working image.
+5. **OTA listener and standby lifecycle.** Prove bounded shutdown, in-flight socket/flash drain, reconnect and listener restart. Until then `XR806OTAStandbyGuard` deliberately retains `OTA_BUSY` and prevents deep sleep when OTA is configured.
+6. **Persistent preferences / safe mode.** `esphome/components/xr806/preferences.cpp` is currently non-persistent. Robust OTA authentication provisioning, crash recovery and safe-mode boot counters need power-loss-safe flash storage.
+7. **Real-device tests.** Measure flash geometry, power and watchdog during encrypted OTA and all API/WLAN/Tuya V0 wake races. Passing CI and building an AWIH image are insufficient evidence.
+
+Status vocabulary: **transport configured** = YAML accepted and OTA socket compiled; **firmware update supported** = verified flash/recovery path. Stage C provides the former only.
