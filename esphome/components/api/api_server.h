@@ -18,6 +18,9 @@
 #include "esphome/core/entity_includes.h"
 #include "esphome/core/log.h"
 #include "esphome/core/string_ref.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/standby_controller.h"
+#endif
 #ifdef USE_PROVISIONING
 #include "esphome/components/provisioning/provisioning.h"
 #endif
@@ -52,6 +55,9 @@ bool load_saved_noise_psk(noise::psk_t &out);
 #endif
 
 class APIServer final : public Component
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    , public xr806::XR806StandbyParticipant
+#endif
 #ifdef USE_CAMERA
     ,
                         public camera::CameraListener
@@ -63,6 +69,13 @@ class APIServer final : public Component
   uint16_t get_port() const { return this->port_; }
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
   void loop() override;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  void standby_preflight(bool requested) override;
+  bool may_quiesce() const override;
+  bool prepare_for_standby() override;
+  void standby_cancelled() override;
+  void standby_resumed(const xr806::XR806StandbyResume &event) override;
+#endif
   void dump_config() override;
   void on_shutdown() override;
   bool teardown() override;
@@ -326,6 +339,11 @@ class APIServer final : public Component
 #endif  // USE_API_HOMEASSISTANT_STATES
   // No explicit close() needed — listen sockets have no active connections on
   // failure/shutdown. Destructor handles fd cleanup (close or abort per platform).
+  void start_listening_();
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  void restore_xr806_listener_();
+  bool xr806_listener_paused_{false};
+#endif
   inline void destroy_socket_() {
     delete this->socket_;
     this->socket_ = nullptr;
