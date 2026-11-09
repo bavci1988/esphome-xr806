@@ -149,7 +149,7 @@ bool ESPHomeOTAComponent::can_pause_for_standby() const {
     return true;
   }
   return this->client_ == nullptr && this->backend_ == nullptr && this->server_ != nullptr &&
-         !this->server_->ready() && this->state_ == OTAState::IDLE;
+         !this->server_->ready() && this->ota_state_ == OTAState::IDLE;
 }
 
 bool ESPHomeOTAComponent::pause_for_standby() {
@@ -159,7 +159,7 @@ bool ESPHomeOTAComponent::pause_for_standby() {
   // Neither an OTA transfer nor an accepted/incoming connection may be
   // discarded. The server listening socket is drained, never an OTA client.
   if (this->client_ != nullptr || this->backend_ != nullptr || this->server_ == nullptr ||
-      this->server_->ready() || this->state_ != OTAState::IDLE) {
+      this->server_->ready() || this->ota_state_ != OTAState::IDLE) {
     return false;
   }
   xr806::lowpower_policy().set_ota_idle(false);
