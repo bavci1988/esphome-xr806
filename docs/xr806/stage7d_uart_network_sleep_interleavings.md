@@ -33,11 +33,15 @@ HC32 GPIO-wake event after timer-only wake.
    Owner updates, duplicate last-moment votes, new network quiescing or a
    cancellation cannot be erased by clearing a reusable boolean during
    admission. The coordinator also checks owner generation/blockers.
-3. **mDNS callback generation:** `XR806StandbyAsyncEpoch` is shared by
+3. **Native API shutdown barrier:** If reboot/shutdown begins while the
+   listener is already parked, the API explicitly reasserts API_BUSY and
+   withdraws PM/preflight before closing anything. A paused API listener
+   therefore cannot silently authorize CPU standby during teardown.
+4. **mDNS callback generation:** `XR806StandbyAsyncEpoch` is shared by
    the real lwIP-backed mDNS owner and the host tests. An old callback
    from a cancelled/restarted preflight cannot release the new mDNS
    owner vote. The callback rechecks cancellation after publishing.
-4. **No unsafe OTA shortcut:** A state listener can veto standby on OTA
+5. **No unsafe OTA shortcut:** A state listener can veto standby on OTA
    activity, but is not equivalent to a flash writer, TCP listener and
    pending-write drain. OTA is deliberately fail-closed.
 
