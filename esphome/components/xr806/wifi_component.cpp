@@ -131,6 +131,7 @@ void XR806WiFiComponent::restore_network_() {
     return;
   auto &policy = lowpower_policy();
   policy.set_network_idle(false);  // Claim CPU before resuming Wi-Fi activity.
+  policy.set_network_quiescing(false);
   if (!this->claim_network_lock_()) {
     ESP_LOGE(TAG, "Failed to reacquire WLAN native PM wakelock; recovery blocked");
     this->mark_failed();
@@ -164,7 +165,9 @@ void XR806WiFiComponent::standby_preflight(bool requested) {
   if ((policy.blockers() & other_services) != 0)
     return;  // Never disable Wi-Fi while API/mDNS/OTA still own sockets.
   if (!this->network_suspending_) {
+    policy.set_network_quiescing(true);  // Declare intentional link teardown first.
     if (wlan_sta_disable() != 0) {
+      policy.set_network_quiescing(false);
       ESP_LOGW(TAG, "WLAN STA disable refused; retaining PM blocker");
       return;
     }
