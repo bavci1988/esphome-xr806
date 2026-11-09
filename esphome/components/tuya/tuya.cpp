@@ -308,6 +308,13 @@ void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buff
     // CMD02/CMD09 are only acknowledged by an *empty* reply. CMD05 reports
     // never consume a queued command, and any unsolicited matching command ID
     // must not release an unrelated transaction.
+    // RX dispatch can run after the 1500-ms deadline but before the main
+    // loop calls expire(). Never accept a late ACK from the previous epoch
+    // or apply it to a new write; let the timeout path force full recovery.
+    if (this->lp_wire_.overdue(millis()) && this->lp_wire_.accepts(command, len)) {
+      ESP_LOGW(TAG, "Discarding expired MCU ACK (CMD 0x%02X); resync required", command);
+      return;
+    }
     if (this->lp_wire_.complete(command, len) && this->expected_response_.has_value() &&
         this->expected_response_ == command_type) {
       this->expected_response_.reset();
