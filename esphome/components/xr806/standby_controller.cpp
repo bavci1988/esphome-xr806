@@ -181,8 +181,7 @@ void XR806StandbyController::attempt_standby_() {
     // An already asserted MCU wake level must not trigger an immediate
     // suspend/resume loop or hide pending UART work.
     const GPIO_PinState level = HAL_GPIO_ReadPin(GPIO_PORT_A, pin);
-    if ((this->wake_falling_ && level == GPIO_PIN_LOW) ||
-        (!this->wake_falling_ && level == GPIO_PIN_HIGH)) {
+    if ((this->wake_falling_ && level == GPIO_PIN_LOW) || (!this->wake_falling_ && level == GPIO_PIN_HIGH)) {
       ESP_LOGW(TAG, "Wake input already active; standby refused");
       goto abort;
     }
