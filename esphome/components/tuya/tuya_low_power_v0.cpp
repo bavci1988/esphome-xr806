@@ -111,8 +111,8 @@ void Tuya::poll_low_power_product_recovery_() {
   }
   const uint32_t now = millis();
   // Never inject an autonomous CMD01 during a report burst or a write ACK.
-  const bool idle = !this->lp_v0_.busy() && this->command_queue_.empty() && !this->expected_response_.has_value() &&
-                    this->rx_message_.empty();
+  const bool idle = !this->lp_v0_.busy() && !this->lp_wire_.active() && this->command_queue_.empty() &&
+                    !this->expected_response_.has_value() && this->rx_message_.empty();
   if (this->lp_product_retry_.active()) {
     if (!this->lp_product_retry_.due(now) || !idle) {
       return;
@@ -144,7 +144,8 @@ bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
   // parser callback returns. Only that specific frame can be disregarded.
   const bool guard_elapsed = static_cast<int32_t>(millis() - this->lp_wake_guard_until_) >= 0;
   const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
-  return this->lp_v0_.ready() && this->lp_sleep_window_.standby_mode_stable() && !this->lp_product_retry_.active() &&
+  return this->lp_v0_.ready() && this->lp_wire_.idle() && this->lp_sleep_window_.standby_mode_stable() &&
+         !this->lp_product_retry_.active() &&
          guard_elapsed && baud_locked && this->parent_ != nullptr && this->parent_->is_connected() &&
          !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
          !this->expected_response_.has_value() && (in_cmd38_handler || this->rx_message_.empty());
@@ -261,14 +262,16 @@ void Tuya::process_low_power_queue_() {
 
   // Standard Tuya's 300 ms retry logic is incompatible with the HC32's
   // delayed CMD05 report. ACK and report have separate timeouts.
-  if (this->expected_response_.has_value() && static_cast<uint32_t>(now - this->last_command_timestamp_) >= 1500) {
+  if (this->lp_wire_.expire(now)) {
     const bool product_query = *this->expected_response_ == TuyaCommandType::PRODUCT_QUERY;
     this->expected_response_.reset();
     if (!this->command_queue_.empty())
       this->command_queue_.erase(this->command_queue_.begin());
     this->lp_v0_.command_timeout();
     this->lp_network_status_ = 0xFF;
-    ESP_LOGW(LP_TAG, "MCU command ACK timeout (product=%s); scheduling resync", YESNO(product_query));
+    this->invalidate_low_power_mode_epoch_();
+    ESP_LOGW(LP_TAG, "MCU command ACK timeout (product=%s); quarantining writes until full resync",
+             YESNO(product_query));
     if (product_query && !this->auto_baud_) {
       if (++this->init_retries_ >= LP_MAX_RETRIES) {
         this->init_failed_ = true;
@@ -280,7 +283,8 @@ void Tuya::process_low_power_queue_() {
     }
   }
 
-  if (this->lp_v0_.busy() || this->expected_response_.has_value() || !this->rx_message_.empty() ||
+  if (this->lp_v0_.busy() || this->lp_wire_.active() || this->lp_wire_.faulted() ||
+      this->expected_response_.has_value() || !this->rx_message_.empty() ||
       this->command_queue_.empty() || static_cast<uint32_t>(now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS)
     return;
   if (!this->lp_v0_.has_product() && this->command_queue_.front().cmd != TuyaCommandType::PRODUCT_QUERY)
@@ -424,6 +428,10 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         this->lp_network_status_ = 0xFF;
       }
       this->lp_v0_.product_received();
+      // Revalidated product identity clears the wire quarantine, but not
+      // the MCU full-status gate (17 new CMD05 reports are still required).
+      if (this->lp_wire_.faulted())
+        this->lp_wire_.recovered();
       this->init_state_ = TuyaInitState::INIT_DATAPOINT;
       ESP_LOGI(LP_TAG, "TRV16 PID %s version %s wk=%d mwk=%d sm=%d", this->lp_product_.pid.c_str(),
                this->lp_product_.version.c_str(), this->lp_product_.wake_gpio, this->lp_product_.mcu_wake_gpio,
