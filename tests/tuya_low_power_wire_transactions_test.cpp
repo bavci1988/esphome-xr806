@@ -9,16 +9,16 @@ int main() {
   assert(!t.accepts(0x09, 0));
   assert(!t.begin(0x06, 10));  // unsolicited direct time reply is no queued transaction
   assert(t.begin(0x09, 100));
-  assert(!t.begin(0x02, 120)); // no overlapping queued network/write transaction
-  assert(!t.complete(0x05, 6)); // report cannot satisfy write ACK
-  assert(!t.complete(0x09, 2)); // malformed ACK
-  assert(!t.complete(0x02, 0)); // wrong command code
+  assert(!t.begin(0x02, 120));   // no overlapping queued network/write transaction
+  assert(!t.complete(0x05, 6));  // report cannot satisfy write ACK
+  assert(!t.complete(0x09, 2));  // malformed ACK
+  assert(!t.complete(0x02, 0));  // wrong command code
   assert(t.active() && !t.expire(1599));
   assert(t.complete(0x09, 0));
   assert(t.idle());
 
   assert(t.begin(0x02, 2000));
-  assert(!t.complete(0x09, 0)); // late CMD09 ACK may not clear CMD02
+  assert(!t.complete(0x09, 0));  // late CMD09 ACK may not clear CMD02
   assert(t.complete(0x02, 0));
   assert(t.begin(0x01, 2500));
   assert(!t.complete(0x01, 0));
@@ -27,9 +27,9 @@ int main() {
   assert(!t.expire(4499));
   assert(t.expire(4500));
   assert(t.faulted() && !t.active());
-  assert(!t.begin(0x09, 5000)); // new write cannot consume late old ACK
+  assert(!t.begin(0x09, 5000));  // new write cannot consume late old ACK
   assert(!t.complete(0x09, 0));
-  t.recovered(); // caller must validate MCU product AND 17-DP state separately
+  t.recovered();  // caller must validate MCU product AND 17-DP state separately
   assert(t.begin(0x09, 6000));
   t.transport_fault();
   assert(!t.begin(0x02, 7000));
