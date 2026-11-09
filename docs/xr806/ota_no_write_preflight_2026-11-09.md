@@ -47,7 +47,7 @@ The updated read-only `inspect_ota_geometry.py` decodes this selection with stri
 
 ### Development delivered in this branch
 
-1. `ota_update_pm_gate.h`: portable fail-closed PM wakelock state machine. `ota_backend.cpp` integrates it with the process-wide `UpdateLock` under `USE_XR806_STANDBY_CONTROLLER`: assert OTA busy before flash work, require native `pm_wake_lock()`, keep native lock until `UpdateLock::release()`, and never release the global flash-write lock after a PM-unlock failure. A successful OTA `hold_until_reboot()` retains the lock until reboot by design.
+1. `ota_update_pm_gate.h`: portable fail-closed PM-wakelock state machine, staged for a **future XR806-specific OTABackend**. In the upstream-compatible port, the shared `ota/ota_backend.cpp` is deliberately restored unchanged: no flash-writing implementation or global `UpdateLock` interception is enabled.
 2. `ota_flash_plan.h`: **read-only** runtime geometry admission/check for sector-aligned candidate/metadata regions, overflow and overlap against running image, size and explicit proof flags. A test using the observed TRV16 occupied range fails closed on active-image overlap.
 3. `tests/xr806/ota_update_preflight_test.cpp`: host tests for acquired/failed/unreleased PM locks and flash-plan failure modes, with no flash writes.
 4. `XR806OTAStandbyGuard` remains a veto. OTA/flash update support has **not** been enabled, and the flash plan is only an input validator for a future vendor backend.
@@ -90,4 +90,16 @@ The vendor's `ota_push_start()` erases the inactive image slot IMMEDIATELY; with
 
 ### Parallel USE_TUYA_LOW_POWER_V0 work
 
-The separate `claude/serene-franklin-jgpjuw` branch gates the Tuya V0 setup/loop/driver through `USE_TUYA_LOW_POWER_V0`. Its changes also touch XR806 HAL, mDNS, network and build files. This OTA branch intentionally does not blindly merge those unrelated changes. The OTA PM update writer lock lives in the shared `ota::UpdateLock`, outside the Tuya protocol component. Future integration must run both Standard Tuya and low_power_v0 regression tests and real CMD38/network/OTA standby races.
+The separate `claude/serene-franklin-jgpjuw` branch gates the Tuya V0 setup/loop/driver through `USE_TUYA_LOW_POWER_V0`. Its changes also touch XR806 HAL, mDNS, network and build files. This OTA branch intentionally does not blindly merge those unrelated changes. The OTA PM state machine is kept in the XR806 platform; it is NOT attached to shared `ota::UpdateLock` until a real vendor OTA backend exists. Future integration must run both Standard Tuya and low_power_v0 regression tests and real CMD38/network/OTA standby races.
+
+## Upstream-compatible integration with standard WiFi and Standby (2026-11-09)
+
+Branch `feature/xr806-ota-reversible-standby` now has an explicit merge parent from `claude/serene-franklin-jgpjuw` (PR #13). PR #12 is **stacked onto that upstream refactor**, not directly onto `dev`; merge #13 first, then retarget #12 to `dev` when the shared architecture has landed.
+
+The resulting tree preserves the actual standard `wifi:` component backed by `wifi_component_xr806.cpp`, standalone `XR806WiFiStandby` and `XR806APIStandby`, platform mDNS participant, upstream UART pin-validation schema, and `USE_TUYA_LOW_POWER_V0` compilation gate. No legacy `xr806.wifi` component or XR806-specific `api_server.cpp`/shared mDNS lifecycle injection is restored.
+
+The new `xr806.ota_diagnostic_readonly: true` flag is inserted in the new XR806 platform schema and enables `USE_XR806_OTA_RUNTIME_PROBE` only. On the boot path, `xr806/runtime.cpp` performs **read-only** `image_get_ota_param()`, `image_get_cfg()` and `image_get_running_seq()` calls after initialization and logs FDCM and image addresses. It never starts OTA, changes FDCM, writes flash, controls WiFi standby or bypasses OTA_BUSY. The diagnostic cannot authorize writes because both actual flash size and proposed upload size are deliberately unknown (zero).
+
+**Shared OTA backend remains unchanged:** An earlier Stage-A experiment injected a native PM wakelock into the generic `ota_backend.cpp`. That is no longer part of this merged tree: the safe design is to implement the vendor PM owner in the future platform-specific OTA backend, not force platform symbols into shared OTA core. The portable guard stays as a host-tested building block but is not wired to live flash.
+
+Validation matrix: read-only diagnostics codegen; Standard Tuya and `USE_TUYA_LOW_POWER_V0` host compile; WiFi and mDNS integration; OTA negative validation; UART/CMD38 sleep races; offline AWIH checksum and FDCM tests. All full-target and hardware results remain explicitly unverified until pinned-SDK cross-link and spare-WXU measurements.
