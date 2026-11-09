@@ -89,8 +89,6 @@ size_t XR806GPIOPin::dump_summary(char *buffer, size_t len) const {
 
 // GPIO interrupts / ISR support are implemented separately.
 
-// XR806_NATIVE_INTERRUPT_V1
-
 ISRInternalGPIOPin XR806GPIOPin::to_isr() const { return ISRInternalGPIOPin(this); }
 
 void XR806GPIOPin::detach_interrupt() const {

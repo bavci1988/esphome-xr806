@@ -6,7 +6,6 @@
 
 namespace esphome::xr806 {
 
-// XR806_PREFERENCES_V1
 // Initial backend: non-persistent ESPHome fallback.
 // No flash writes. Persistent storage will be added separately.
 static ESPPreferences xr806_preferences;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)

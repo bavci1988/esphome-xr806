@@ -6,7 +6,6 @@
 extern void setup();
 extern void loop();
 
-// XR806_LOWPOWER_POLICY_V1
 #include "esphome/core/defines.h"
 #ifdef USE_XR806_OTA_RUNTIME_PROBE
 #include "ota_vendor_sdk_snapshot.h"

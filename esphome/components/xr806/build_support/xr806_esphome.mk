@@ -5,14 +5,14 @@
 # forbids tab characters). Reset to the default at the end of the file.
 .RECIPEPREFIX := >
 
-# Root of the enclosing ESPHome repository.
+# Root of the ESPHome source tree (the directory that contains esphome/).
 XR806_REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../..)
 
-# External ArduinoJson headers; repository integration follows.
+# Set by run_compile() in esphome/components/xr806/__init__.py.
 XR806_ARDUINOJSON_SRC ?= $(error XR806_ARDUINOJSON_SRC must be provided by ESPHome)
 
-XR806_OBJDIR ?= $(XR806_REPO_ROOT)/.xr806-build/obj
-XR806_OUTPUT ?= $(XR806_REPO_ROOT)/.xr806-build/app.elf
+XR806_OBJDIR ?= $(error XR806_OBJDIR must be provided by ESPHome)
+XR806_OUTPUT ?= $(error XR806_OUTPUT must be provided by ESPHome)
 
 # Use the ESPHome-specific C entry point instead of the SDK test main.
 XR806_SDK_OBJECTS := $(filter-out $(PRJ_ROOT_PATH)/main.o,$(OBJS))
@@ -54,10 +54,9 @@ $(XR806_OUTPUT): $(XR806_SDK_OBJECTS) $(XR806_ESPHOME_MAIN) $(XR806_ESPHOME_OBJE
 >    $(XR806_ESPHOME_OBJECTS) \
 >    $(LIBRARIES)
 
-# ESPHOME_CPP_BUILD_RULES_V1
 # Compile ESPHome C++20 sources using the YAML-generated configuration.
 
-XR806_SRC ?= $(XR806_REPO_ROOT)/.xr806-build/src
+XR806_SRC ?= $(error XR806_SRC must be provided by ESPHome)
 XR806_DEFINES := $(XR806_SRC)/esphome/core/defines.h
 XR806_CXX ?= arm-none-eabi-g++
 
@@ -88,7 +87,7 @@ XR806_CXXFLAGS := \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1/portable/GCC/ARM_CM33_NTZ \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1/portable/GCC/ARM_CM33_NTZ/non_secure
 
-# XR806_NOISE_INTEGRATED_V1: archives supplied by ESPHome run_compile.
+# Archives supplied by ESPHome run_compile.
 ifneq ($(strip $(XR806_NOISE_C_ARCHIVE)),)
 XR806_CXXFLAGS += \
     -I$(XR806_NOISE_C_INCLUDE) \
@@ -132,7 +131,6 @@ $(eval $(call XR806_COMPILE_SOCKET_CPP,xr_socket_core,$(XR806_REPO_ROOT)/esphome
 $(eval $(call XR806_COMPILE_SOCKET_CPP,xr_socket_lwip,$(XR806_REPO_ROOT)/esphome/components/socket/lwip_sockets_impl.cpp))
 
 
-# ESPHOME_SDK_MAIN_RULE_V1
 # Build a separate SDK main.o with ESPHome enabled.
 # The vendor project's original main.o remains untouched.
 
@@ -144,26 +142,6 @@ $(XR806_ESPHOME_MAIN): $(PRJ_ROOT_PATH)/main.c
 >    $(INCLUDE_PATHS) \
 >    -o $@ $<
 
-# ESPHOME_CODEGEN_RULE_V1
-# Regenerate ESPHome sources when YAML or platform configuration changes.
-
-XR806_YAML ?= $(XR806_REPO_ROOT)/examples/xr806/trv16.yaml
-XR806_PYTHON ?= python3
-XR806_PLATFORM_PY ?= $(XR806_REPO_ROOT)/esphome/components/xr806/__init__.py
-
-ifneq ($(XR806_SKIP_CODEGEN),1)
-# Grouped targets: a single ESPHome invocation generates both files.
-$(XR806_SRC)/main.cpp $(XR806_DEFINES) &: $(XR806_YAML) $(XR806_PLATFORM_PY)
->@echo "=== Generiere ESPHome-Code aus YAML ==="
->cd $(XR806_REPO_ROOT) && \
->    $(XR806_PYTHON) -m esphome compile \
->    $(XR806_YAML) --only-generate && \
->    test -s $(XR806_SRC)/main.cpp && \
->    test -s $(XR806_DEFINES) && \
->    touch $(XR806_SRC)/main.cpp $(XR806_DEFINES)
-endif
-
-# XR806_IMAGE_CONFIG_V1
 # Preprocess the WXU 2MiB OTA-enabled AWIH image configuration.
 # Layout: boot+app <=1276K; FDCM 1276..1280K; XZ update 1280..1920K; reserved tail 1920..2048K.
 
@@ -176,10 +154,9 @@ $(XR806_IMAGE_CFG): $(ROOT_PATH)/project/demo/trv16_port/image/xr806/image.cfg
 >    -include generated/autoconf.h \
 >    -o $@ - < $<
 
-# XR806_AWIH_PACKAGING_V1
 # Build RAM/XIP binaries and package the AWIH firmware image.
 
-XR806_FW_DIR ?= $(XR806_REPO_ROOT)/.xr806-build/firmware
+XR806_FW_DIR ?= $(error XR806_FW_DIR must be provided by ESPHome)
 XR806_AWIH ?= $(XR806_FW_DIR)/firmware.img
 
 $(XR806_FW_DIR)/app.bin: $(XR806_OUTPUT)
@@ -210,13 +187,10 @@ $(XR806_FW_DIR)/sys_sdd_40M.bin: $(ROOT_PATH)/bin/xradio_v3/sys_sdd_40M.bin
 >@mkdir -p $(@D)
 >install -m 0644 $< $@
 
-$(XR806_AWIH): $(XR806_FW_DIR)/app.bin $(XR806_FW_DIR)/app_xip.bin $(XR806_IMAGE_CFG) $(XR806_FW_DIR)/mkimage $(XR806_FW_DIR)/boot_40M.bin $(XR806_FW_DIR)/wlan_bl.bin $(XR806_FW_DIR)/wlan_fw.bin $(XR806_FW_DIR)/sys_sdd_40M.bin $(XR806_REPO_ROOT)/tools/xr806/stamp_ota_header.py
->rm -f $@
->cd $(XR806_FW_DIR) && ./mkimage -c image.cfg -o $(notdir $@).unstamped
->python3 $(XR806_REPO_ROOT)/tools/xr806/stamp_ota_header.py $@.unstamped --image-config $(XR806_IMAGE_CFG) -o $@
->rm -f $@.unstamped
+# run_compile() adds the OTA layout to the BOOT header when it copies the image to firmware.bin.
+$(XR806_AWIH): $(XR806_FW_DIR)/app.bin $(XR806_FW_DIR)/app_xip.bin $(XR806_IMAGE_CFG) $(XR806_FW_DIR)/mkimage $(XR806_FW_DIR)/boot_40M.bin $(XR806_FW_DIR)/wlan_bl.bin $(XR806_FW_DIR)/wlan_fw.bin $(XR806_FW_DIR)/sys_sdd_40M.bin
+>cd $(XR806_FW_DIR) && ./mkimage -c image.cfg -o $(notdir $@)
 
-# XR806_GPIO_BUILD_RULE_V2
 # Additional GPIO object, independent of existing object-list formatting.
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/gpio.o
 
@@ -226,10 +200,8 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/gpio.o
 $(eval $(call XR806_COMPILE_CPP,gpio,$(XR806_SRC)/esphome/components/xr806/gpio.cpp))
 
 
-# XR806_BINARY_SENSOR_BUILD_V1
 # ESPHome entity and GPIO binary-sensor implementations.
 
-# === XR806_ENTITY_BASE_V2 ===
 # Shared core entity implementation.
 
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/entity_base.o
@@ -237,9 +209,7 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/entity_base.o
 
 $(eval $(call XR806_COMPILE_CPP,entity_base,$(XR806_SRC)/esphome/core/entity_base.cpp))
 
-# === END XR806_ENTITY_BASE_V2 ===
 
-# XR806_CORE_GPIO_BUILD_V1
 # ESPHome core GPIO logging and utilities.
 # core_gpio.o avoids collision with XR806 platform gpio.o.
 
@@ -250,7 +220,6 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/core_gpio.o
 $(eval $(call XR806_COMPILE_CPP,core_gpio,$(XR806_SRC)/esphome/core/gpio.cpp))
 
 
-# XR806_CORE_LOG_BUILD_V1
 # ESPHome core logging implementation.
 
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/core_log.o
@@ -259,7 +228,6 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/core_log.o
 
 $(eval $(call XR806_COMPILE_CPP,core_log,$(XR806_SRC)/esphome/core/log.cpp))
 
-# === XR806_AUTO_COMPONENTS_V1 ===
 # Discover YAML-generated ESPHome component implementations.
 # XR806 platform files are built by their dedicated rules.
 # Core files remain explicitly selected to exclude foreign
@@ -267,7 +235,7 @@ $(eval $(call XR806_COMPILE_CPP,core_log,$(XR806_SRC)/esphome/core/log.cpp))
 
 XR806_AUTO_COMPONENT_SRCS := $(shell find $(XR806_SRC)/esphome/components -type f -name '*.cpp' ! -path '$(XR806_SRC)/esphome/components/xr806/*' 2>/dev/null | LC_ALL=C sort)
 
-# XR806_API_SOCKET_DEDUP_V1: already compiled with XR806_SOCKET_SHIM.
+# Already compiled with XR806_SOCKET_SHIM.
 # Avoid linking the auto-discovered copies alongside xr_socket_*.o.
 XR806_AUTO_COMPONENT_SRCS := $(filter-out \
     $(XR806_SRC)/esphome/components/socket/socket.cpp \
@@ -284,9 +252,7 @@ $(XR806_OBJDIR)/auto/components/%.o: $(XR806_SRC)/esphome/components/%.cpp $(XR8
 >@mkdir -p $(@D)
 >$(XR806_CXX) $(XR806_CXXFLAGS) -c $< -o $@
 
-# === END XR806_AUTO_COMPONENTS_V1 ===
 
-# XR806_OTA_INFLATE_C_V1
 # ESPHome OTA's raw DEFLATE decoder is a C file selected by generated
 # USE_OTA_DEFLATE. The general auto-component rule only compiles C++.
 # Compile this single generated C source as C, with the vendor ARM toolchain.
@@ -304,7 +270,6 @@ endif
 
 
 
-# === XR806_PREFERENCES_V1 ===
 # Non-persistent preferences manager for early XR806 bring-up.
 
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr806_preferences.o
@@ -312,10 +277,8 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/xr806_preferences.o
 
 $(eval $(call XR806_COMPILE_CPP,xr806_preferences,$(XR806_SRC)/esphome/components/xr806/preferences.cpp))
 
-# === END XR806_PREFERENCES_V1 ===
 
 
-# XR806_NETWORK_STATUS_V1
 # Platform-owned network state; no ESPHome Core modifications.
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_network_status.o
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_network_status.o
@@ -325,7 +288,6 @@ $(eval $(call XR806_COMPILE_CPP,xr_network_status,$(XR806_SRC)/esphome/component
 
 
 
-# XR806_API_CORE_LINK_V1
 # ESPHome-generated build metadata + reusable entity iteration (WLAN MAC: helpers.cpp).
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_core_build_info.o \
                         $(XR806_OBJDIR)/xr_core_component_iterator.o
@@ -337,11 +299,9 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_core_build_info.o \
 $(eval $(call XR806_COMPILE_CPP,xr_core_build_info,$(XR806_SRC)/esphome/core/build_info_data.cpp))
 $(eval $(call XR806_COMPILE_CPP,xr_core_component_iterator,$(XR806_SRC)/esphome/core/component_iterator.cpp))
 
-# XR806_MDNS_PLATFORM_V1
 # The lwIP mDNS backend lives in mdns/mdns_xr806.cpp, like the other
-# mdns_<platform>.cpp files, and is built by XR806_AUTO_COMPONENTS_V1.
+# mdns_<platform>.cpp files, and is built by the component loop above.
 
-# XR806_HEADER_DEPENDENCIES_V1
 # Track C++ header dependencies across all ESPHome objects.
 # Prevent stale main.o after platform class/header migrations.
 XR806_CXXFLAGS += -MMD -MP
@@ -349,7 +309,6 @@ XR806_CXXFLAGS += -MMD -MP
 # GCC writes one .d file alongside each compiled .o file.
 -include $(XR806_ESPHOME_OBJECTS:.o=.d)
 
-# XR806_STAGE7B_STANDBY_V1
 # Builds to an empty object unless explicitly enabled in xr806.standby_trial.
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_standby_trial.o
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_standby_trial.o

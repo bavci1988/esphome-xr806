@@ -766,6 +766,7 @@ esphome/components/xiaomi_rtcgq02lm/* @jesserockz
 esphome/components/xiaomi_xmwsdj04mmc/* @medusalix
 esphome/components/xl9535/* @mreditor97
 esphome/components/xpt2046/touchscreen/* @nielsnl68 @numo68
+esphome/components/xr806/* @bavci1988
 esphome/components/xxtea/* @clydebarrow
 esphome/components/zephyr/* @tomaszduda23
 esphome/components/zephyr_coredump/* @tomaszduda23

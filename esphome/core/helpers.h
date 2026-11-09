@@ -1,8 +1,4 @@
 #pragma once
-#ifdef USE_XR806
-#include <FreeRTOS.h>
-#include <semphr.h>
-#endif
 
 #include <algorithm>
 #include <array>
@@ -54,7 +50,7 @@ extern "C" uint32_t fdb_calc_crc32(uint32_t crc, const void *buf, size_t size);
 #if defined(USE_ESP32)
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
-#elif defined(USE_LIBRETINY)
+#elif defined(USE_LIBRETINY) || defined(USE_XR806)
 #include <FreeRTOS.h>
 #include <semphr.h>
 #endif
