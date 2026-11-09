@@ -94,7 +94,23 @@ void XR806StandbyController::dump_config() {
 }
 
 bool XR806StandbyController::is_any_transport_unowned_() const {
-  return this->require_uart_participant_ && this->participant_count_ == 0;
+  if (!this->require_uart_participant_)
+    return false;
+  for (size_t i = 0; i < this->participant_count_; ++i) {
+    if (this->participants_[i]->owns_uart())
+      return false;
+  }
+  return true;
+}
+
+bool XR806StandbyController::may_quiesce() const {
+  if (this->is_any_transport_unowned_())
+    return false;
+  for (size_t i = 0; i < this->participant_count_; ++i) {
+    if (!this->participants_[i]->may_quiesce())
+      return false;
+  }
+  return true;
 }
 
 void XR806StandbyController::loop() {
