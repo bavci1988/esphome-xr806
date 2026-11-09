@@ -365,6 +365,12 @@ def enable_deflate() -> None:
 
 @coroutine_with_priority(CoroPriority.OTA_UPDATES)
 async def to_code(config: ConfigType) -> None:
+    if CORE.target_platform == "xr806":
+        _LOGGER.warning(
+            "XR806 OTA is transport-only: firmware uploads are rejected "
+            "without modifying flash until the vendor OTA backend and "
+            "recovery path are verified"
+        )
     var = cg.new_Pvariable(config[CONF_ID])
     cg.add(var.set_port(config[CONF_PORT]))
 
