@@ -60,8 +60,8 @@ int main() {
   assert(!scan.probe_due(509));
 
   auto frame = [](uint8_t command, const std::string &payload) {
-    std::vector<uint8_t> b = {0x55, 0xAA, 0x00, command,
-        static_cast<uint8_t>(payload.size() >> 8), static_cast<uint8_t>(payload.size())};
+    std::vector<uint8_t> b = {
+        0x55, 0xAA, 0x00, command, static_cast<uint8_t>(payload.size() >> 8), static_cast<uint8_t>(payload.size())};
     b.insert(b.end(), payload.begin(), payload.end());
     uint8_t sum = 0;
     for (uint8_t x : b)
