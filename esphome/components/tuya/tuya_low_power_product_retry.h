@@ -13,8 +13,9 @@ class TuyaLowPowerProductRetry {
   static constexpr uint8_t MAX_RETRIES = 5;
 
   void begin(uint32_t now) {
-    if (active_)
+    if (active_) {
       return;
+    }
     active_ = true;
     attempts_ = 0;
     next_ms_ = now + RETRY_MS;
@@ -26,8 +27,9 @@ class TuyaLowPowerProductRetry {
   bool exhausted() const { return active_ && attempts_ >= MAX_RETRIES; }
 
   void query_sent(uint32_t now) {
-    if (!active_ || this->exhausted())
+    if (!active_ || this->exhausted()) {
       return;
+    }
     ++attempts_;
     next_ms_ = now + RETRY_MS;
   }
