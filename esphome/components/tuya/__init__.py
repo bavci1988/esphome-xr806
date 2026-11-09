@@ -156,9 +156,7 @@ async def to_code(config):
     await cg.add_pin(var.set_mcu_wake_pin, config.get(CONF_MCU_WAKE_PIN))
     if CONF_TRV16_MCU_WAKE_PB04 in config:
         cg.add(
-            var.set_trv16_pb04_wake(
-                config[CONF_TRV16_MCU_WAKE_PB04] == "active_high"
-            )
+            var.set_trv16_pb04_wake(config[CONF_TRV16_MCU_WAKE_PB04] == "active_high")
         )
     cg.add(
         var.set_protocol(
