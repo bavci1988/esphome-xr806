@@ -536,7 +536,7 @@ void WebServer::handle_index_request(AsyncWebServerRequest *request) {
 #ifdef USE_WEBSERVER_PRIVATE_NETWORK_ACCESS
 void WebServer::handle_pna_cors_request(AsyncWebServerRequest *request) {
   // WebServerBase's middleware already rejected an origin that is not allowed.
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
   char origin_buf[web_server_base::MAX_ORIGIN_LENGTH + 1];
   const size_t origin_len = request->get_header_to("Origin", origin_buf);
   // Only an allow-any-origin build lets through an Origin too long for the buffer; it gets "*" instead
