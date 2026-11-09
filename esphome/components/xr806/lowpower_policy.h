@@ -78,7 +78,36 @@ class XR806LowPowerPolicy {
     return blockers | (requested_.load(std::memory_order_acquire) ? 0u : NOT_REQUESTED);
   }
 
-  bool can_enter_standby() const { return blockers() == 0; }
+  struct Snapshot {
+    uint32_t blockers;
+    uint32_t generation;
+    bool stable;
+  };
+
+  // All owner votes are atomic; a stable epoch must be observed on both
+  // sides of the blocker load. A third-party event after this snapshot still
+  // requires its owner to acquire a native SDK PM wakelock BEFORE work starts.
+  Snapshot snapshot() const {
+    for (unsigned attempt = 0; attempt < 4; ++attempt) {
+      const uint32_t before = this->generation();
+      const uint32_t flags = this->blockers();
+      const uint32_t after = this->generation();
+      if (before == after) {
+        return {flags, after, true};
+      }
+    }
+    return {ALL_REQUIREMENTS | NOT_REQUESTED, this->generation(), false};
+  }
+
+  bool can_enter_standby() const {
+    const auto state = this->snapshot();
+    return state.stable && state.blockers == 0;
+  }
+
+  bool can_enter_standby(uint32_t expected_epoch) const {
+    const auto state = this->snapshot();
+    return state.stable && state.blockers == 0 && state.generation == expected_epoch;
+  }
 
  private:
   void update_(uint32_t blocker, bool ready) {
