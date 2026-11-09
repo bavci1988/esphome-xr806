@@ -24,3 +24,11 @@ A bare branch/SHA or an ESPHome YAML parse pass is **not** evidence of a flashab
 `esphome`, `xr806`, `web_server`, `captive_portal`, `mdns`, `api`, `ota`, `wifi`, `time`, `uart`, `tuya`, `climate`, `switch`, `number`, `select`, `sensor`, `binary_sensor`, `text_sensor`, `button`.
 
 Configured DPs: 1, 2, 3, 4, 7, 10, 11, 16, 17, 19, 20, 101, 102, 104, 105, 107, 108, plus the `tuya.refresh` trigger for DP106.
+
+## Executed full-config CI result (2026-11-09)
+
+- Run: https://github.com/bavci1988/xr806-sdk/actions/runs/42708563259 (private).
+- The ARM toolchain was installed, and the full configuration was copied and passed to the ESPHome validator **without deleting any YAML sections**.
+- The validation step exited with code **2** at `web_server` (source line 24): `This feature is only available on [esp32, esp8266, bk72xx, ln882x, rp2, rtl87xx]`.
+- The native AWIH and OTA compile steps were correctly skipped; **no artifact exists for this full configuration**. The source is not flash-ready.
+- Additional design blocker, independent of this first validation error: `captive_portal` is excluded by `cv.only_on` and native XR806 Wi-Fi is currently station-only.
