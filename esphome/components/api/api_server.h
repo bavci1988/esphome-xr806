@@ -72,6 +72,7 @@ class APIServer final : public Component
 #ifdef USE_XR806_STANDBY_CONTROLLER
   void standby_preflight(bool requested) override;
   bool may_quiesce() const override;
+  uint32_t owned_services() const override { return xr806::XR806LowPowerPolicy::API_BUSY; }
   bool prepare_for_standby() override;
   void standby_cancelled() override;
   void standby_resumed(const xr806::XR806StandbyResume &event) override;
