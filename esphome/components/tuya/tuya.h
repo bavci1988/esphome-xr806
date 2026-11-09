@@ -188,6 +188,8 @@ class Tuya final : public Component,
   void invalidate_low_power_mode_epoch_();
   bool low_power_ready_for_sleep_(bool in_cmd38_handler = false) const;
   void cancel_low_power_standby_();
+  void poll_low_power_sleep_preflight_();
+  void cancel_low_power_preflight_(bool notify_mcu);
   void send_low_power_awake_notification_();
   void send_raw_command_(TuyaCommand command);
   void process_command_queue_();
@@ -236,6 +238,9 @@ class Tuya final : public Component,
   uint32_t lp_last_resync_ms_{0};
   TuyaLowPowerStandbyState lp_standby_{};
   TuyaLowPowerWireTransactions lp_wire_{};
+  bool lp_cmd38_pending_{false};
+  uint32_t lp_cmd38_deadline_ms_{0};
+  uint32_t lp_cmd38_cooldown_until_{0};
   bool lp_bridge_registered_{false};
   uint8_t lp_network_status_{0xFF};
   TuyaInitState init_state_ = TuyaInitState::INIT_HEARTBEAT;
