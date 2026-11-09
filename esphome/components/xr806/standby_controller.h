@@ -27,6 +27,10 @@ class XR806StandbyParticipant {
   // Optional nonblocking service drain, invoked while other owners still
   // have their busy votes asserted. Must never claim idle before close/drain.
   virtual void standby_preflight(bool requested) {}
+  // Only the UART/MCU participant can satisfy the mandatory transport owner.
+  virtual bool owns_uart() const { return false; }
+  // A connected network owner can veto before acknowledging MCU CMD38.
+  virtual bool may_quiesce() const { return true; }
   virtual bool prepare_for_standby() = 0;
   virtual void standby_cancelled() = 0;
   virtual void standby_resumed(const XR806StandbyResume &event) = 0;
@@ -56,6 +60,7 @@ class XR806StandbyController final : public Component {
   uint8_t wake_pin() const { return this->wake_pin_; }
   bool requires_external_sync() const { return this->external_sync_required_; }
 
+  bool may_quiesce() const;
   bool register_participant(XR806StandbyParticipant *participant);
   void request_standby(bool requested);
 
