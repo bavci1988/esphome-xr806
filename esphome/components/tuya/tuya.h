@@ -11,6 +11,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/components/uart/uart.h"
 #include "tuya_low_power_v0.h"
+#include "tuya_low_power_transaction_gate.h"
 #include "tuya_low_power_product.h"
 #include "tuya_low_power_autobaud.h"
 #include "tuya_low_power_sleep_window.h"
@@ -222,6 +223,7 @@ class Tuya final : public Component,
 #endif
   TuyaLowPowerAutoBaud lp_autobaud_{};
   TuyaLowPowerV0Session lp_v0_{};
+  TuyaLowPowerTransactionGate lp_transaction_{};
   TuyaLowPowerProductInfo lp_product_{};
   // Bounded CMD01 JSON copy for diagnostics, no extra heap allocation.
   std::array<char, 513> lp_product_text_{};
