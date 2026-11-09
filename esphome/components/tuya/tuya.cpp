@@ -3,9 +3,6 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
-#ifdef USE_XR806_LOWPOWER
-#include "esphome/components/xr806/lowpower_policy.h"
-#endif
 
 #ifdef USE_NETWORK
 #include "esphome/components/network/util.h"
@@ -43,52 +40,16 @@ static bool network_is_connected() {
 }
 
 void Tuya::setup() {
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
-    this->init_state_ = TuyaInitState::INIT_PRODUCT;
-    if (this->mcu_wake_pin_ != nullptr) {
-      this->mcu_wake_pin_->setup();
-      this->mcu_wake_pin_->digital_write(false);  // Inactive logical level.
-    }
-#ifdef USE_XR806
-    if (this->trv16_pb04_requested_ && !this->trv16_pb04_.claim(this->trv16_pb04_active_high_)) {
-      ESP_LOGE(TAG, "PB04 is owned by another peripheral/flash mux; MCU wake pin refused");
-      this->mark_failed();
-      return;
-    }
-#endif
-#ifdef USE_XR806_LOWPOWER
-    esphome::xr806::lowpower_policy().require_external_mcu(true);
-    this->update_low_power_sleep_lock_();
-#endif
-#ifdef USE_XR806_STANDBY_CONTROLLER
-    // Registration is a protocol-specific opt-in. The generic platform PM
-    // driver never sends Tuya packets or infers the MCU's 'sm' selection.
-    if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr) {
-      this->lp_bridge_registered_ = controller->register_participant(this);
-      if (!this->lp_bridge_registered_) {
-        ESP_LOGE(TAG, "Cannot register Tuya MCU standby participant; PM remains blocked");
-        this->mark_failed();
-      }
-    }
-#endif  // USE_XR806_STANDBY_CONTROLLER
-    // The original WXU probes CMD01 at each candidate baud, without a heartbeat.
-    // With a fixed rate the existing queued CMD01 request is sufficient.
-    if (this->auto_baud_) {
-#ifdef USE_XR806
-      // A wrong candidate rate produces expected LSR framing errors. The
-      // physical UART driver must not latch a permanent fault during probes.
-      this->parent_->set_baud_probe_mode(true);
-#endif
-      this->lp_autobaud_.start(this->parent_->get_baud_rate());
-    } else {
-      this->send_low_power_product_query_(false);
-    }
-    this->set_interval(WIFI_STATUS_INTERVAL_ID, 1000, [this] { this->send_low_power_network_(); });
-  } else {
-    this->set_interval(HEARTBEAT_INTERVAL_ID, 15000, [this] { this->send_empty_command_(TuyaCommandType::HEARTBEAT); });
+#ifdef USE_TUYA_LOW_POWER_V0
+  if (this->is_low_power_()) {
+    // Validation rejects force_time_sync and status_pin for this protocol.
+    this->setup_low_power_();
+    return;
   }
+#endif
+  this->set_interval(HEARTBEAT_INTERVAL_ID, 15000, [this] { this->send_empty_command_(TuyaCommandType::HEARTBEAT); });
 #ifdef USE_TIME
-  if (this->force_time_sync_ && this->protocol_ == TuyaProtocol::STANDARD) {
+  if (this->force_time_sync_) {
     this->register_local_time_sync_callback_();
     this->set_interval(FORCE_TIME_SYNC_INTERVAL_ID, FORCE_TIME_SYNC_CHECK_INTERVAL,
                        [this] { this->check_force_time_sync_(); });
@@ -101,63 +62,20 @@ void Tuya::setup() {
 
 void Tuya::loop() {
   this->read_available([this](uint8_t b) { this->handle_char_(b); });
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
-    this->poll_low_power_sleep_preflight_();
-#ifdef USE_XR806_STANDBY_CONTROLLER
-    if (this->lp_standby_.requested()) {
-      const auto &policy = esphome::xr806::lowpower_policy();
-      const bool ota_busy = (policy.blockers() & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
-      auto *controller = esphome::xr806::standby_controller();
-      if (!policy.standby_requested() || ota_busy || controller == nullptr || !controller->may_quiesce() ||
-          !this->low_power_ready_for_sleep_()) {
-        // Withdraw the HC32 logical-sleep signal on any new protocol,
-        // network, OTA or application work, before PM has been entered.
-        this->cancel_low_power_standby_();
-      }
-    }
-#endif
-    if (this->parent_ == nullptr || !this->parent_->is_connected()) {
-      if (!this->lp_standby_.recovery_required()) {
-        this->lp_standby_.transport_fault();
-        this->lp_v0_.command_timeout();
-        this->lp_wire_.transport_fault();
-        this->lp_network_status_ = 0xFF;
-        ESP_LOGE(TAG, "XR806 UART unhealthy: MCU transactions cancelled, standby blocked until recovery");
-      }
-#ifdef USE_XR806_STANDBY_CONTROLLER
-      if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr)
-        controller->request_standby(false);
-#endif
-      this->update_low_power_sleep_lock_();
-      return;  // No further CMD09 or autobaud probes on a failed transport.
-    }
-    if (this->auto_baud_) {
-      if (this->lp_autobaud_.searching())
-        this->poll_low_power_autobaud_();
-      if (!this->lp_autobaud_.locked())
-        return;  // Never send queued MCU writes/status before CMD01 lock.
-    }
-    this->poll_low_power_product_recovery_();
-    if (this->lp_v0_.expire(millis())) {
-      ESP_LOGW(TAG, "Low-power status/write report timeout; requesting state resynchronization");
-      this->lp_network_status_ = 0xFF;
-    }
-    this->update_low_power_sleep_lock_();
+#ifdef USE_TUYA_LOW_POWER_V0
+  if (this->is_low_power_()) {
+    this->loop_low_power_();
+    return;
   }
+#endif
   process_command_queue_();
 }
 
 void Tuya::dump_config() {
   ESP_LOGCONFIG(TAG, "Tuya:");
-  ESP_LOGCONFIG(
-      TAG, "  Protocol: %s",
-      this->protocol_ == TuyaProtocol::LOW_POWER_V0 ? LOG_STR_LITERAL("low_power_v0") : LOG_STR_LITERAL("standard"));
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
-    ESP_LOGCONFIG(TAG, "  Auto baud: %s", YESNO(this->auto_baud_));
-    if (this->auto_baud_ && this->lp_autobaud_.locked()) {
-      ESP_LOGCONFIG(TAG, "  Detected baud: %u", static_cast<unsigned>(this->lp_autobaud_.baud()));
-    }
-  }
+#ifdef USE_TUYA_LOW_POWER_V0
+  this->dump_low_power_config_();
+#endif
   if (this->init_state_ != TuyaInitState::INIT_DONE) {
     if (this->init_failed_) {
       ESP_LOGCONFIG(TAG, "  Initialization failed. Current init_state: %u", static_cast<uint8_t>(this->init_state_));
@@ -192,10 +110,9 @@ void Tuya::dump_config() {
                   this->reset_pin_reported_);
   }
   LOG_PIN("  Status Pin: ", this->status_pin_);
-  const char *product_text = this->protocol_ == TuyaProtocol::LOW_POWER_V0
-                                 ? this->lp_product_text_.data()
-                                 : (this->product_ ? this->product_.get() : LOG_STR_LITERAL(""));
-  ESP_LOGCONFIG(TAG, "  Product: '%s'", this->product_invalid_ ? LOG_STR_LITERAL(R"({"p":"INVALID"})") : product_text);
+  ESP_LOGCONFIG(TAG, "  Product: '%s'",
+                this->product_invalid_ ? LOG_STR_LITERAL(R"({"p":"INVALID"})")
+                                       : (this->product_ ? this->product_.get() : LOG_STR_LITERAL("")));
 #ifdef USE_TIME
   if (this->time_id_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Force time sync: %s", YESNO(this->force_time_sync_));
@@ -235,10 +152,12 @@ bool Tuya::validate_message_() {
   uint16_t length = encode_uint16(data[4], data[5]);
   // Keep the low-power MCU parser bounded. Corrupted length bytes on a
   // sleeping UART must not accumulate a 64-KiB heap buffer.
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && (length > 512 || version != 0)) {
+#ifdef USE_TUYA_LOW_POWER_V0
+  if (this->is_low_power_() && (length > 512 || version != 0)) {
     ESP_LOGW(TAG, "Invalid low-power MCU frame length/version: %u/%u", length, version);
     return false;
   }
+#endif
 
   // wait until all data is read
   if (at - 6 < length)
@@ -249,8 +168,10 @@ bool Tuya::validate_message_() {
   const uint8_t calc_checksum = sum_bytes(data, 6 + length);
 
   if (rx_checksum != calc_checksum) {
-    if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
+#ifdef USE_TUYA_LOW_POWER_V0
+    if (this->is_low_power_() && this->lp_standby_.requested())
       this->cancel_low_power_standby_();
+#endif
     ESP_LOGW(TAG, "Tuya Received invalid message checksum %02X!=%02X", rx_checksum, calc_checksum);
     return false;
   }
@@ -269,17 +190,10 @@ bool Tuya::validate_message_() {
 }
 
 void Tuya::handle_char_(uint8_t c) {
-  // An incoming byte before CMD38 consent invalidates a pending network
-  // preflight. The MCU must see a busy response, not a delayed grant.
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_cmd38_pending_) {
-    this->cancel_low_power_preflight_(true);
-    this->lp_cmd38_cooldown_until_ = millis() + 500;
-  }
-  // The first arriving byte, not only a fully checksummed frame, must
-  // preempt a provisional CMD38 -> CMD12 -> CPU standby transaction.
-  // Otherwise partial/noisy UART RX can race the final PM admission check.
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
-    this->cancel_low_power_standby_();
+#ifdef USE_TUYA_LOW_POWER_V0
+  if (this->is_low_power_())
+    this->on_low_power_rx_byte_();
+#endif
   this->rx_message_.push_back(c);
   if (!this->validate_message_()) {
     this->rx_message_.clear();
@@ -289,41 +203,13 @@ void Tuya::handle_char_(uint8_t c) {
 }
 
 void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len) {
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->auto_baud_ && this->lp_autobaud_.searching()) {
-    // validate_message_ already checked the full checksum. Keep the scanner
-    // independent so bad/wrong frames cannot unlock the boot state machine.
-    if (!this->lp_autobaud_.accept_frame(this->rx_message_.data(), this->rx_message_.size(), millis()))
-      return;
-#ifdef USE_XR806
-    // The accepted CMD01 packet was checksum-validated and matches this rate.
-    // From now on, any hardware framing/overrun error is a real sticky fault.
-    this->parent_->set_baud_probe_mode(false);
-#endif
-    ESP_LOGI(TAG, "Tuya low_power_v0 baud locked: %u", static_cast<unsigned>(this->lp_autobaud_.baud()));
-  }
-
-  TuyaCommandType command_type = (TuyaCommandType) command;
-
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
-    // CMD02/CMD09 are only acknowledged by an *empty* reply. CMD05 reports
-    // never consume a queued command, and any unsolicited matching command ID
-    // must not release an unrelated transaction.
-    // A matching reply delivered after its deadline but before the periodic
-    // timeout sweep must not complete an expired transaction.
-    if (this->lp_wire_.overdue(millis()) && this->lp_wire_.accepts(command, len)) {
-      ESP_LOGW(TAG, "Discarding overdue MCU ACK CMD 0x%02X; recovery required", command);
-      return;
-    }
-    if (this->lp_wire_.complete(command, len) && this->expected_response_.has_value() &&
-        this->expected_response_ == command_type) {
-      this->expected_response_.reset();
-      if (!this->command_queue_.empty())
-        this->command_queue_.erase(this->command_queue_.begin());
-      this->init_retries_ = 0;
-    }
-    this->handle_low_power_command_(command, version, buffer, len);
+#ifdef USE_TUYA_LOW_POWER_V0
+  if (this->is_low_power_()) {
+    this->handle_low_power_frame_(command, version, buffer, len);
     return;
   }
+#endif
+  TuyaCommandType command_type = (TuyaCommandType) command;
 
   if (this->expected_response_.has_value() && this->expected_response_ == command_type) {
     this->expected_response_.reset();
@@ -638,53 +524,33 @@ void Tuya::handle_datapoints_(const uint8_t *buffer, size_t len) {
 }
 
 void Tuya::send_raw_command_(TuyaCommand command) {
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_cmd38_pending_)
-    this->cancel_low_power_preflight_(true);
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
-    this->cancel_low_power_standby_();
+#ifdef USE_TUYA_LOW_POWER_V0
+  if (this->is_low_power_()) {
+    this->send_low_power_raw_command_(command);
+    return;
+  }
+#endif
   uint8_t len_hi = (uint8_t) (command.payload.size() >> 8);
   uint8_t len_lo = (uint8_t) (command.payload.size() & 0xFF);
   uint8_t version = 0;
 
   this->last_command_timestamp_ = millis();
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
-    const auto cmd = static_cast<uint8_t>(command.cmd);
-    if (cmd == 0x01 || cmd == 0x02 || cmd == 0x09) {
-      if (!this->lp_wire_.begin(cmd, millis())) {
-        ESP_LOGE(TAG, "Refusing overlapping/ambiguous low-power MCU wire transaction");
-        this->lp_v0_.command_timeout();
-        this->lp_wire_.transport_fault();
-        return;
-      }
-      this->expected_response_ = command.cmd;
-    }
-    if (cmd == 0x02 && command.payload.size() == 1 && command.payload[0] == 0x04)
-      this->lp_v0_.begin_full_status(millis());
-    if (cmd == 0x09 && command.payload.size() >= 4) {
-      const auto &p = command.payload;
-      const size_t size = (static_cast<size_t>(p[2]) << 8) | p[3];
-      if (p.size() == size + 4)
-        this->lp_v0_.begin_write(p[0], p[1], p.data() + 4, size, millis());
-    }
-    this->update_low_power_sleep_lock_();
-  } else {
-    switch (command.cmd) {
-      case TuyaCommandType::HEARTBEAT:
-        this->expected_response_ = TuyaCommandType::HEARTBEAT;
-        break;
-      case TuyaCommandType::PRODUCT_QUERY:
-        this->expected_response_ = TuyaCommandType::PRODUCT_QUERY;
-        break;
-      case TuyaCommandType::CONF_QUERY:
-        this->expected_response_ = TuyaCommandType::CONF_QUERY;
-        break;
-      case TuyaCommandType::DATAPOINT_DELIVER:
-      case TuyaCommandType::DATAPOINT_QUERY:
-        this->expected_response_ = TuyaCommandType::DATAPOINT_REPORT_ASYNC;
-        break;
-      default:
-        break;
-    }
+  switch (command.cmd) {
+    case TuyaCommandType::HEARTBEAT:
+      this->expected_response_ = TuyaCommandType::HEARTBEAT;
+      break;
+    case TuyaCommandType::PRODUCT_QUERY:
+      this->expected_response_ = TuyaCommandType::PRODUCT_QUERY;
+      break;
+    case TuyaCommandType::CONF_QUERY:
+      this->expected_response_ = TuyaCommandType::CONF_QUERY;
+      break;
+    case TuyaCommandType::DATAPOINT_DELIVER:
+    case TuyaCommandType::DATAPOINT_QUERY:
+      this->expected_response_ = TuyaCommandType::DATAPOINT_REPORT_ASYNC;
+      break;
+    default:
+      break;
   }
 
 #if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
@@ -703,10 +569,12 @@ void Tuya::send_raw_command_(TuyaCommand command) {
 }
 
 void Tuya::process_command_queue_() {
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+#ifdef USE_TUYA_LOW_POWER_V0
+  if (this->is_low_power_()) {
     this->process_low_power_queue_();
     return;
   }
+#endif
   uint32_t now = millis();
   uint32_t delay = now - this->last_command_timestamp_;
 
@@ -738,10 +606,10 @@ void Tuya::process_command_queue_() {
 }
 
 void Tuya::send_command_(const TuyaCommand &command) {
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_cmd38_pending_)
-    this->cancel_low_power_preflight_(true);
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
-    this->cancel_low_power_standby_();
+#ifdef USE_TUYA_LOW_POWER_V0
+  if (this->is_low_power_())
+    this->preempt_low_power_sleep_();
+#endif
   command_queue_.push_back(command);
   process_command_queue_();
 }
@@ -989,27 +857,12 @@ void Tuya::set_string_datapoint_value_(uint8_t datapoint_id, const std::string &
 }
 
 void Tuya::send_datapoint_command_(uint8_t datapoint_id, TuyaDatapointType datapoint_type, std::vector<uint8_t> data) {
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
-    if (!this->lp_v0_.ready() || !this->lp_wire_.idle() || this->lp_standby_.requested()) {
-      ESP_LOGW(TAG, "Refusing DP%u write before MCU synchronization or while another transaction owns UART",
-               static_cast<unsigned>(datapoint_id));
-      return;
-    }
-    // The original MCU DP102 handler blindly reads four bytes even for
-    // RAW1 and can consume checksum/buffer memory. Reject unsafe writes
-    // BEFORE serialization, regardless of whether a higher-level entity
-    // calls a forced setter or sends an unknown datapoint.
-    if (!TuyaLowPowerSleepWindow::valid_datapoint(datapoint_id, static_cast<uint8_t>(datapoint_type), data.data(),
-                                                  data.size())) {
-      ESP_LOGE(TAG, "Refusing malformed TRV16 DP%u (type=%u, len=%u)", datapoint_id,
-               static_cast<unsigned>(datapoint_type), static_cast<unsigned>(data.size()));
-      return;
-    }
-    if (datapoint_id == TuyaLowPowerSleepWindow::ENABLE_DP || datapoint_id == TuyaLowPowerSleepWindow::WINDOW_DP) {
-      this->lp_sleep_window_.on_write(datapoint_id);
-      this->invalidate_low_power_mode_epoch_();
-    }
+#ifdef USE_TUYA_LOW_POWER_V0
+  if (this->is_low_power_()) {
+    this->send_low_power_datapoint_(datapoint_id, datapoint_type, data);
+    return;
   }
+#endif
   std::vector<uint8_t> buffer;
   buffer.push_back(datapoint_id);
   buffer.push_back(static_cast<uint8_t>(datapoint_type));
@@ -1017,9 +870,7 @@ void Tuya::send_datapoint_command_(uint8_t datapoint_id, TuyaDatapointType datap
   buffer.push_back(data.size() >> 0);
   buffer.insert(buffer.end(), data.begin(), data.end());
 
-  const auto cmd = this->protocol_ == TuyaProtocol::LOW_POWER_V0 ? static_cast<TuyaCommandType>(0x09)
-                                                                 : TuyaCommandType::DATAPOINT_DELIVER;
-  this->send_command_(TuyaCommand{.cmd = cmd, .payload = buffer});
+  this->send_command_(TuyaCommand{.cmd = TuyaCommandType::DATAPOINT_DELIVER, .payload = buffer});
 }
 
 void Tuya::register_listener_(uint8_t datapoint_id, Callback<void(const TuyaDatapoint &)> func) {
