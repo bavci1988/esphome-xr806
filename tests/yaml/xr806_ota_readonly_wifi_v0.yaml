@@ -1,0 +1,33 @@
+# CI-only synthetic network and MCU: tests coexistence, not electrical pins.
+esphome:
+  name: xr806-ota-v0-ci
+xr806:
+  board: wxu
+  lowpower: true
+  ota_diagnostic_readonly: true
+  wlan:
+    network_suspend: true
+  standby:
+    enabled: true
+    wake_pin: PA20
+    wake_edge: falling
+    wake_after_ms: 3000
+    quiet_ms: 250
+    min_awake_ms: 5000
+    require_external_sync: true
+wifi:
+  ssid: TEST-NETWORK-NO-HARDWARE
+  password: TestOnlyPassword123
+  power_save_mode: light
+api:
+mdns:
+uart:
+  id: uart_mcu
+  tx_pin: PB0
+  rx_pin: PB1
+  baud_rate: 115200
+tuya:
+  id: mcu
+  uart_id: uart_mcu
+  protocol: low_power_v0
+  auto_baud: true

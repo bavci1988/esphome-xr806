@@ -2,11 +2,20 @@ name: XR806 Low-Power Policy (MCU-independent)
 
 on:
   push:
-    branches: [dev, feature/xr806-standby-race-arbiter]
+    branches: [dev, feature/xr806-ota-reversible-standby]
   pull_request:
     branches: [dev]
     paths:
       - "esphome/components/xr806/lowpower_policy.h"
+      - "esphome/components/xr806/ota_update_pm_gate.h"
+      - "esphome/components/xr806/ota_flash_plan.h"
+      - "esphome/components/xr806/ota_vendor_runtime_preflight.h"
+      - "esphome/components/xr806/ota_dry_run_session.h"
+      - "esphome/components/ota/ota_backend.cpp"
+      - "tests/xr806/ota_update_preflight_test.cpp"
+      - "tests/xr806/ota_vendor_runtime_test.cpp"
+      - "tools/xr806/inspect_ota_geometry.py"
+      - "tests/xr806/ota_geometry_test.py"
       - "esphome/components/xr806/wifi_power_save_retry.h"
       - "esphome/components/xr806/standby_trial_state.h"
       - "esphome/components/xr806/standby_trial.cpp"
@@ -50,4 +59,15 @@ jobs:
             tests/xr806/standby_race_network_lifecycle_test.cpp \
             -o /tmp/xr806-standby-network-race-test
           /tmp/xr806-standby-network-race-test
+          g++ -std=gnu++20 -Wall -Wextra -Werror -I. \
+            tests/xr806/ota_update_preflight_test.cpp \
+            -o /tmp/xr806-ota-update-preflight-test
+          /tmp/xr806-ota-update-preflight-test
+          python3 tests/xr806/ota_geometry_test.py
+          g++ -std=gnu++20 -Wall -Wextra -Werror -I. \
+            tests/xr806/ota_vendor_runtime_test.cpp \
+            -o /tmp/xr806-ota-vendor-runtime-test
+          /tmp/xr806-ota-vendor-runtime-test
+          echo "PASS read-only OTA vendor runtime geometry + transfer failure simulation"
+          echo "PASS fail-closed OTA PM gate and no-write flash-layout preflight"
           echo "PASS low-power admission fence and 120 WLAN/API/OTA/mDNS/UART interleavings"
