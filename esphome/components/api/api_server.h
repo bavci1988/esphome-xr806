@@ -1,6 +1,9 @@
 #pragma once
 
 #include "esphome/core/defines.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/standby_controller.h"
+#endif
 #ifdef USE_API
 #include "api_buffer.h"
 // Must precede clients_ so APIConnection is complete for default_delete (libc++).
@@ -52,6 +55,9 @@ bool load_saved_noise_psk(noise::psk_t &out);
 #endif
 
 class APIServer final : public Component
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    , public xr806::XR806StandbyServiceOwner
+#endif
 #ifdef USE_CAMERA
     ,
                         public camera::CameraListener
@@ -65,6 +71,11 @@ class APIServer final : public Component
   void loop() override;
   void dump_config() override;
   void on_shutdown() override;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  bool pause_for_standby() override;
+  void cancel_standby_pause() override;
+  void resume_after_standby() override;
+#endif
   bool teardown() override;
 #ifdef USE_LOGGER
   void on_log(uint8_t level, const char *tag, const char *message, size_t message_len);
@@ -326,6 +337,7 @@ class APIServer final : public Component
 #endif  // USE_API_HOMEASSISTANT_STATES
   // No explicit close() needed — listen sockets have no active connections on
   // failure/shutdown. Destructor handles fd cleanup (close or abort per platform).
+  void start_listener_();
   inline void destroy_socket_() {
     delete this->socket_;
     this->socket_ = nullptr;
@@ -384,6 +396,9 @@ class APIServer final : public Component
   uint16_t batch_delay_{100};  // Keep in sync with DEFAULT_BATCH_DELAY in __init__.py
   uint8_t listen_backlog_{4};  // Keep in sync with DEFAULT_LISTEN_BACKLOG in __init__.py
   bool shutting_down_ = false;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  bool standby_paused_{false};
+#endif
   uint8_t api_connection_count_{0};
 #ifdef USE_API_OUTGOING_CONNECTION
   // Connected clients whose hello declared them a dial-back target
