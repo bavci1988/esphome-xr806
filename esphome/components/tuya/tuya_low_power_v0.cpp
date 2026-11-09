@@ -19,7 +19,6 @@ namespace esphome::tuya {
 static const char *const LP_TAG = "tuya.low_power_v0";
 static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
 static constexpr uint32_t LP_COMMAND_DELAY_MS = 10;
-static constexpr int LP_MAX_RETRIES = 5;
 
 void Tuya::send_low_power_product_query_(bool direct_probe) {
   // The original WXU calls its MCU-wake helper *before* CMD01. We pulse
@@ -161,8 +160,8 @@ void Tuya::update_low_power_sleep_lock_() {
 }
 
 bool Tuya::request_low_power_refresh() {
-  if (this->protocol_ != TuyaProtocol::LOW_POWER_V0 || !this->lp_v0_.has_product() || this->lp_v0_.busy() ||
-      this->expected_response_.has_value())
+  if (this->protocol_ != TuyaProtocol::LOW_POWER_V0 || !this->lp_v0_.ready() || !this->lp_wire_.idle() ||
+      this->lp_standby_.requested() || this->expected_response_.has_value())
     return false;
   this->send_datapoint_command_(106, TuyaDatapointType::BOOLEAN, {0x01});
   return true;
