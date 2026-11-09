@@ -56,7 +56,8 @@ bool load_saved_noise_psk(noise::psk_t &out);
 
 class APIServer final : public Component
 #ifdef USE_XR806_STANDBY_CONTROLLER
-    , public xr806::XR806StandbyParticipant
+    ,
+                        public xr806::XR806StandbyParticipant
 #endif
 #ifdef USE_CAMERA
     ,
