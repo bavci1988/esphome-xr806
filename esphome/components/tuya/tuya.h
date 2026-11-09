@@ -16,6 +16,7 @@
 #include "tuya_low_power_sleep_window.h"
 #include "tuya_low_power_product_retry.h"
 #include "tuya_low_power_standby_state.h"
+#include "tuya_low_power_wire_transactions.h"
 
 #ifdef USE_XR806_STANDBY_CONTROLLER
 #include "esphome/components/xr806/standby_controller.h"
@@ -233,6 +234,7 @@ class Tuya final : public Component,
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_last_resync_ms_{0};
   TuyaLowPowerStandbyState lp_standby_{};
+  TuyaLowPowerWireTransactions lp_wire_{};
   bool lp_bridge_registered_{false};
   uint8_t lp_network_status_{0xFF};
   TuyaInitState init_state_ = TuyaInitState::INIT_HEARTBEAT;
