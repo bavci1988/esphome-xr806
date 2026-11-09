@@ -81,7 +81,7 @@ def package(firmware: bytes, *, flash_size: int = 2 * 1024 * 1024,
             raise ValueError("Invalid AWIH next_addr")
         cursor = successor
     raw = firmware[app_start:end]
-    xz = lzma.compress(raw, format=lzma.FORMAT_XZ,
+    xz = lzma.compress(raw, format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32,
                        filters=[{"id": lzma.FILTER_LZMA2,
                                  "dict_size": BOOTLOADER_XZ_DICT, "preset": 6}])
     fields = [AWIH_MAGIC, 5, 0, (0xFFFF - checksum16(xz)) & 0xFFFF,
