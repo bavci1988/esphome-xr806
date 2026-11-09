@@ -1,6 +1,6 @@
 # CI-only synthetic network and MCU: tests coexistence, not electrical pins.
 esphome:
-  name: xr806-ota-readonly-integration-ci
+  name: xr806-ota-v0-ci
 xr806:
   board: wxu
   lowpower: true
