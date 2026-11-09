@@ -38,11 +38,15 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
 
   const image_ota_param_t *runtime = image_get_ota_param();
-  image_cfg_t cfg{};
-  if (runtime == nullptr || image_get_cfg(&cfg) != 0) {
-    ESP_LOGE(TAG, "Cannot read active ROM/FDCM OTA geometry");
+  if (runtime == nullptr) {
+    ESP_LOGE(TAG, "Cannot read XR806 ROM OTA geometry");
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
   }
+  // Serial-flashed AWIH images do not contain an initialized FDCM sector.
+  // Read now; initialize a VERIFIED seq0 record only after the ROM/flash
+  // geometry check and native PM wakelock have succeeded.
+  image_cfg_t cfg{};
+  const bool has_cfg = image_get_cfg(&cfg) == 0;
   const image_seq_t running = image_get_running_seq();
   if (running >= IMAGE_SEQ_NUM || running != runtime->running_seq)
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
@@ -67,8 +71,10 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
   g.bootloader_bytes = runtime->bl_size;
   g.upload_bytes = static_cast<uint32_t>(image_size);
   g.running_seq = running;
-  g.selected_seq = cfg.seq;
-  g.selected_verified = cfg.state == IMAGE_STATE_VERIFIED;
+  // A missing first-install FDCM is admissible only for a verified seq0
+  // runtime/layout. A known but corrupt/unsupported selection remains blocked.
+  g.selected_seq = has_cfg ? cfg.seq : 0;
+  g.selected_verified = has_cfg ? cfg.state == IMAGE_STATE_VERIFIED : true;
   this->plan_ = xr806::validate_writer(g);
   if (this->plan_.error != xr806::WriterError::OK) {
     ESP_LOGE(TAG, "XR806 OTA runtime layout rejected (%u): active=0x%X staging=0x%X FDCM=0x%X",
@@ -84,6 +90,21 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
   if (pm_wake_lock(&ota_native_wakelock) != 0)
     return OTA_RESPONSE_ERROR_UPDATE_BUSY;
   this->pm_held_ = true;
+  if (!has_cfg) {
+    // First authenticated OTA after a wired RX/TX AWIH flash. Only FDCM at
+    // the newly validated metadata address is touched; never the active app.
+    image_cfg_t initial{};
+    initial.seq = 0;
+    initial.state = IMAGE_STATE_VERIFIED;
+    image_cfg_t confirmed{};
+    if (image_set_cfg(&initial) != 0 || image_get_cfg(&confirmed) != 0 ||
+        confirmed.seq != initial.seq || confirmed.state != initial.state) {
+      ESP_LOGE(TAG, "Serial-install FDCM initialization/readback failed");
+      this->stop_();
+      return OTA_RESPONSE_ERROR_UPDATE_PREPARE;
+    }
+    ESP_LOGI(TAG, "Initialized empty FDCM for serial-installed seq0");
+  }
   if (ota_push_init() != OTA_STATUS_OK || ota_set_skip_size(0) != OTA_STATUS_OK) {
     this->stop_();
     return OTA_RESPONSE_ERROR_UPDATE_PREPARE;
