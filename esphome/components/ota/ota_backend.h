@@ -98,6 +98,10 @@ enum OTAType : uint8_t {
 
 /// Serializes flash updates. Taken in begin(), released when the backend is destroyed, or kept until
 /// reboot after a successful end(). Also for components writing the update partition outside OTA.
+// True while any OTA backend (including a web-server update) holds the global
+// exclusive firmware update lock. This is independent of the OTA listener.
+bool global_update_active();
+
 class UpdateLock {
  public:
   UpdateLock() = default;
