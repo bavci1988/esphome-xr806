@@ -470,8 +470,11 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       this->handle_datapoints_(data, len);
       if (this->init_state_ != TuyaInitState::INIT_DONE && this->lp_v0_.synchronized()) {
         this->init_state_ = TuyaInitState::INIT_DONE;
-        this->initialized_callback_.call();
-        ESP_LOGI(LP_TAG, "Initial MCU status synchronized");
+        if (!this->lp_initialized_callback_called_) {
+          this->lp_initialized_callback_called_ = true;
+          this->initialized_callback_.call();
+        }
+        ESP_LOGI(LP_TAG, "MCU status synchronized for current product epoch");
       }
       this->update_low_power_sleep_lock_();
       return;
