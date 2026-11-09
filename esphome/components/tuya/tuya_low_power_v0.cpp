@@ -2,7 +2,7 @@
 
 #include <cctype>
 #include <cstring>
-#include <new>
+#include <utility>
 
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
@@ -399,20 +399,13 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         this->mark_failed();
         return;
       }
-      std::unique_ptr<char[]> raw_product(new (std::nothrow) char[len + 1]);
-      if (!raw_product) {
-        // Unlike the original WXU caller, keep initialization incomplete
-        // when the product descriptor cannot be allocated.
-        this->invalidate_low_power_mode_epoch_();
-        this->lp_v0_.command_timeout();
-        this->lp_product_retry_.begin(millis());
-        ESP_LOGE(LP_TAG, "CMD01 product descriptor allocation failed; bounded retry");
-        return;
-      }
-      std::memcpy(raw_product.get(), data, len);
-      raw_product[len] = '\0';
+      // parse() limits len to 512, so the raw descriptor fits our fixed
+      // diagnostics buffer without an extra allocation and without an
+      // implementation-dependent nothrow-new/abort path.
+      std::memcpy(this->lp_product_text_.data(), data, len);
+      this->lp_product_text_[len] = '\0';
       const bool had_product = this->lp_v0_.has_product();
-      this->lp_product_ = incoming;
+      this->lp_product_ = std::move(incoming);
       this->lp_product_retry_.success();
       this->lp_mode_requery_pending_ = false;
       this->lp_sleep_window_.product_validated();
@@ -423,7 +416,6 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         this->lp_sleep_window_.reset_reports();
         this->lp_network_status_ = 0xFF;
       }
-      this->product_ = std::move(raw_product);
       this->lp_v0_.product_received();
       this->init_state_ = TuyaInitState::INIT_DATAPOINT;
       ESP_LOGI(LP_TAG, "TRV16 PID %s version %s wk=%d mwk=%d sm=%d", this->lp_product_.pid.c_str(),
