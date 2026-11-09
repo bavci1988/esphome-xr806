@@ -144,6 +144,11 @@ void ESPHomeOTAComponent::start_listener_() {
 }
 
 #ifdef USE_XR806_STANDBY_CONTROLLER
+bool ESPHomeOTAComponent::can_pause_for_standby() const {
+  return this->client_ == nullptr && this->backend_ == nullptr && this->server_ != nullptr &&
+         !this->server_->ready() && this->state_ == OTAState::IDLE;
+}
+
 bool ESPHomeOTAComponent::pause_for_standby() {
   if (this->standby_paused_) {
     return true;
