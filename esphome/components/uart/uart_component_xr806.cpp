@@ -13,7 +13,7 @@
 
 namespace esphome::uart {
 
-static const char *const TAG = "xr806.uart";
+ESPHOME_LOG_TAG(TAG, "xr806.uart");
 
 void XR806UARTComponent::setup() {
   if (this->uart_id_ != 0 || this->baud_rate_ == 0 ||
