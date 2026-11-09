@@ -55,6 +55,8 @@ struct Backend {
 #ifdef USE_XR806_STANDBY_CONTROLLER
   std::atomic<bool> suspend_requested{false};
   std::atomic<bool> suspended{false};
+  // Distinguish callbacks from different preflight/cancellation epochs.
+  std::atomic<uint32_t> suspend_epoch{0};
 #endif
 
   // Owned exclusively by the SDK TCP/IP thread.
@@ -95,12 +97,27 @@ void refresh_mdns(void *context) {
   if (!state->configured)
     return;
 #ifdef USE_XR806_STANDBY_CONTROLLER
+  const uint32_t requested_epoch = state->suspend_epoch.load(std::memory_order_acquire);
   if (state->suspend_requested.load(std::memory_order_acquire)) {
-    // Removing the registered responder on the *lwIP thread* is the actual
-    // completion event. A scheduled callback is not proof it has drained.
+    // The lwIP thread owns the actual responder. A callback from an older
+    // suspend epoch must never publish an idle vote for a newer request.
     remove_netif(state);
+    if (requested_epoch != state->suspend_epoch.load(std::memory_order_acquire) ||
+        !state->suspend_requested.load(std::memory_order_acquire)) {
+      state->suspended.store(false, std::memory_order_release);
+      xr806::lowpower_policy().set_mdns_idle(false);
+      return;
+    }
     state->suspended.store(true, std::memory_order_release);
     xr806::lowpower_policy().set_mdns_idle(true);
+    // A cancelling producer can race exactly between the check and vote.
+    // Recheck AFTER publishing; it will either restore BUSY here or its
+    // own preflight(false) will publish BUSY after this callback.
+    if (requested_epoch != state->suspend_epoch.load(std::memory_order_acquire) ||
+        !state->suspend_requested.load(std::memory_order_acquire)) {
+      state->suspended.store(false, std::memory_order_release);
+      xr806::lowpower_policy().set_mdns_idle(false);
+    }
     return;
   }
   state->suspended.store(false, std::memory_order_release);
@@ -257,6 +274,7 @@ void MDNSComponent::standby_preflight(bool requested) {
     state.suspended.store(false, std::memory_order_release);
   }
   state.suspend_requested.store(requested, std::memory_order_release);
+  state.suspend_epoch.fetch_add(1, std::memory_order_acq_rel);
   request_refresh();
 }
 
