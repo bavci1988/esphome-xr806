@@ -2,10 +2,12 @@ name: Tuya MCU Low-Power v0 (host tests)
 
 on:
   push:
-    branches: [dev, feature/xr806-stage7d-race-hardening]
+    branches: [dev, feature/xr806-ota-reversible-standby]
     paths:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
+      - "tests/yaml/xr806_ota_readonly_diagnostic.yaml"
+      - "esphome/components/xr806/__init__.py"
       - "tests/tuya_low_power_standby_state_test.cpp"
       - "tests/tuya_low_power_sleep_window_test.cpp"
       - "tests/tuya_low_power_wire_transactions_test.cpp"
@@ -14,6 +16,9 @@ on:
       - "esphome/components/xr806/mdns.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
       - "tests/yaml/tuya_low_power_*.yaml"
+      - "tests/yaml/xr806_ota_readonly_diagnostic.yaml"
+      - "esphome/components/xr806/__init__.py"
+      - "esphome/components/xr806/runtime.cpp"
   pull_request:
     branches: [dev]
     paths:
@@ -74,6 +79,8 @@ jobs:
         run: |
           python -m esphome compile tests/yaml/tuya_low_power_v0_xr806.yaml --only-generate
           python -m esphome config tests/yaml/tuya_low_power_v0_xr806_network_suspend.yaml
+          python -m esphome config tests/yaml/xr806_ota_readonly_diagnostic.yaml
+          python -m esphome compile tests/yaml/xr806_ota_readonly_diagnostic.yaml --only-generate
           python -m esphome compile tests/yaml/tuya_low_power_v0_xr806_network_suspend.yaml --only-generate
           python -m esphome config tests/yaml/tuya_low_power_pb04_optin_codegen.yaml
           python -m esphome compile tests/yaml/tuya_low_power_pb04_optin_codegen.yaml --only-generate
