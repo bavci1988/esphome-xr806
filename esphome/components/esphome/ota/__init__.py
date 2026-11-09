@@ -292,6 +292,7 @@ _SUPPORTED_PLATFORMS = [
     PLATFORM_LN882X,
     PLATFORM_RTL87XX,
     PLATFORM_HOST,
+    "xr806",  # Platform has an explicit read-only OTA backend; writes fail closed.
 ]
 
 
