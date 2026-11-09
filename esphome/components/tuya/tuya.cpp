@@ -137,6 +137,7 @@ void Tuya::loop() {
       if (!this->lp_autobaud_.locked())
         return;  // Never send queued MCU writes/status before CMD01 lock.
     }
+    this->poll_low_power_product_recovery_();
     if (this->lp_v0_.expire(millis())) {
       ESP_LOGW(TAG, "Low-power status/write report timeout; requesting state resynchronization");
       this->lp_network_status_ = 0xFF;
@@ -958,6 +959,23 @@ void Tuya::set_string_datapoint_value_(uint8_t datapoint_id, const std::string &
 }
 
 void Tuya::send_datapoint_command_(uint8_t datapoint_id, TuyaDatapointType datapoint_type, std::vector<uint8_t> data) {
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    // The original MCU DP102 handler blindly reads four bytes even for
+    // RAW1 and can consume checksum/buffer memory. Reject unsafe writes
+    // BEFORE serialization, regardless of whether a higher-level entity
+    // calls a forced setter or sends an unknown datapoint.
+    if (!TuyaLowPowerSleepWindow::valid_datapoint(datapoint_id, static_cast<uint8_t>(datapoint_type),
+                                                  data.data(), data.size())) {
+      ESP_LOGE(TAG, "Refusing malformed TRV16 DP%u (type=%u, len=%u)", datapoint_id,
+               static_cast<unsigned>(datapoint_type), static_cast<unsigned>(data.size()));
+      return;
+    }
+    if (datapoint_id == TuyaLowPowerSleepWindow::ENABLE_DP ||
+        datapoint_id == TuyaLowPowerSleepWindow::WINDOW_DP) {
+      this->lp_sleep_window_.on_write(datapoint_id);
+      this->invalidate_low_power_mode_epoch_();
+    }
+  }
   std::vector<uint8_t> buffer;
   buffer.push_back(datapoint_id);
   buffer.push_back(static_cast<uint8_t>(datapoint_type));
