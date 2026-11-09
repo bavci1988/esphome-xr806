@@ -53,6 +53,7 @@ static std::atomic<bool> s_connect_failed{false};
 // Main loop only.
 static bool s_observer_attached = false;
 static bool s_sta_enabled = false;
+static bool s_ap_mode = false;
 static bool s_connect_requested = false;
 static bool s_sta_was_connected = false;
 static bool s_power_save_requested = false;
@@ -82,6 +83,16 @@ static struct netif *sta_netif() { return wlan_netif_get(WLAN_MODE_STA); }
 static bool sta_ready() { return xr806::read_xr806_network_snapshot(sta_netif()).ready(); }
 
 static bool sta_enable() {
+  if (s_ap_mode) {
+    if (wlan_ap_disable() != 0)
+      return false;
+    s_ap_mode = false;
+  }
+  struct netif *nif = wlan_netif_get(WLAN_MODE_NONE);
+  if (nif == nullptr || wlan_netif_get_mode(nif) != WLAN_MODE_STA) {
+    if (net_switch_mode(WLAN_MODE_STA) != 0)
+      return false;
+  }
   if (s_sta_enabled)
     return true;
   if (wlan_sta_enable() != 0)
@@ -105,8 +116,26 @@ void WiFiComponent::wifi_pre_setup_() {
 }
 
 bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
-  if (ap.has_value() && ap.value())
-    return false;  // Validation rejects ap: on XR806; the radio runs one interface at a time.
+  // The XR806 vendor driver runs one interface: never leave STA enabled during SoftAP.
+  if (ap.has_value() && ap.value()) {
+    if (s_sta_enabled && wlan_sta_disable() != 0)
+      return false;
+    s_sta_enabled = false;
+    s_connect_requested = false;
+    s_sta_was_connected = false;
+    if (!s_ap_mode) {
+      if (net_switch_mode(WLAN_MODE_HOSTAP) != 0)
+        return false;
+      s_ap_mode = true;
+    }
+    return true;
+  }
+
+  if (ap.has_value() && !ap.value() && s_ap_mode) {
+    if (wlan_ap_disable() != 0)
+      return false;
+    s_ap_mode = false;
+  }
   if (sta.has_value()) {
     if (sta.value())
       return sta_enable();
@@ -147,6 +176,43 @@ bool WiFiComponent::wifi_sta_ip_config_(const optional<ManualIP> &manual_ip) {
   // Validation rejects manual_ip on XR806; the vendor network control always runs DHCP.
   return !manual_ip.has_value();
 }
+
+#ifdef USE_WIFI_AP
+bool WiFiComponent::wifi_ap_ip_config_(const optional<ManualIP> &manual_ip) {
+  // net_ctrl.c applies the AP address from sysinfo (currently 192.168.176.1/24)
+  // and starts udhcpd when the AP netif reports NETWORK_UP.
+  return !manual_ip.has_value();
+}
+
+bool WiFiComponent::wifi_start_ap_(const WiFiAP &ap) {
+  if (!this->wifi_mode_(false, true))
+    return false;
+#ifdef USE_WIFI_MANUAL_IP
+  if (!this->wifi_ap_ip_config_(ap.get_manual_ip()))
+    return false;
+#else
+  if (!this->wifi_ap_ip_config_({}))
+    return false;
+#endif
+  if (ap.ssid_.empty() || ap.ssid_.size() > WLAN_SSID_MAX_LEN ||
+      (!ap.password_.empty() && (ap.password_.size() < 8 || ap.password_.size() > 63)))
+    return false;
+
+  uint8_t ssid[WLAN_SSID_MAX_LEN]{};
+  uint8_t psk[64]{};
+  std::memcpy(ssid, ap.ssid_.data(), ap.ssid_.size());
+  if (!ap.password_.empty())
+    std::memcpy(psk, ap.password_.data(), ap.password_.size());
+  if (wlan_ap_set(ssid, static_cast<uint8_t>(ap.ssid_.size()), ap.password_.empty() ? nullptr : psk) != 0)
+    return false;
+  return wlan_ap_enable() == 0;
+}
+
+network::IPAddress WiFiComponent::wifi_soft_ap_ip() {
+  struct netif *nif = wlan_netif_get(WLAN_MODE_HOSTAP);
+  return nif == nullptr ? network::IPAddress() : network::IPAddress(netif_ip_addr4(nif));
+}
+#endif  // USE_WIFI_AP
 
 bool WiFiComponent::wifi_apply_hostname_() {
   struct netif *nif = sta_netif();
@@ -330,6 +396,14 @@ bool WiFiComponent::wifi_loop_() {
     this->notify_scan_results_listeners_();
 #endif
   }
+
+#ifdef USE_WIFI_AP
+  if (s_ap_mode && this->ap_setup_) {
+    int num_clients = 0;
+    if (wlan_ap_sta_num(&num_clients) == 0)
+      this->ap_clients_ = static_cast<uint8_t>(std::clamp(num_clients, 0, 255));
+  }
+#endif
 
   const bool connected = sta_ready();
   if (connected && !s_sta_was_connected) {
