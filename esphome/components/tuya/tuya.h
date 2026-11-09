@@ -12,6 +12,8 @@
 #include "tuya_low_power_v0.h"
 #include "tuya_low_power_product.h"
 #include "tuya_low_power_autobaud.h"
+#include "tuya_low_power_sleep_window.h"
+#include "tuya_low_power_product_retry.h"
 #include "tuya_low_power_standby_state.h"
 
 #ifdef USE_XR806_STANDBY_CONTROLLER
@@ -179,6 +181,8 @@ class Tuya final : public Component,
   void poll_low_power_autobaud_();
   void send_low_power_product_query_(bool direct_probe);
   void process_low_power_queue_();
+  void poll_low_power_product_recovery_();
+  void invalidate_low_power_mode_epoch_();
   bool low_power_ready_for_sleep_(bool in_cmd38_handler = false) const;
   void cancel_low_power_standby_();
   void send_low_power_awake_notification_();
@@ -218,6 +222,10 @@ class Tuya final : public Component,
   TuyaLowPowerAutoBaud lp_autobaud_{};
   TuyaLowPowerV0Session lp_v0_{};
   TuyaLowPowerProductInfo lp_product_{};
+  TuyaLowPowerSleepWindow lp_sleep_window_{};
+  TuyaLowPowerProductRetry lp_product_retry_{};
+  bool lp_mode_requery_pending_{false};
+  uint32_t lp_mode_requery_after_ms_{0};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_last_resync_ms_{0};
   TuyaLowPowerStandbyState lp_standby_{};
