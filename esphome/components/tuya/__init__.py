@@ -2,7 +2,7 @@ from esphome import automation, pins
 import esphome.codegen as cg
 from esphome.components import time, uart
 import esphome.config_validation as cv
-from esphome.const import CONF_SENSOR_DATAPOINT, CONF_TIME_ID
+from esphome.const import CONF_PROTOCOL, CONF_SENSOR_DATAPOINT, CONF_TIME_ID
 from esphome.cpp_generator import MockObj
 from esphome.core import CORE
 from esphome.types import ConfigType
@@ -16,7 +16,6 @@ CONF_ON_DATAPOINT_UPDATE = "on_datapoint_update"
 CONF_DATAPOINT_TYPE = "datapoint_type"
 CONF_STATUS_PIN = "status_pin"
 CONF_FORCE_TIME_SYNC = "force_time_sync"
-CONF_PROTOCOL = "protocol"
 CONF_AUTO_BAUD = "auto_baud"
 CONF_MCU_WAKE_PIN = "mcu_wake_pin"
 CONF_TRV16_MCU_WAKE_PB04 = "trv16_mcu_wake_pb04"
