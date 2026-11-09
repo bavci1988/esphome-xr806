@@ -56,8 +56,14 @@ class TuyaLowPowerWireTransactions {
     return true;
   }
 
+  // A matching frame delivered at or after the deadline must never win
+  // just because the main-loop timeout sweep has not run yet.
+  bool overdue(uint32_t now) const {
+    return active_ && static_cast<uint32_t>(now - started_ms_) >= ACK_TIMEOUT_MS;
+  }
+
   bool expire(uint32_t now) {
-    if (!active_ || static_cast<uint32_t>(now - started_ms_) < ACK_TIMEOUT_MS)
+    if (!this->overdue(now))
       return false;
     active_ = false;
     kind_ = Kind::NONE;
