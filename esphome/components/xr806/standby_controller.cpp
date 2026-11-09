@@ -146,8 +146,7 @@ void XR806StandbyController::loop() {
     ESP_LOGW(TAG, "MCU CMD38 service preflight expired without confirmed drain");
     this->request_preflight(false);
   }
-  if (p.standby_requested() &&
-      static_cast<uint32_t>(millis() - this->request_since_ms_) > PREFLIGHT_TIMEOUT_MS) {
+  if (p.standby_requested() && static_cast<uint32_t>(millis() - this->request_since_ms_) > PREFLIGHT_TIMEOUT_MS) {
     ESP_LOGW(TAG, "Suspend preflight timed out; releasing service owners and refusing PM entry");
     this->request_standby(false);
     this->state_.postpone();
