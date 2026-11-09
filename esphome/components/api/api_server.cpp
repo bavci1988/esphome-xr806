@@ -1,4 +1,7 @@
 #include "api_server.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/lowpower_policy.h"
+#endif
 #ifdef USE_API
 #include <cerrno>
 #include <cinttypes>
@@ -129,6 +132,18 @@ void APIServer::setup() {
   this->outgoing_conn_.setup();
 #endif
 
+  this->start_listener_();
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (auto *controller = xr806::standby_controller(); controller != nullptr) {
+    if (!controller->register_service_owner(xr806::XR806StandbyService::API, this)) {
+      ESP_LOGE(TAG, "XR806 API standby owner registration failed; retaining veto");
+    }
+  }
+  xr806::lowpower_policy().set_api_idle(false);
+#endif
+}
+
+void APIServer::start_listener_() {
   // Listener last: on failure socket_failed_() returns early, and an
   // outgoing_connection build keeps dialing out without one
   this->socket_ = socket::socket_ip_loop_monitored(SOCK_STREAM, 0).release();  // monitored for incoming connections
@@ -169,6 +184,11 @@ void APIServer::setup() {
 }
 
 void APIServer::loop() {
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (this->standby_paused_) {
+    return;
+  }
+#endif
   // Accept new clients only if the socket exists and has incoming connections
   if (this->socket_ && this->socket_->ready()) {
     this->accept_new_connections_();
@@ -793,6 +813,40 @@ void APIServer::on_camera_image(const std::shared_ptr<camera::CameraImage> &imag
   }
 }
 #endif
+
+
+#ifdef USE_XR806_STANDBY_CONTROLLER
+bool APIServer::pause_for_standby() {
+  if (this->standby_paused_) {
+    return true;
+  }
+  // A real API client, queued accept or outgoing link is never silently
+  // discarded for power savings. Closing only an idle listener is safe.
+#ifdef USE_API_OUTGOING_CONNECTION
+  return false;  // Outgoing dial-out lifecycle is not implemented yet.
+#else
+  if (this->shutting_down_ || this->api_connection_count_ != 0 || this->socket_ == nullptr ||
+      this->socket_->ready()) {
+    return false;
+  }
+  this->destroy_socket_();
+  this->standby_paused_ = true;
+  xr806::lowpower_policy().set_api_idle(true);
+  return true;
+#endif
+}
+
+void APIServer::cancel_standby_pause() { this->resume_after_standby(); }
+
+void APIServer::resume_after_standby() {
+  if (!this->standby_paused_) {
+    return;
+  }
+  xr806::lowpower_policy().set_api_idle(false);  // Veto before reopening.
+  this->standby_paused_ = false;
+  this->start_listener_();
+}
+#endif  // USE_XR806_STANDBY_CONTROLLER
 
 void APIServer::on_shutdown() {
   this->shutting_down_ = true;
