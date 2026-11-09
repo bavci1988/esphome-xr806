@@ -1,0 +1,72 @@
+name: XR806 one-time PR branch consolidation
+on:
+  push:
+    branches: [dev]
+    paths: ['.github/workflows/xr806-post-merge-cleanup-once.yml']
+permissions:
+  contents: write
+jobs:
+  archive-and-delete:
+    if: github.repository == 'bavci1988/esphome-xr806'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify dev ancestry; tag and remove both resolved PR heads
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.parse, urllib.error
+          repo = "bavci1988/esphome-xr806"
+          expected = {"claude/serene-franklin-jgpjuw":"3deceeab92af14f427a25f22702ac7cf2090bd77","feature/xr806-ota-reversible-standby":"554fa2c654cf49446c70080a5a09965e607b848c"}
+          token = os.environ["GH_TOKEN"]
+          def call(method, route, body=None):
+              url = "https://api.github.com/repos/" + repo + "/" + route
+              payload = json.dumps(body).encode("utf8") if body is not None else None
+              req = urllib.request.Request(
+                  url, data=payload, method=method,
+                  headers={"Authorization": "Bearer " + token,
+                           "Accept": "application/vnd.github+json",
+                           "X-GitHub-Api-Version": "2022-11-28",
+                           "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      raw = response.read()
+                      return json.loads(raw) if raw else None
+              except urllib.error.HTTPError as error:
+                  if method == "GET" and error.code == 404:
+                      return None
+                  raise RuntimeError(f"{method} {route} HTTP {error.code}: {error.read().decode()[:450]}") from error
+          current = call("GET", "git/ref/heads/dev")
+          if not current:
+              raise SystemExit("dev not found")
+          dev_sha = current["object"]["sha"]
+          for name, sha in expected.items():
+              encoded = urllib.parse.quote(name, safe="/")
+              ref = call("GET", "git/ref/heads/" + encoded)
+              if ref is None:
+                  print("Already deleted:", name)
+                  continue
+              if ref["object"]["sha"] != sha:
+                  raise SystemExit(f"Unsafe ref changed for {name}; stop")
+              comparison = call("GET", "compare/" + sha + "..." + dev_sha)
+              if comparison["ahead_by"] < 1 or comparison["behind_by"] != 0:
+                  raise SystemExit(f"Branch {name} is not fully incorporated in dev; stop")
+              tag = "archive/post-merge-20261109/" + name.replace("/", "-")
+              tag_route = "git/ref/tags/" + urllib.parse.quote(tag, safe="/")
+              old_tag = call("GET", tag_route)
+              if old_tag is None:
+                  call("POST", "git/refs", {"ref": "refs/tags/" + tag, "sha": sha})
+              tagged = call("GET", tag_route)
+              if tagged is None or tagged["object"]["sha"] != sha:
+                  raise SystemExit(f"Archive tag mismatch: {tag}")
+              print("Archived:", name, "under", tag)
+              call("DELETE", "git/refs/heads/" + encoded)
+              if call("GET", "git/ref/heads/" + encoded) is not None:
+                  raise SystemExit(f"Branch still exists: {name}")
+              print("Deleted:", name)
+          branches = call("GET", "branches?per_page=100")
+          names = [b["name"] for b in branches]
+          if names != ["dev"]:
+              raise SystemExit("Unexpected remaining branches: " + repr(names))
+          print("SUCCESS: only default dev branch remains; both PR heads archived as immutable tags.")
+          PY
