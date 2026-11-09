@@ -23,6 +23,48 @@ SECTION_IDS = {
 }
 
 
+def decode_fdcm_selection(data: bytes, start: int, size: int) -> dict:
+    """Decode the vendor ROM's append-only 4-byte FDCM image selection records.
+
+    Reconstructs src/rom/rom_bin/src/image/fdcm.c and image/image.c. This is
+    offline evidence, not proof that a bootloader on the board uses that ROM.
+    """
+    region = data[start:start + size]
+    if len(region) < 12:
+        raise ValueError("OTA FDCM area too small")
+    magic, bitmap_size, data_size = struct.unpack_from("<IHH", region)
+    if magic != 0xA55A5AA5 or data_size != 4 or bitmap_size == 0 or (
+        8 + bitmap_size >= len(region)
+    ):
+        raise ValueError("invalid OTA FDCM header")
+    bitmap = region[8:8 + bitmap_size]
+    used = 0
+    for value in bitmap:
+        if value == 0:
+            used += 8
+            continue
+        remaining = (~value) & 0xFF
+        while remaining:
+            remaining >>= 1
+            used += 1
+        break
+    if used == 0 or 8 + bitmap_size + used * data_size > len(region):
+        raise ValueError("OTA FDCM records absent or exceed area")
+    records = []
+    for i in range(used):
+        raw_seq, raw_state = struct.unpack_from("<HH", region, 8 + bitmap_size + i * data_size)
+        seq = {0x5555: 0, 0xAAAA: 1}.get(raw_seq)
+        state = {0x9669: "VERIFIED", 0x6996: "UNVERIFIED"}.get(raw_state, "UNKNOWN")
+        records.append({"seq": seq, "state": state,
+                        "offset": f"0x{start + 8 + bitmap_size + i * 4:06x}"})
+    latest = records[-1]
+    return {
+        "record_count": len(records),
+        "records": records,
+        "latest_selected_seq": latest["seq"] if latest["state"] == "VERIFIED" else None,
+    }
+
+
 def parse(data: bytes) -> dict:
     if len(data) < HEADER.size:
         raise ValueError("dump shorter than AWIH section header")
@@ -68,6 +110,7 @@ def parse(data: bytes) -> dict:
             "image_max_kib": image_max_kib,
             "xz_max_kib": xz_max_kib,
         },
+        "fdcm_selection": decode_fdcm_selection(data, metadata_start, metadata_size),
         "evidence": {
             "non_ff_bytes_at_sdk_example_0x100000_4k": sum(x != 255 for x in data[0x100000:0x101000]),
             "non_ff_bytes_at_header_metadata_4k": sum(
@@ -79,7 +122,7 @@ def parse(data: bytes) -> dict:
             "sections": sections,
         },
         "write_authorized": False,
-        "warning": "Header decoding is not running-sequence, signature or rollback proof.",
+        "warning": "Offline FDCM selection is inferred from matching vendor ROM code; physical running slot, signature and rollback are not proven.",
     }
 
 
