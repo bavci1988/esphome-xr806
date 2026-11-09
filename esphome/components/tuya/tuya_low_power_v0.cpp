@@ -73,10 +73,15 @@ void Tuya::poll_low_power_autobaud_() {
 #endif
 }
 
-bool Tuya::low_power_ready_for_sleep_() const {
+bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
+  // A validated CMD38 frame is still present in rx_message_ until the
+  // parser callback returns. Only that specific frame can be disregarded.
   const bool guard_elapsed = static_cast<int32_t>(millis() - this->lp_wake_guard_until_) >= 0;
-  return this->lp_v0_.ready() && guard_elapsed && this->command_queue_.empty() &&
-         !this->expected_response_.has_value() && this->rx_message_.empty();
+  const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
+  return this->lp_v0_.ready() && guard_elapsed && baud_locked && this->parent_ != nullptr &&
+         this->parent_->is_connected() && !this->lp_standby_.recovery_required() &&
+         this->command_queue_.empty() && !this->expected_response_.has_value() &&
+         (in_cmd38_handler || this->rx_message_.empty());
 }
 
 void Tuya::update_low_power_sleep_lock_() {
@@ -93,37 +98,97 @@ bool Tuya::request_low_power_refresh() {
   return true;
 }
 
+void Tuya::send_low_power_awake_notification_() {
+  // This is a Tuya/HC32 command, not an XR806 hardware-wake operation.
+  if (this->parent_ == nullptr || !this->parent_->is_connected()) {
+    this->lp_standby_.transport_fault();
+  } else {
+    this->send_low_power_direct_(0x12, {0x00});
+    if (this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS)
+      this->lp_standby_.transport_fault();
+  }
+  this->lp_wake_guard_until_ = millis() + 5000;
+  this->update_low_power_sleep_lock_();
+}
+
+void Tuya::cancel_low_power_standby_() {
+  const bool compensate = this->lp_standby_.force_cancel();
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr)
+    controller->request_standby(false);
+#endif
+  if (compensate)
+    this->send_low_power_awake_notification_();
+  this->update_low_power_sleep_lock_();
+}
+
 bool Tuya::notify_low_power_transition(bool sleeping) {
-  // The PM bridge must invoke this only at an actual suspend/resume boundary.
-  // A CMD38 request is NOT evidence that the CPU entered sleep.
   if (this->protocol_ != TuyaProtocol::LOW_POWER_V0 || !this->lp_v0_.has_product())
     return false;
   if (sleeping) {
-    if (this->lp_sleep_notified_ || !this->low_power_ready_for_sleep_())
-      return false;
-#ifdef USE_XR806_LOWPOWER
-    if (!esphome::xr806::lowpower_policy().can_enter_standby())
-      return false;
-#else
-    return false;  // Never advertise sleep without XR806 PM support.
-#endif
-    if (this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS)
+    // The generic coordinator's scheduler/wake votes are intentionally
+    // FALSE during prepare: requiring can_enter_standby() here deadlocks.
+    if (!this->lp_standby_.needs_notification() || !this->low_power_ready_for_sleep_() ||
+        this->available() != 0 || this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS)
       return false;
     this->send_low_power_direct_(0x12, {0x01});
-    if (this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS)
+    if (this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
+      this->lp_standby_.transport_fault();
+      this->update_low_power_sleep_lock_();
       return false;
-    this->lp_sleep_notified_ = true;
+    }
+    this->lp_standby_.notification_sent();
+    this->update_low_power_sleep_lock_();
     return true;
   }
 
-  if (!this->lp_sleep_notified_)
-    return false;  // GPIO wake alone does not always imply CMD12/00.
-  this->lp_sleep_notified_ = false;
-  this->lp_wake_guard_until_ = millis() + 5000;
-  this->send_low_power_direct_(0x12, {0x00});
-  this->update_low_power_sleep_lock_();
+  if (!this->lp_standby_.force_cancel())
+    return false;
+  this->send_low_power_awake_notification_();
   return true;
 }
+
+#ifdef USE_XR806_STANDBY_CONTROLLER
+bool Tuya::prepare_for_standby() {
+  if (!this->lp_bridge_registered_ || !this->lp_standby_.requested() ||
+      this->lp_product_.sleep_mode != 1 || !this->low_power_ready_for_sleep_() ||
+      this->available() != 0)
+    return false;
+  if (this->lp_standby_.needs_notification()) {
+    // Deliberately postpone platform PM; CMD12/01 was transmitted first.
+    // standby_cancelled() consumes the intentional first deferral.
+    (void) this->notify_low_power_transition(true);
+    return false;
+  }
+  return this->lp_standby_.ready_for_pm() &&
+         this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
+}
+
+void Tuya::standby_cancelled() {
+  const bool compensate = this->lp_standby_.cancelled();
+  if (!this->lp_standby_.requested()) {
+    if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr)
+      controller->request_standby(false);
+  }
+  if (compensate)
+    this->send_low_power_awake_notification_();
+  this->update_low_power_sleep_lock_();
+}
+
+void Tuya::standby_resumed(const xr806::XR806StandbyResume &event) {
+  const auto action = this->lp_standby_.resumed(event.expected_source, event.wake_gpio);
+  this->lp_wake_guard_until_ = millis() + 5000;
+  // A retained GPIO wake may receive CMD12/00 only if we previously sent
+  // CMD12/01. Timer-only wake must not impersonate the original GPIO path.
+  if (action == TuyaLowPowerStandbyState::ResumeAction::SEND_CMD12_WAKE) {
+    this->send_low_power_awake_notification_();
+  } else if (action == TuyaLowPowerStandbyState::ResumeAction::REQUIRE_RESYNC) {
+    this->lp_v0_.command_timeout();
+    ESP_LOGE(LP_TAG, "Unexpected/timer-only MCU resume: withholding CMD12/00 and further standby");
+  }
+  this->update_low_power_sleep_lock_();
+}
+#endif
 
 void Tuya::process_low_power_queue_() {
   const uint32_t now = millis();
@@ -227,6 +292,11 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
     case 0x00:  // First MCU heartbeat after reset is 00; subsequent is 01.
       if (len != 1 || data[0] != 0)
         return;
+      this->lp_standby_.reset_on_mcu_boot();
+#ifdef USE_XR806_STANDBY_CONTROLLER
+      if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr)
+        controller->request_standby(false);
+#endif
       if (!this->lp_v0_.has_product()) {
         this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
       } else {
@@ -309,18 +379,46 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       }
       return;
 
-    case 0x38: {  // MCU asks whether it may enter low-power.
+    case 0x38: {  // MCU asks whether WXU can enter low-power.
       if (len != 1 || data[0] != 0)
         return;
-      uint8_t flags = 0x01;  // Fail closed: actual XR806 PM entry is not integrated.
-#ifdef USE_XR806_LOWPOWER
-      const uint32_t blockers = esphome::xr806::lowpower_policy().blockers();
-      if (blockers & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY)
+      uint8_t flags = 0x01;  // Default: network/bus not safely suspended.
+#ifdef USE_XR806_STANDBY_CONTROLLER
+      auto *controller = esphome::xr806::standby_controller();
+      const auto blockers = esphome::xr806::lowpower_policy().blockers();
+      const bool ota_veto = (blockers & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
+      const bool owner_veto =
+          (blockers & (esphome::xr806::XR806LowPowerPolicy::NETWORK_BUSY |
+                       esphome::xr806::XR806LowPowerPolicy::API_BUSY |
+                       esphome::xr806::XR806LowPowerPolicy::MDNS_BUSY |
+                       esphome::xr806::XR806LowPowerPolicy::OTA_BUSY)) != 0;
+      const bool accepted = controller != nullptr && this->lp_bridge_registered_ &&
+                            this->lp_standby_.accept_request(
+                                this->lp_product_.sleep_mode == 1,
+                                this->low_power_ready_for_sleep_(true),
+                                this->parent_ != nullptr && this->parent_->is_connected(), !owner_veto);
+      if (accepted) {
+        flags = 0x00;
+      } else if (ota_veto) {
+        flags |= 0x02;
+      }
+#elif defined(USE_XR806_LOWPOWER)
+      if (esphome::xr806::lowpower_policy().blockers() & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY)
         flags |= 0x02;
 #endif
-      if (!this->low_power_ready_for_sleep_())
-        flags |= 0x01;
       this->send_low_power_direct_(0x38, {0x00, flags});
+#ifdef USE_XR806_STANDBY_CONTROLLER
+      if (accepted) {
+        // CMD38/00 is only a provisional consent. Request the PM controller
+        // once the ACK is fully on the wire; it will still verify ALL votes.
+        if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
+          controller->request_standby(true);
+        } else {
+          this->lp_standby_.transport_fault();
+          this->update_low_power_sleep_lock_();
+        }
+      }
+#endif
       return;
     }
 
