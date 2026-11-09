@@ -30,6 +30,7 @@ from esphome.const import (
     PLATFORM_NRF52,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
     Platform,
 )
 
@@ -82,7 +83,7 @@ PLATFORM_HOOKS: Final[dict[str, frozenset[str]]] = {
     "has_network_ota": frozenset({PLATFORM_NRF52}),
     "process_stacktrace": frozenset(STACKTRACE_GATES),
     # The file an app update sends, when it is not the build output itself
-    "ota_image": frozenset({PLATFORM_BK72XX, PLATFORM_LN882X, PLATFORM_RTL87XX}),
+    "ota_image": frozenset({PLATFORM_BK72XX, PLATFORM_LN882X, PLATFORM_RTL87XX, PLATFORM_XR806}),
 }
 
 
