@@ -16,6 +16,8 @@ DOMAIN = "web_server_base"
 
 
 def AUTO_LOAD() -> list[str]:
+    if CORE.is_xr806:
+        return ["web_server_xr806", "socket"]
     if CORE.is_esp32:
         return ["web_server_idf"]
     if CORE.using_arduino:
@@ -105,6 +107,8 @@ async def to_code(config: ConfigType) -> None:
     var = cg.new_Pvariable(config[CONF_ID])
     cg.add(cg.RawExpression(f"{web_server_base_ns}::global_web_server_base = {var}"))
 
+    if CORE.is_xr806:
+        return
     if CORE.is_esp32:
         # Count for StaticVector in web_server_idf - matches headers added in init()
         cg.add_define("WEB_SERVER_DEFAULT_HEADERS_COUNT", 1)
@@ -142,6 +146,7 @@ FILTER_SOURCE_FILES = filter_source_files_from_platform(
         "dns_server_esp32_idf.cpp": {
             PlatformFramework.ESP32_ARDUINO,
             PlatformFramework.ESP32_IDF,
+            PlatformFramework.XR806_XRADIO,
         },
     }
 )
