@@ -106,9 +106,11 @@ struct TuyaCommand {
   std::vector<uint8_t> payload;
 };
 
-class Tuya final : public Component, public uart::UARTDevice
+class Tuya final : public Component,
+                   public uart::UARTDevice
 #ifdef USE_XR806_STANDBY_CONTROLLER
-                   , public xr806::XR806StandbyParticipant
+    ,
+                   public xr806::XR806StandbyParticipant
 #endif
 {
  public:
