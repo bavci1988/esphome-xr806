@@ -25,6 +25,8 @@ class XR806LowPowerPolicy {
   // Fail closed: initially all subsystems block standby.
   // This policy never enters standby by itself.
   void request_standby(bool requested) {
+    if (commit_active_.load(std::memory_order_acquire))
+      commit_aborted_.store(true, std::memory_order_release);
     if (requested_.exchange(requested, std::memory_order_acq_rel) != requested)
       generation_.fetch_add(1, std::memory_order_acq_rel);
   }
@@ -44,6 +46,8 @@ class XR806LowPowerPolicy {
   // A separate, optional MCU driver must explicitly request this gate.
   // Each transition from absent to present resets the synchronization gate.
   void require_external_mcu(bool required) {
+    if (commit_active_.load(std::memory_order_acquire))
+      commit_aborted_.store(true, std::memory_order_release);
     if (required) {
       // Set the blocker BEFORE publishing the external-MCU requirement.
       // This avoids a transient unblocked window for a concurrent sleep voter.
