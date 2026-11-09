@@ -53,6 +53,7 @@ from esphome.const import (  # noqa: F401
     PLATFORM_LN882X,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import CORE, CoroPriority, coroutine_with_priority
 from esphome.core.entity_helpers import WEBSERVER_SORTING_SCHEMA  # noqa: F401
@@ -292,6 +293,7 @@ CONFIG_SCHEMA = cv.All(
             PLATFORM_LN882X,
             PLATFORM_RP2,
             PLATFORM_RTL87XX,
+            PLATFORM_XR806,
         ]
     ),
     default_url,
@@ -396,6 +398,8 @@ def serve_captive(config: ConfigType, full_config: ConfigType) -> bool:
 def _final_validate_ap_mode(config: ConfigType) -> None:
     full_config = fv.full_config.get()
     wifi_config = full_config.get(CONF_WIFI)
+    if CORE.is_xr806 and (auth := config.get(CONF_AUTH)) is not None and auth.get(CONF_TYPE) == AUTH_TYPE_DIGEST:
+        raise cv.Invalid("XR806 native HTTP supports Basic authentication only", path=[CONF_AUTH, CONF_TYPE])
     captive = serve_captive(config, full_config)
     local = serve_local(config, wifi_config)
     ap_only = wifi_is_ap_only(wifi_config)
