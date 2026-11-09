@@ -9,12 +9,12 @@ extern void loop();
 // XR806_LOWPOWER_POLICY_V1
 #include "esphome/core/defines.h"
 #ifdef USE_XR806_OTA_RUNTIME_PROBE
-#include "esphome/components/xr806/ota_vendor_sdk_snapshot.h"
+#include "ota_vendor_sdk_snapshot.h"
 #include "esphome/core/log.h"
 #endif
 
 #ifdef USE_XR806_LOWPOWER
-#include "esphome/components/xr806/lowpower_policy.h"
+#include "lowpower_policy.h"
 
 namespace esphome::xr806 {
 

@@ -58,9 +58,7 @@ class TuyaLowPowerWireTransactions {
 
   // Handles ACKs arriving after the deadline but before a timeout sweep.
   // Wrap-safe for elapsed intervals shorter than 2^31 milliseconds.
-  bool overdue(uint32_t now) const {
-    return active_ && static_cast<uint32_t>(now - started_ms_) >= ACK_TIMEOUT_MS;
-  }
+  bool overdue(uint32_t now) const { return active_ && static_cast<uint32_t>(now - started_ms_) >= ACK_TIMEOUT_MS; }
 
   bool expire(uint32_t now) {
     if (!this->overdue(now))

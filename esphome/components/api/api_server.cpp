@@ -10,9 +10,6 @@
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
 #include "esphome/core/version.h"
-#ifdef USE_XR806_STANDBY_CONTROLLER
-#include "esphome/components/xr806/lowpower_policy.h"
-#endif
 #ifdef USE_API_HOMEASSISTANT_SERVICES
 #include "homeassistant_service.h"
 #endif
@@ -132,20 +129,6 @@ void APIServer::setup() {
   this->outgoing_conn_.setup();
 #endif
 
-  this->start_listening_();
-#ifdef USE_XR806_STANDBY_CONTROLLER
-  if (auto *controller = xr806::standby_controller(); controller != nullptr) {
-    if (!controller->register_participant(this)) {
-      ESP_LOGE(TAG, "Cannot register XR806 Native API standby participant");
-      this->mark_failed();
-      return;
-    }
-    xr806::lowpower_policy().set_api_idle(false);
-  }
-#endif
-}
-
-void APIServer::start_listening_() {
   // Listener last: on failure socket_failed_() returns early, and an
   // outgoing_connection build keeps dialing out without one
   this->socket_ = socket::socket_ip_loop_monitored(SOCK_STREAM, 0).release();  // monitored for incoming connections
@@ -185,66 +168,7 @@ void APIServer::start_listening_() {
   }
 }
 
-#ifdef USE_XR806_STANDBY_CONTROLLER
-bool APIServer::may_quiesce() const {
-#ifdef USE_API_OUTGOING_CONNECTION
-  // Dial-out can start network work without an inbound connection.
-  return false;
-#else
-  return !this->shutting_down_ && this->api_connection_count_ == 0 &&
-         (this->socket_ != nullptr || this->xr806_listener_paused_);
-#endif
-}
-
-void APIServer::restore_xr806_listener_() {
-  if (!this->xr806_listener_paused_)
-    return;
-  xr806::lowpower_policy().set_api_idle(false);  // Claim work before reopening TCP listener.
-  this->xr806_listener_paused_ = false;
-  if (!this->shutting_down_) {
-    this->start_listening_();
-    if (this->socket_ == nullptr)
-      this->mark_failed();
-  }
-}
-
-void APIServer::standby_preflight(bool requested) {
-  if (!requested) {
-    this->restore_xr806_listener_();
-    return;
-  }
-  if (this->xr806_listener_paused_) {
-    xr806::lowpower_policy().set_api_idle(true);
-    return;
-  }
-  if (!this->may_quiesce()) {
-    xr806::lowpower_policy().set_api_idle(false);
-    return;
-  }
-  // No client accepted, active or queued; close the listener so an
-  // asynchronous SYN cannot introduce a new API owner after admission.
-  this->destroy_socket_();
-  this->xr806_listener_paused_ = true;
-  xr806::lowpower_policy().set_api_idle(true);
-}
-
-bool APIServer::prepare_for_standby() {
-  return this->xr806_listener_paused_ && this->api_connection_count_ == 0 && !this->shutting_down_;
-}
-
-void APIServer::standby_cancelled() { this->restore_xr806_listener_(); }
-
-void APIServer::standby_resumed(const xr806::XR806StandbyResume &event) {
-  (void) event;
-  this->restore_xr806_listener_();
-}
-#endif
-
 void APIServer::loop() {
-#ifdef USE_XR806_STANDBY_CONTROLLER
-  if (this->xr806_listener_paused_)
-    return;  // Avoid generating TCP/OTA work while its listener is parked.
-#endif
   // Accept new clients only if the socket exists and has incoming connections
   if (this->socket_ && this->socket_->ready()) {
     this->accept_new_connections_();
@@ -871,15 +795,6 @@ void APIServer::on_camera_image(const std::shared_ptr<camera::CameraImage> &imag
 #endif
 
 void APIServer::on_shutdown() {
-#ifdef USE_XR806_STANDBY_CONTROLLER
-  // Reboot/shutdown is NEW work even when the API listener was already
-  // parked. Veto PM before any socket/connection teardown starts.
-  xr806::lowpower_policy().set_api_idle(false);
-  if (auto *controller = xr806::standby_controller(); controller != nullptr) {
-    controller->request_standby(false);
-    controller->request_preflight(false);
-  }
-#endif
   this->shutting_down_ = true;
 
   // Close the listening socket to prevent new connections

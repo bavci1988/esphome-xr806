@@ -44,4 +44,3 @@ jobs:
           from esphome.components.xr806.build_support.noise_build import prepare_noise_build
           prepare_noise_build()
           PY
-

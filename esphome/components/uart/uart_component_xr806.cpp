@@ -16,16 +16,14 @@ namespace esphome::uart {
 ESPHOME_LOG_TAG(TAG, "xr806.uart");
 
 void XR806UARTComponent::setup() {
-  if (this->uart_id_ != 0 || this->baud_rate_ == 0 ||
-      this->data_bits_ != 8 || this->stop_bits_ != 1 ||
+  if (this->uart_id_ != 0 || this->baud_rate_ == 0 || this->data_bits_ != 8 || this->stop_bits_ != 1 ||
       this->parity_ != UART_CONFIG_PARITY_NONE) {
     ESP_LOGE(TAG, "Unsupported UART configuration");
     this->mark_failed();
     return;
   }
 
-  if (this->rx_buffer_size_ == 0 ||
-      this->rx_buffer_size_ > 4096) {
+  if (this->rx_buffer_size_ == 0 || this->rx_buffer_size_ > 4096) {
     ESP_LOGE(TAG, "Invalid RX buffer size");
     this->mark_failed();
     return;
@@ -43,8 +41,7 @@ void XR806UARTComponent::setup() {
   HAL_Status result = HAL_UART_Init(static_cast<UART_ID>(this->uart_id_), &config);
 
   if (result != HAL_OK) {
-    ESP_LOGE(TAG, "HAL_UART_Init failed: %d",
-             static_cast<int>(result));
+    ESP_LOGE(TAG, "HAL_UART_Init failed: %d", static_cast<int>(result));
     this->mark_failed();
     return;
   }
@@ -64,16 +61,14 @@ void XR806UARTComponent::setup() {
   this->uart_pm_wakelock_.name = const_cast<char *>("esphome.xr806.uart0");
   this->note_uart_activity_();
 #endif
-  ESP_LOGI(TAG, "UART0 initialized: %u baud",
-           static_cast<unsigned>(this->baud_rate_));
+  ESP_LOGI(TAG, "UART0 initialized: %u baud", static_cast<unsigned>(this->baud_rate_));
 }
 
 // The vendor HAL's HAL_UART_IsTxEmpty() checks only the FIFO. A shift
 // register may still be emitting the final UART frame on the physical line.
 // XR806 has a 16550-compatible LSR transmitter-empty flag and BUSY status.
 bool XR806UARTComponent::tx_hardware_idle_() const {
-  return this->initialized_ && this->uart_ != nullptr &&
-         HAL_UART_IsTxEmpty(this->uart_) &&
+  return this->initialized_ && this->uart_ != nullptr && HAL_UART_IsTxEmpty(this->uart_) &&
          (this->uart_->LINE_STATUS & UART_TX_EMPTY_BIT) != 0;
 }
 
@@ -92,8 +87,8 @@ void XR806UARTComponent::set_baud_probe_mode(bool probing) {
 }
 
 bool XR806UARTComponent::reconfigure_baud_rate(uint32_t baud_rate) {
-  if (!this->initialized_ || this->uart_ == nullptr || this->uart_id_ != 0 ||
-      this->tx_fault_ || this->rx_overflow_fault_)
+  if (!this->initialized_ || this->uart_ == nullptr || this->uart_id_ != 0 || this->tx_fault_ ||
+      this->rx_overflow_fault_)
     return false;
   if (baud_rate != 9600 && baud_rate != 115200)
     return false;
@@ -136,18 +131,14 @@ bool XR806UARTComponent::reconfigure_baud_rate(uint32_t baud_rate) {
 
 void XR806UARTComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "XR806 UART0:");
-  ESP_LOGCONFIG(TAG, "  Baud rate: %u",
-                static_cast<unsigned>(this->baud_rate_));
-  ESP_LOGCONFIG(TAG, "  RX buffer: %u bytes",
-                static_cast<unsigned>(this->rx_buffer_.size()));
-  ESP_LOGCONFIG(TAG, "  Dropped RX bytes: %u",
-                static_cast<unsigned>(this->rx_overflows_));
+  ESP_LOGCONFIG(TAG, "  Baud rate: %u", static_cast<unsigned>(this->baud_rate_));
+  ESP_LOGCONFIG(TAG, "  RX buffer: %u bytes", static_cast<unsigned>(this->rx_buffer_.size()));
+  ESP_LOGCONFIG(TAG, "  Dropped RX bytes: %u", static_cast<unsigned>(this->rx_overflows_));
 }
 
 void XR806UARTComponent::check_logger_conflict() {
   // The SDK console uses UART2; this backend owns UART0 only.
 }
-
 
 #ifdef USE_XR806_LOWPOWER
 
@@ -179,8 +170,7 @@ void XR806UARTComponent::update_uart_idle_() {
   const bool rx_fifo_empty = !HAL_UART_IsRxReady(this->uart_);
   const bool tx_completed_on_wire = this->tx_hardware_idle_();
   const uint32_t line_status = this->uart_->LINE_STATUS;
-  if (line_status & (UART_FIFO_ERROR_BIT | UART_FRAME_ERROR_BIT | UART_PARITY_ERROR_BIT |
-                     UART_OVERRUN_ERROR_BIT)) {
+  if (line_status & (UART_FIFO_ERROR_BIT | UART_FRAME_ERROR_BIT | UART_PARITY_ERROR_BIT | UART_OVERRUN_ERROR_BIT)) {
     if (this->baud_probe_mode_) {
       ++this->ignored_probe_line_errors_;  // Invalid baud candidates are expected.
     } else if (!this->rx_overflow_fault_) {
@@ -190,17 +180,10 @@ void XR806UARTComponent::update_uart_idle_() {
   }
   const bool peripheral_idle = (this->uart_->STATUS & UART_BUSY_BIT) == 0;
 
-  const uint32_t elapsed =
-      static_cast<uint32_t>(
-          millis() - this->last_uart_activity_ms_);
+  const uint32_t elapsed = static_cast<uint32_t>(millis() - this->last_uart_activity_ms_);
 
-  const bool idle =
-      buffer_empty &&
-      rx_fifo_empty &&
-      tx_completed_on_wire &&
-      peripheral_idle &&
-      !this->tx_fault_ && !this->rx_overflow_fault_ && !this->baud_probe_mode_ &&
-      elapsed >= UART_IDLE_GUARD_MS;
+  const bool idle = buffer_empty && rx_fifo_empty && tx_completed_on_wire && peripheral_idle && !this->tx_fault_ &&
+                    !this->rx_overflow_fault_ && !this->baud_probe_mode_ && elapsed >= UART_IDLE_GUARD_MS;
 
   if (idle && this->uart_pm_wakelock_held_) {
     if (pm_wake_unlock(&this->uart_pm_wakelock_) != 0) {
@@ -219,8 +202,7 @@ void XR806UARTComponent::update_uart_idle_() {
 #endif  // USE_XR806_LOWPOWER
 
 void XR806UARTComponent::fill_rx_() {
-  if (!this->initialized_ || this->uart_ == nullptr ||
-      this->rx_buffer_.empty()) {
+  if (!this->initialized_ || this->uart_ == nullptr || this->rx_buffer_.empty()) {
     return;
   }
 
@@ -229,9 +211,7 @@ void XR806UARTComponent::fill_rx_() {
 #endif
 
   // Bound work per call to avoid starving the ESPHome main loop.
-  for (size_t i = 0;
-       i < 512 && HAL_UART_IsRxReady(this->uart_);
-       ++i) {
+  for (size_t i = 0; i < 512 && HAL_UART_IsRxReady(this->uart_); ++i) {
 #ifdef USE_XR806_LOWPOWER
     if (!saw_rx) {
       // Claim the SDK PM wakelock before consuming even the first RX byte.
@@ -255,11 +235,9 @@ void XR806UARTComponent::fill_rx_() {
     }
 
     this->rx_buffer_[this->rx_tail_] = byte;
-    this->rx_tail_ =
-        (this->rx_tail_ + 1) % this->rx_buffer_.size();
+    this->rx_tail_ = (this->rx_tail_ + 1) % this->rx_buffer_.size();
     ++this->rx_count_;
   }
-
 }
 
 void XR806UARTComponent::loop() {
@@ -303,16 +281,14 @@ bool XR806UARTComponent::read_array(uint8_t *data, size_t len) {
 
   for (size_t i = 0; i < len; ++i) {
     data[i] = this->rx_buffer_[this->rx_head_];
-    this->rx_head_ =
-        (this->rx_head_ + 1) % this->rx_buffer_.size();
+    this->rx_head_ = (this->rx_head_ + 1) % this->rx_buffer_.size();
     --this->rx_count_;
   }
 
   return true;
 }
 
-void XR806UARTComponent::write_array(
-    const uint8_t *data, size_t len) {
+void XR806UARTComponent::write_array(const uint8_t *data, size_t len) {
   if (len == 0)
     return;
   if (!this->initialized_ || this->uart_ == nullptr || data == nullptr) {

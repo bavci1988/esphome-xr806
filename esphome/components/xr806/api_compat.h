@@ -12,3 +12,8 @@
 #endif
 
 #endif
+
+#ifdef __cplusplus
+// Force-included into every XR806 C++ unit; declares no platform API.
+namespace esphome::xr806 {}
+#endif

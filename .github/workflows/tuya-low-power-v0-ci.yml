@@ -2,23 +2,19 @@ name: Tuya MCU Low-Power v0 (host tests)
 
 on:
   push:
-    branches: [dev, feature/xr806-ota-reversible-standby]
+    branches: [dev, feature/xr806-stage7d-race-hardening]
     paths:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
-      - "tests/yaml/xr806_ota_readonly_diagnostic.yaml"
-      - "esphome/components/xr806/__init__.py"
       - "tests/tuya_low_power_standby_state_test.cpp"
       - "tests/tuya_low_power_sleep_window_test.cpp"
       - "tests/tuya_low_power_wire_transactions_test.cpp"
       - "tests/xr806/standby_interleaving_test.cpp"
       - "esphome/components/xr806/lowpower_policy.h"
-      - "esphome/components/xr806/mdns.cpp"
+      - "esphome/components/mdns/mdns_xr806.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
       - "tests/yaml/tuya_low_power_*.yaml"
       - "tests/yaml/xr806_ota_readonly_diagnostic.yaml"
-      - "esphome/components/xr806/__init__.py"
-      - "esphome/components/xr806/runtime.cpp"
   pull_request:
     branches: [dev]
     paths:
@@ -79,9 +75,9 @@ jobs:
         run: |
           python -m esphome compile tests/yaml/tuya_low_power_v0_xr806.yaml --only-generate
           python -m esphome config tests/yaml/tuya_low_power_v0_xr806_network_suspend.yaml
+          python -m esphome compile tests/yaml/tuya_low_power_v0_xr806_network_suspend.yaml --only-generate
           python -m esphome config tests/yaml/xr806_ota_readonly_diagnostic.yaml
           python -m esphome compile tests/yaml/xr806_ota_readonly_diagnostic.yaml --only-generate
-          python -m esphome compile tests/yaml/tuya_low_power_v0_xr806_network_suspend.yaml --only-generate
           python -m esphome config tests/yaml/tuya_low_power_pb04_optin_codegen.yaml
           python -m esphome compile tests/yaml/tuya_low_power_pb04_optin_codegen.yaml --only-generate
       - name: Reject PB04 MCU wake without explicit verified wiring
@@ -105,6 +101,13 @@ jobs:
             exit 1
           fi
           grep -q "not supported on xr806" /tmp/ota-invalid.log
+      - name: Reject tuya.refresh on a standard Tuya hub
+        run: |
+          if python -m esphome config tests/yaml/tuya_refresh_standard_rejected.yaml > /tmp/refresh-invalid.log 2>&1; then
+            echo "tuya.refresh unexpectedly accepted on a standard Tuya hub" >&2
+            exit 1
+          fi
+          grep -q "tuya.refresh requires protocol: low_power_v0" /tmp/refresh-invalid.log
       - name: Syntax-check Tuya C++ against generated ESPHome headers (SDK neutral)
         run: |
           set -euo pipefail
@@ -119,3 +122,8 @@ jobs:
           git clone --quiet --filter=blob:none https://github.com/bblanchon/ArduinoJson.git /tmp/tuya-arduinojson
           git -C /tmp/tuya-arduinojson checkout --quiet 77771d3c07668e01d8f52acb03910c1110bb373f
           g++ -std=gnu++20 -fsyntax-only -Wall -Wextra             -I/tmp/tuya-arduinojson/src -I.             esphome/components/tuya/tuya.cpp             esphome/components/tuya/tuya_low_power_v0.cpp
+          # Standard Tuya builds (no low_power_v0) must compile without the low-power code.
+          sed -i '/^#define USE_TUYA_LOW_POWER_V0$/d' esphome/core/defines.h
+          ! grep -q USE_TUYA_LOW_POWER_V0 esphome/core/defines.h
+          g++ -std=gnu++20 -fsyntax-only -Wall -Wextra -I/tmp/tuya-arduinojson/src -I. \
+            esphome/components/tuya/tuya.cpp esphome/components/tuya/tuya_low_power_v0.cpp

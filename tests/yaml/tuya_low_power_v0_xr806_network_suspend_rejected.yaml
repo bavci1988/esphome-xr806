@@ -4,13 +4,12 @@ esphome:
 xr806:
   board: wxu
   lowpower: true
-  wifi:
-    ssid: TEST-NETWORK-NO-HARDWARE
-    password: TestOnlyPassword123
-    network_bridge: true
-    power_save: true
+  wlan:
     network_suspend: true
-network:
+wifi:
+  ssid: TEST-NETWORK-NO-HARDWARE
+  password: TestOnlyPassword123
+  power_save_mode: light
 api:
 mdns:
 uart:

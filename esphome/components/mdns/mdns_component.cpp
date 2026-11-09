@@ -162,7 +162,7 @@ void MDNSComponent::compile_records_(StaticVector<MDNSService, MDNS_SERVICE_COUN
     defined(USE_XR806)
     txt_count++;  // platform
 #endif
-#if defined(USE_WIFI) || defined(USE_ETHERNET) || defined(USE_OPENTHREAD) || defined(USE_XR806_NETWORK_BRIDGE)
+#if defined(USE_WIFI) || defined(USE_ETHERNET) || defined(USE_OPENTHREAD)
     txt_count++;  // network
 #endif
 #ifdef USE_API_NOISE
@@ -213,8 +213,9 @@ void MDNSComponent::compile_records_(StaticVector<MDNSService, MDNS_SERVICE_COUN
     MDNS_STATIC_CONST_CHAR(PLATFORM_NRF52, "nRF52");
     txt_records.push_back({MDNS_STR(TXT_PLATFORM), MDNS_STR(PLATFORM_NRF52)});
 #elif defined(USE_XR806)
-    MDNS_STATIC_CONST_CHAR(MDNS_PLATFORM_XR806_TEXT, "XR806");
-    txt_records.push_back({MDNS_STR(TXT_PLATFORM), MDNS_STR(MDNS_PLATFORM_XR806_TEXT)});
+    // PLATFORM_XR806 is a macro from the XRadio SDK build flags.
+    MDNS_STATIC_CONST_CHAR(PLATFORM_XR806_NAME, "XR806");
+    txt_records.push_back({MDNS_STR(TXT_PLATFORM), MDNS_STR(PLATFORM_XR806_NAME)});
 #endif
 
     txt_records.push_back({MDNS_STR(TXT_BOARD), MDNS_STR(VALUE_BOARD)});
@@ -233,9 +234,6 @@ void MDNSComponent::compile_records_(StaticVector<MDNSService, MDNS_SERVICE_COUN
 #elif defined(USE_ETHERNET)
     MDNS_STATIC_CONST_CHAR(NETWORK_ETHERNET, "ethernet");
     txt_records.push_back({MDNS_STR(TXT_NETWORK), MDNS_STR(NETWORK_ETHERNET)});
-#elif defined(USE_XR806_NETWORK_BRIDGE)
-    MDNS_STATIC_CONST_CHAR(NETWORK_XR806_WIFI, "wifi");
-    txt_records.push_back({MDNS_STR(TXT_NETWORK), MDNS_STR(NETWORK_XR806_WIFI)});
 #elif defined(USE_OPENTHREAD)
     MDNS_STATIC_CONST_CHAR(NETWORK_THREAD, "thread");
     txt_records.push_back({MDNS_STR(TXT_NETWORK), MDNS_STR(NETWORK_THREAD)});
