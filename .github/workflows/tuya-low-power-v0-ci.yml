@@ -2,11 +2,12 @@ name: Tuya MCU Low-Power v0 (host tests)
 
 on:
   push:
-    branches: [dev, feature/xr806-tuya-standby-bridge]
+    branches: [dev, feature/trv16-re-sleep-window-recovery]
     paths:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
       - "tests/tuya_low_power_standby_state_test.cpp"
+      - "tests/tuya_low_power_sleep_window_test.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
       - "tests/yaml/tuya_low_power_*.yaml"
   pull_request:
@@ -15,6 +16,7 @@ on:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
       - "tests/tuya_low_power_standby_state_test.cpp"
+      - "tests/tuya_low_power_sleep_window_test.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
   workflow_dispatch:
 
@@ -38,7 +40,11 @@ jobs:
             tests/tuya_low_power_standby_state_test.cpp \
             -o /tmp/tuya-low-power-standby-state-test
           /tmp/tuya-low-power-standby-state-test
-          echo "PASS Tuya MCU transaction and guarded CMD12/CMD38 standby states"
+          g++ -std=c++17 -Wall -Wextra -Werror -I. \
+            tests/tuya_low_power_sleep_window_test.cpp \
+            -o /tmp/tuya-low-power-window-test
+          /tmp/tuya-low-power-window-test
+          echo "PASS Tuya MCU transaction, standby, daily sleep-window and CMD01 recovery states"
 
   xr806-codegen:
     runs-on: ubuntu-24.04
