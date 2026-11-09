@@ -225,6 +225,7 @@ class Tuya final : public Component,
   TuyaLowPowerSleepWindow lp_sleep_window_{};
   TuyaLowPowerProductRetry lp_product_retry_{};
   bool lp_mode_requery_pending_{false};
+  bool lp_initialized_callback_called_{false};
   uint32_t lp_mode_requery_after_ms_{0};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_last_resync_ms_{0};
