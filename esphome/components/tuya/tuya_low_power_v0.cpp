@@ -288,6 +288,10 @@ void Tuya::send_low_power_time_() {
 
 void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uint8_t *data, size_t len) {
   (void) version;
+  // Once CMD38 is provisionally accepted, any new MCU traffic invalidates
+  // the quiet interval. Do not race a report burst against CPU standby.
+  if (command != 0x38 && this->lp_standby_.requested())
+    this->cancel_low_power_standby_();
   switch (command) {
     case 0x00:  // First MCU heartbeat after reset is 00; subsequent is 01.
       if (len != 1 || data[0] != 0)
