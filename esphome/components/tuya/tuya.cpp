@@ -98,11 +98,18 @@ void Tuya::loop() {
   this->read_available([this](uint8_t b) { this->handle_char_(b); });
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
 #ifdef USE_XR806_STANDBY_CONTROLLER
-    if (this->lp_standby_.requested() && esphome::xr806::standby_controller() != nullptr &&
-        !esphome::xr806::lowpower_policy().standby_requested()) {
-      // A queued command, network event or an external request cancellation
-      // must not leave HC32 believing that WXU is still sleeping.
-      this->cancel_low_power_standby_();
+    if (this->lp_standby_.requested()) {
+      const auto &policy = esphome::xr806::lowpower_policy();
+      const uint32_t busy_owners = esphome::xr806::XR806LowPowerPolicy::NETWORK_BUSY |
+                                   esphome::xr806::XR806LowPowerPolicy::API_BUSY |
+                                   esphome::xr806::XR806LowPowerPolicy::OTA_BUSY |
+                                   esphome::xr806::XR806LowPowerPolicy::MDNS_BUSY;
+      if (!policy.standby_requested() || (policy.blockers() & busy_owners) != 0 ||
+          !this->low_power_ready_for_sleep_()) {
+        // Withdraw the HC32 logical-sleep signal on any new protocol,
+        // network, OTA or application work, before PM has been entered.
+        this->cancel_low_power_standby_();
+      }
     }
 #endif
     if (this->parent_ == nullptr || !this->parent_->is_connected()) {
