@@ -24,6 +24,9 @@ struct XR806StandbyResume {
 class XR806StandbyParticipant {
  public:
   virtual ~XR806StandbyParticipant() = default;
+  // Optional nonblocking service drain, invoked while other owners still
+  // have their busy votes asserted. Must never claim idle before close/drain.
+  virtual void standby_preflight(bool requested) {}
   virtual bool prepare_for_standby() = 0;
   virtual void standby_cancelled() = 0;
   virtual void standby_resumed(const XR806StandbyResume &event) = 0;
