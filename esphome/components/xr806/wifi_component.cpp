@@ -5,6 +5,9 @@
 #ifdef USE_XR806_WLAN_SMOKE
 
 #include "esphome/components/xr806/wifi_component.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/lowpower_policy.h"
+#endif
 #include "esphome/components/xr806/network_status.h"
 #if defined(USE_XR806) && defined(USE_XR806_NETWORK_BRIDGE)
 #include "esphome/components/network/util.h"
@@ -248,7 +251,67 @@ void XR806WiFiComponent::apply_power_save_(void *opaque_netif, uint32_t now) {
            static_cast<unsigned>(this->listen_interval_));
 }
 
+
+#ifdef USE_XR806_STANDBY_CONTROLLER
+void XR806WiFiComponent::register_standby_owner_() {
+  auto *controller = standby_controller();
+  if (controller == nullptr || this->standby_registered_) {
+    return;
+  }
+  this->standby_registered_ = controller->register_service_owner(XR806StandbyService::WLAN, this);
+  lowpower_policy().set_network_idle(false);
+}
+
+bool XR806WiFiComponent::can_pause_for_standby() const {
+  // Connected WLAN is NOT stopped for an MCU's spontaneous CMD38.
+  // This avoids destroying Home Assistant/API/OTA sessions in flight.
+  return this->standby_registered_ && !this->connected_ && !this->standby_paused_;
+}
+
+bool XR806WiFiComponent::pause_for_standby() {
+  if (this->standby_paused_) {
+    return true;
+  }
+  if (!this->can_pause_for_standby()) {
+    return false;
+  }
+  lowpower_policy().set_network_idle(false);
+  if (wlan_sta_disable() != 0) {
+    ESP_LOGE(TAG, "Cannot disable offline WLAN station; standby vetoed");
+    return false;
+  }
+  this->standby_paused_ = true;
+  // Only after the vendor driver reports that the STA has been disabled.
+  lowpower_policy().set_network_idle(true);
+  return true;
+}
+
+void XR806WiFiComponent::cancel_standby_pause() { this->resume_after_standby(); }
+
+void XR806WiFiComponent::resume_after_standby() {
+  if (!this->standby_paused_) {
+    return;
+  }
+  lowpower_policy().set_network_idle(false);  // Busy BEFORE re-enabling.
+  this->standby_paused_ = false;
+  this->connected_ = false;
+  this->reconnect_.begin(millis());
+  if (wlan_sta_enable() != 0) {
+    ESP_LOGE(TAG, "WLAN restart after standby/abort failed");
+    this->mark_failed();
+  }
+}
+#endif
+
 void XR806WiFiComponent::loop() {
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (!this->standby_registered_) {
+    this->register_standby_owner_();
+  }
+  if (this->standby_paused_) {
+    return;  // Never reconnect or scan while radio is intentionally suspended.
+  }
+#endif
   const uint32_t now = millis();
   if (static_cast<uint32_t>(now - this->last_poll_ms_) < 1000U)
     return;
