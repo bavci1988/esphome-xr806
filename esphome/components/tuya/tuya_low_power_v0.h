@@ -112,15 +112,13 @@ class TuyaLowPowerV0Session {
 
   bool expire(uint32_t now, uint32_t max_age_ms = REPORT_TIMEOUT_MS) {
     bool expired = false;
-    if (full_status_active_ &&
-        static_cast<uint32_t>(now - status_started_ms_) >= max_age_ms) {
+    if (full_status_active_ && static_cast<uint32_t>(now - status_started_ms_) >= max_age_ms) {
       status_mask_ = 0;
       full_status_active_ = false;
       synced_ = false;
       expired = true;
     }
-    if (write_pending_ &&
-        static_cast<uint32_t>(now - write_started_ms_) >= max_age_ms) {
+    if (write_pending_ && static_cast<uint32_t>(now - write_started_ms_) >= max_age_ms) {
       write_pending_ = false;
       write_refresh_ = false;
       refresh_mask_ = 0;

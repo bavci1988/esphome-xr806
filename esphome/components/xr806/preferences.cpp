@@ -4,17 +4,20 @@
 
 #include "esphome/core/preferences.h"
 
-namespace esphome {
+namespace esphome::xr806 {
 
 // XR806_PREFERENCES_V1
 // Initial backend: non-persistent ESPHome fallback.
 // No flash writes. Persistent storage will be added separately.
-namespace {
-ESPPreferences xr806_preferences;
-}
+static ESPPreferences xr806_preferences;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+}  // namespace esphome::xr806
+
+namespace esphome {
 
 // EntityBase and other components require this global manager.
-ESPPreferences *global_preferences = &xr806_preferences;
+ESPPreferences *global_preferences =  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    &xr806::xr806_preferences;
 
 }  // namespace esphome
 

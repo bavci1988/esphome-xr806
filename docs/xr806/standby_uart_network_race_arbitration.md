@@ -11,9 +11,9 @@ Plattformkomponenten interpretieren keine Tuya-CMD-/DP-Daten.
 | Tuya MCU low_power_v0 | `tuya_low_power_wire_transactions.h`, `tuya_low_power_v0.cpp` | CMD01/02/09 jeweils maximal eine offene ACK-Transaktion, danach ggf. separate CMD05-Serie, keine offene RX/Write-Schuld, gesunder UART |
 | XR806 UART0 | UART-TEMT und native SDK-PM-Wakelock | FIFO + Shiftregister vollständig gesendet, RX abgearbeitet, Ruhefrist, kein sticky fault |
 | XR806 PM | `standby_controller.cpp`, `lowpower_policy.h` | Besitzer aller vorhandenen Dienste registriert und inaktiv, unveränderte Generation, atomarer Admission-Fence, Hardware-Wake korrekt eingerichtet |
-| Native API | `api_server.cpp` | Kein einziger API-Client; Listener wird geschlossen und bei Abbruch/Resume erneut geöffnet |
-| mDNS | `xr806/mdns.cpp` | Registrierter lwIP-Responder tatsächlich im TCP/IP-Thread abgemeldet; Callback wurde **ausgeführt**, nicht nur eingeplant |
-| WLAN | `xr806/wifi_component.cpp` | Explizites `network_suspend: true`, API/mDNS/OTA abgearbeitet, STA deaktiviert und Link/Association inaktiv, native WLAN-PM-Sperre freigegeben |
+| Native API | `xr806/api_standby.cpp` (vorher `api_server.cpp`) | Kein einziger API-Client; ein später verbindender Client setzt die Stimme zurück auf „busy“ und bricht den Versuch ab. Der Listener bleibt offen; nach dem WLAN-Parken kann kein Client mehr kommen |
+| mDNS | `mdns/mdns_xr806.cpp` | Registrierter lwIP-Responder tatsächlich im TCP/IP-Thread abgemeldet; Callback wurde **ausgeführt**, nicht nur eingeplant |
+| WLAN | `xr806/wifi_standby.cpp` (steuert `wifi::WiFiComponent`) | Explizites `network_suspend: true`, API/mDNS/OTA abgearbeitet, STA deaktiviert und Link/Association inaktiv, native WLAN-PM-Sperre freigegeben |
 | OTA | `xr806/standby_ota_guard.h` | **Noch nicht freigabefähig:** OTA-Events werden überwacht, aber keinem bekannten OTA-Backend wird fälschlich ein garantierter Listener-/Flash-Drain zugeschrieben |
 
 **Zusätzliche Build-Grenze:** Der ESPHome-Quellcode in
@@ -61,11 +61,11 @@ beweist weder Sollwertübernahme noch Ventilbewegung.
 1. Die HC32 kann CMD38 senden. Solange UART, MCU-Status, RTC-sm
    oder ein benötigter Netzwerk-Owner unbekannt/busy ist,
    wird `CMD38 [00,01]` zurückgegeben.
-2. Mit opt-in `xr806.wifi.network_suspend: true`, passender
+2. Mit opt-in `xr806.wlan.network_suspend: true`, passender
    PA20-Konfiguration, validierter MCU-Synchronisation und
    nachweisbar quiesce-fähigen API/mDNS/WLAN-Teilnehmern
    startet ein gesonderter **Service-Preflight**.
-3. API schließt seinen Listener ohne einen aktiven Client.
+3. API stimmt „idle“ nur ohne aktiven Client.
    mDNS wird über `tcpip_callback()` auf dem lwIP-Thread entfernt.
    Erst nachdem API/mDNS (und ein OTA-Owner, sofern überhaupt
    freigabefähig) fertig sind, darf die WLAN-STA herunterfahren.

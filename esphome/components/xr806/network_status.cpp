@@ -1,8 +1,8 @@
 #include "esphome/core/defines.h"
 
-#ifdef USE_XR806_WLAN_SMOKE
+#if defined(USE_XR806) && defined(USE_WIFI)
 
-#include "esphome/components/xr806/network_status.h"
+#include "network_status.h"
 
 extern "C" {
 #include "xr_config.h"
@@ -14,16 +14,12 @@ extern "C" {
 
 namespace esphome::xr806 {
 
-XR806NetworkSnapshot read_xr806_network_snapshot(
-    struct netif *interface) {
-
+XR806NetworkSnapshot read_xr806_network_snapshot(struct netif *interface) {
   XR806NetworkSnapshot result{};
 
   wlan_sta_states_t state = WLAN_STA_STATE_DISCONNECTED;
 
-  result.associated =
-      wlan_sta_state(&state) == 0 &&
-      state == WLAN_STA_STATE_CONNECTED;
+  result.associated = wlan_sta_state(&state) == 0 && state == WLAN_STA_STATE_CONNECTED;
 
   if (interface == nullptr)
     return result;
@@ -33,22 +29,14 @@ XR806NetworkSnapshot read_xr806_network_snapshot(
 
   const auto *ip = netif_ip4_addr(interface);
 
-  result.ipv4_assigned =
-      ip != nullptr && !ip4_addr_isany(ip);
+  result.ipv4_assigned = ip != nullptr && !ip4_addr_isany(ip);
 
   if (result.ipv4_assigned) {
-    ip4addr_ntoa_r(
-        ip, result.ipv4, sizeof(result.ipv4));
+    ip4addr_ntoa_r(ip, result.ipv4, sizeof(result.ipv4));
 
-    ip4addr_ntoa_r(
-        netif_ip4_gw(interface),
-        result.gateway,
-        sizeof(result.gateway));
+    ip4addr_ntoa_r(netif_ip4_gw(interface), result.gateway, sizeof(result.gateway));
 
-    ip4addr_ntoa_r(
-        netif_ip4_netmask(interface),
-        result.netmask,
-        sizeof(result.netmask));
+    ip4addr_ntoa_r(netif_ip4_netmask(interface), result.netmask, sizeof(result.netmask));
   }
 
   return result;
@@ -56,4 +44,4 @@ XR806NetworkSnapshot read_xr806_network_snapshot(
 
 }  // namespace esphome::xr806
 
-#endif  // USE_XR806_WLAN_SMOKE
+#endif  // USE_XR806 && USE_WIFI

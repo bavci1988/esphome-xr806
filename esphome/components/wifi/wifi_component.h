@@ -991,6 +991,10 @@ class WiFiComponent final : public Component {
   void wifi_scan_done_callback_();
 #endif
 
+#ifdef USE_XR806
+  void wifi_scan_done_callback_();
+#endif
+
   // Large/pointer-aligned members first
   std::vector<WiFiSTAPriority> sta_priorities_;
   // Guarded by ScanResultsLock (see below this class)

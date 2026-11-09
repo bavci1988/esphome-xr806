@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import fcntl
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-from pathlib import Path
-
 
 CACHE_ROOT = Path.home() / ".cache/esphome-xr806/dependencies"
 
@@ -63,23 +62,17 @@ def _git(*args: str, cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
-def _verify(
-    path: Path, name: str, expected_commit: str | None = None
-) -> None:
+def _verify(path: Path, name: str, expected_commit: str | None = None) -> None:
     """Verify the cached Git revision and required files."""
     info = DEPENDENCIES[name]
 
     if not (path / ".git").exists():
-        raise RuntimeError(
-            f"Invalid dependency cache (missing Git metadata): {path}"
-        )
+        raise RuntimeError(f"Invalid dependency cache (missing Git metadata): {path}")
 
     revision = _git("rev-parse", "HEAD", cwd=path)
 
     if revision != (expected_commit or info["commit"]):
-        raise RuntimeError(
-            f"Unexpected {name} revision: {revision}"
-        )
+        raise RuntimeError(f"Unexpected {name} revision: {revision}")
 
     changes = _git(
         "status",
@@ -89,15 +82,11 @@ def _verify(
     )
 
     if changes:
-        raise RuntimeError(
-            f"Cached {name} sources have local modifications: {path}"
-        )
+        raise RuntimeError(f"Cached {name} sources have local modifications: {path}")
 
     for relative in info["required"]:
         if not (path / relative).is_file():
-            raise RuntimeError(
-                f"Missing {name} dependency file: {relative}"
-            )
+            raise RuntimeError(f"Missing {name} dependency file: {relative}")
 
 
 def ensure_dependency(name: str) -> Path:
@@ -121,7 +110,9 @@ def ensure_dependency(name: str) -> Path:
                 len(expected_commit) != 40
                 or any(c not in "0123456789abcdef" for c in expected_commit)
             ):
-                raise RuntimeError("Invalid XR806_SDK_EXPECTED_COMMIT: expected full lowercase Git SHA")
+                raise RuntimeError(
+                    "Invalid XR806_SDK_EXPECTED_COMMIT: expected full lowercase Git SHA"
+                )
             _verify(source, name, expected_commit or None)
             print(f"[XR806] Verified external SDK checkout: {source}", flush=True)
             return source
