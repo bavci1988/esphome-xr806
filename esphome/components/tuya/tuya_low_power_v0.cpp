@@ -283,13 +283,20 @@ void Tuya::process_low_power_queue_() {
     }
   }
 
-  if (this->lp_v0_.busy() || this->lp_v0_.faulted() || this->expected_response_.has_value() ||
+  if (this->lp_v0_.busy() || this->expected_response_.has_value() ||
       !this->lp_transaction_.can_send(now) || !this->rx_message_.empty() ||
       this->command_queue_.empty() || static_cast<uint32_t>(now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS) {
     return;
   }
-  if (!this->lp_v0_.has_product() && this->command_queue_.front().cmd != TuyaCommandType::PRODUCT_QUERY)
+  const uint8_t next_cmd = static_cast<uint8_t>(this->command_queue_.front().cmd);
+  // After timeout only a product re-probe or the full CMD02 status
+  // handshake can repair synchronization. Never send a stale CMD09 write.
+  if (this->lp_v0_.faulted() && next_cmd != 0x01 && next_cmd != 0x02) {
     return;
+  }
+  if (!this->lp_v0_.has_product() && next_cmd != 0x01) {
+    return;
+  }
 
   this->send_raw_command_(this->command_queue_.front());
   if (!this->expected_response_.has_value())
@@ -367,6 +374,12 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       if (len != 1 || data[0] != 0)
         return;
       this->lp_standby_.reset_on_mcu_boot();
+      // Reset/quarantine any outstanding transaction: a late ACK belongs
+      // to the previous MCU boot epoch, not to a future write.
+      this->lp_transaction_.reset(millis());
+      this->expected_response_.reset();
+      this->command_queue_.clear();
+      this->lp_v0_.command_timeout();
       // The HC32 may have a new RTC sleep-window marker (sm), including
       // after a PA3 pulse or local UI change; force a fresh product epoch.
       if (this->lp_v0_.has_product()) {
