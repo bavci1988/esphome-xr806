@@ -435,7 +435,49 @@ def run_compile(args, config) -> bool:
     print(f"[XR806] AWIH firmware: {image}", flush=True)
     print(f"[XR806] ESPHome firmware: {destination}", flush=True)
 
+    # Part VI: produce a separate bootloader-compatible XRadio XZ update.
+    # The normal AWIH firmware.bin stays intact for recovery/serial flashing.
+    # Never expose a stale OTA package when an updated image no longer fits.
+    if "ota" in CORE.config:
+        import sys
+
+        ota_output = destination.with_name("firmware.ota.bin")
+        ota_output.unlink(missing_ok=True)
+        packer = repo_root / "tools/xr806/make_ota_xz.py"
+        pack = subprocess.run(
+            [sys.executable, str(packer), str(destination), "-o", str(ota_output)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if pack.returncode:
+            print(
+                "[XR806] OTA package unavailable (no firmware write will be attempted): "
+                + (pack.stderr.strip() or pack.stdout.strip()),
+                flush=True,
+            )
+        else:
+            print(f"[XR806] Native XZ OTA package: {ota_output}", flush=True)
+
     return True
+
+
+def ota_image(binary):
+    """Native network OTA must send the AWIH/XZ image, not full BOOT+APP AWIH."""
+    from pathlib import Path
+    from esphome.core import EsphomeError
+
+    binary = Path(binary)
+    if binary.name.endswith(".ota.bin"):
+        return binary
+    ota = binary.with_name("firmware.ota.bin")
+    if not ota.is_file():
+        raise EsphomeError(
+            "No XR806 AWIH/XZ OTA image exists for this build. "
+            "Check flash-size/compression output; do not send full firmware.bin over OTA."
+        )
+    return ota
+
 
 
 # XR806_GPIO_REGISTRATION_V1
