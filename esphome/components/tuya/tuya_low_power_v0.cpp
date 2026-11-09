@@ -184,8 +184,14 @@ void Tuya::cancel_low_power_standby_() {
   if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr)
     controller->request_standby(false);
 #endif
-  if (compensate)
+  if (compensate) {
     this->send_low_power_awake_notification_();
+  }
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr) {
+    controller->cancel_service_owners();
+  }
+#endif
   this->update_low_power_sleep_lock_();
 }
 
@@ -367,8 +373,16 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
   (void) version;
   // Once CMD38 is provisionally accepted, any new MCU traffic invalidates
   // the quiet interval. Do not race a report burst against CPU standby.
-  if (command != 0x38 && this->lp_standby_.requested())
+  if (command != 0x38 && this->lp_standby_.requested()) {
     this->cancel_low_power_standby_();
+  }
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (command != 0x38) {
+    if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr) {
+      controller->cancel_service_owners();  // New MCU traffic invalidates service quiescence.
+    }
+  }
+#endif
   switch (command) {
     case 0x00:  // First MCU heartbeat after reset is 00; subsequent is 01.
       if (len != 1 || data[0] != 0)
@@ -522,18 +536,24 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       uint8_t flags = 0x01;  // Default: network/bus not safely suspended.
 #ifdef USE_XR806_STANDBY_CONTROLLER
       auto *controller = esphome::xr806::standby_controller();
+      const bool wake_matches_mcu = controller != nullptr && controller->has_wake_pin() &&
+                                    controller->requires_external_sync() &&
+                                    controller->wake_pin() == this->lp_product_.wake_gpio;
+      // Quiesce only after verifying the entire MCU transaction and pin
+      // contract. Async owners can reply "not ready"; CMD38 must answer busy
+      // until all four owners actually release their vetoes.
+      const bool mcu_idle = this->low_power_ready_for_sleep_(true);
+      const bool owners_prepared = wake_matches_mcu && this->lp_bridge_registered_ && mcu_idle &&
+                                   this->lp_product_.sleep_mode == 1 && controller->prepare_service_owners();
       const auto blockers = esphome::xr806::lowpower_policy().blockers();
       const bool ota_veto = (blockers & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
       const bool owner_veto =
           (blockers &
            (esphome::xr806::XR806LowPowerPolicy::NETWORK_BUSY | esphome::xr806::XR806LowPowerPolicy::API_BUSY |
             esphome::xr806::XR806LowPowerPolicy::MDNS_BUSY | esphome::xr806::XR806LowPowerPolicy::OTA_BUSY)) != 0;
-      const bool wake_matches_mcu = controller != nullptr && controller->has_wake_pin() &&
-                                    controller->requires_external_sync() &&
-                                    controller->wake_pin() == this->lp_product_.wake_gpio;
       const bool accepted =
-          wake_matches_mcu && this->lp_bridge_registered_ &&
-          this->lp_standby_.accept_request(this->lp_product_.sleep_mode == 1, this->low_power_ready_for_sleep_(true),
+          owners_prepared &&
+          this->lp_standby_.accept_request(true, mcu_idle,
                                            this->parent_ != nullptr && this->parent_->is_connected(), !owner_veto);
       if (accepted) {
         flags = 0x00;
