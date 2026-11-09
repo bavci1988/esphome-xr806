@@ -3,7 +3,8 @@
 #include "esphome/core/defines.h"
 
 // Only define SHA256 on platforms that support it
-#if defined(USE_ESP32) || defined(USE_ESP8266) || defined(USE_RP2) || defined(USE_LIBRETINY) || defined(USE_HOST)
+#if defined(USE_ESP32) || defined(USE_ESP8266) || defined(USE_RP2) || defined(USE_LIBRETINY) || defined(USE_HOST) || \
+    defined(USE_XR806)
 
 #include <cstdint>
 #include <string>
@@ -22,7 +23,7 @@
 #define USE_SHA256_MBEDTLS
 #include "mbedtls/sha256.h"
 #endif
-#elif defined(USE_LIBRETINY)
+#elif defined(USE_LIBRETINY) || defined(USE_XR806)
 #define USE_SHA256_MBEDTLS
 #include "mbedtls/sha256.h"
 #elif defined(USE_ESP8266) || defined(USE_RP2)
