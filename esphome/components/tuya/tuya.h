@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cinttypes>
 #include <memory>
 #include <vector>
@@ -222,6 +223,8 @@ class Tuya final : public Component,
   TuyaLowPowerAutoBaud lp_autobaud_{};
   TuyaLowPowerV0Session lp_v0_{};
   TuyaLowPowerProductInfo lp_product_{};
+  // Bounded CMD01 JSON copy for diagnostics, no extra heap allocation.
+  std::array<char, 513> lp_product_text_{};
   TuyaLowPowerSleepWindow lp_sleep_window_{};
   TuyaLowPowerProductRetry lp_product_retry_{};
   bool lp_mode_requery_pending_{false};
