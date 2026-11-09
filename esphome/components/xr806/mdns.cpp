@@ -11,9 +11,9 @@
 #include <atomic>
 #include <cstdint>
 #ifdef USE_XR806_STANDBY_CONTROLLER
-#include "lowpower_policy.h"
-#include "standby_async_epoch.h"
-#include "standby_controller.h"
+#include "esphome/components/xr806/lowpower_policy.h"
+#include "esphome/components/xr806/standby_async_epoch.h"
+#include "esphome/components/xr806/standby_controller.h"
 #endif
 #include <cstring>
 #include <string>
