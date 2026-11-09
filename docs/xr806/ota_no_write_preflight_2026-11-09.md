@@ -29,6 +29,22 @@ At `0x177000` the dump begins `A5 5A 5A A5` and contains 21 non-FF bytes in the 
 
 `tools/xr806/inspect_ota_geometry.py` reports these fields and image headers directly from a local dump without writing any flash or uploading the image.
 
+### OTA FDCM state reconstructed from vendor ROM and dump
+
+The ROM source `src/rom/rom_bin/src/image/image.c:879-1000` defines `image_raw_cfg_t` (two 16-bit values), sequences `0x5555` = 0 and `0xAAAA` = 1, and `0x9669` = VERIFIED. The companion `src/rom/rom_bin/src/image/fdcm.c:43-77, 175-225` reads the newest append-only record selected by an inverted bitmap.
+
+At original WXU flash offset `0x177000`, the actual FDCM header is `A55A5AA5`, bitmap length 124 bytes, record size 4 bytes, bitmap beginning `0xF8` (three occupied records). The records are:
+
+| Flash offset | raw_seq | raw_state | Decoded |
+| --- | --- | --- | --- |
+| `0x177084` | `0x5555` | `0x9669` | seq 0, VERIFIED |
+| `0x177088` | `0xAAAA` | `0x9669` | seq 1, VERIFIED |
+| `0x17708C` | `0x5555` | `0x9669` | seq 0, VERIFIED |
+
+**Offline conclusion:** The latest encoded boot selection is **sequence 0 / VERIFIED**, and the stored history shows a prior selection of sequence 1. With the matching ROM behavior, the update sequence would ordinarily be the other one. This is stronger than just observing two AWIH image sections, but still **not** evidence of power-loss-safe rollback, actual running runtime state or compatibility with newly built ESPHome images.
+
+The updated read-only `inspect_ota_geometry.py` decodes this selection with strict FDCM bounds validation; its synthetic fixtures verify all three records. No `fdcm_write`, `image_set_cfg` or flash erase/write is invoked.
+
 ### Development delivered in this branch
 
 1. `ota_update_pm_gate.h`: portable fail-closed PM wakelock state machine. `ota_backend.cpp` integrates it with the process-wide `UpdateLock` under `USE_XR806_STANDBY_CONTROLLER`: assert OTA busy before flash work, require native `pm_wake_lock()`, keep native lock until `UpdateLock::release()`, and never release the global flash-write lock after a PM-unlock failure. A successful OTA `hold_until_reboot()` retains the lock until reboot by design.
