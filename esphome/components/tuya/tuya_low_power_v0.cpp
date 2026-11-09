@@ -93,9 +93,8 @@ bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
   const bool guard_elapsed = static_cast<int32_t>(millis() - this->lp_wake_guard_until_) >= 0;
   const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
   return this->lp_v0_.ready() && guard_elapsed && baud_locked && this->parent_ != nullptr &&
-         this->parent_->is_connected() && !this->lp_standby_.recovery_required() &&
-         this->command_queue_.empty() && !this->expected_response_.has_value() &&
-         (in_cmd38_handler || this->rx_message_.empty());
+         this->parent_->is_connected() && !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
+         !this->expected_response_.has_value() && (in_cmd38_handler || this->rx_message_.empty());
 }
 
 void Tuya::update_low_power_sleep_lock_() {
@@ -105,8 +104,8 @@ void Tuya::update_low_power_sleep_lock_() {
 }
 
 bool Tuya::request_low_power_refresh() {
-  if (this->protocol_ != TuyaProtocol::LOW_POWER_V0 || !this->lp_v0_.has_product() ||
-      this->lp_v0_.busy() || this->expected_response_.has_value())
+  if (this->protocol_ != TuyaProtocol::LOW_POWER_V0 || !this->lp_v0_.has_product() || this->lp_v0_.busy() ||
+      this->expected_response_.has_value())
     return false;
   this->send_datapoint_command_(106, TuyaDatapointType::BOOLEAN, {0x01});
   return true;
@@ -142,8 +141,8 @@ bool Tuya::notify_low_power_transition(bool sleeping) {
   if (sleeping) {
     // The generic coordinator's scheduler/wake votes are intentionally
     // FALSE during prepare: requiring can_enter_standby() here deadlocks.
-    if (!this->lp_standby_.needs_notification() || !this->low_power_ready_for_sleep_() ||
-        this->available() != 0 || this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS)
+    if (!this->lp_standby_.needs_notification() || !this->low_power_ready_for_sleep_() || this->available() != 0 ||
+        this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS)
       return false;
     this->send_low_power_direct_(0x12, {0x01});
     if (this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
@@ -164,9 +163,8 @@ bool Tuya::notify_low_power_transition(bool sleeping) {
 
 #ifdef USE_XR806_STANDBY_CONTROLLER
 bool Tuya::prepare_for_standby() {
-  if (!this->lp_bridge_registered_ || !this->lp_standby_.requested() ||
-      this->lp_product_.sleep_mode != 1 || !this->low_power_ready_for_sleep_() ||
-      this->available() != 0)
+  if (!this->lp_bridge_registered_ || !this->lp_standby_.requested() || this->lp_product_.sleep_mode != 1 ||
+      !this->low_power_ready_for_sleep_() || this->available() != 0)
     return false;
   if (this->lp_standby_.needs_notification()) {
     // Deliberately postpone platform PM; CMD12/01 was transmitted first.
@@ -174,8 +172,7 @@ bool Tuya::prepare_for_standby() {
     (void) this->notify_low_power_transition(true);
     return false;
   }
-  return this->lp_standby_.ready_for_pm() &&
-         this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
+  return this->lp_standby_.ready_for_pm() && this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
 }
 
 void Tuya::standby_cancelled() {
@@ -211,8 +208,7 @@ void Tuya::process_low_power_queue_() {
 
   // Standard Tuya's 300 ms retry logic is incompatible with the HC32's
   // delayed CMD05 report. ACK and report have separate timeouts.
-  if (this->expected_response_.has_value() &&
-      static_cast<uint32_t>(now - this->last_command_timestamp_) >= 1500) {
+  if (this->expected_response_.has_value() && static_cast<uint32_t>(now - this->last_command_timestamp_) >= 1500) {
     const bool product_query = *this->expected_response_ == TuyaCommandType::PRODUCT_QUERY;
     this->expected_response_.reset();
     if (!this->command_queue_.empty())
@@ -231,12 +227,10 @@ void Tuya::process_low_power_queue_() {
     }
   }
 
-  if (this->lp_v0_.busy() || this->expected_response_.has_value() ||
-      !this->rx_message_.empty() || this->command_queue_.empty() ||
-      static_cast<uint32_t>(now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS)
+  if (this->lp_v0_.busy() || this->expected_response_.has_value() || !this->rx_message_.empty() ||
+      this->command_queue_.empty() || static_cast<uint32_t>(now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS)
     return;
-  if (!this->lp_v0_.has_product() &&
-      this->command_queue_.front().cmd != TuyaCommandType::PRODUCT_QUERY)
+  if (!this->lp_v0_.has_product() && this->command_queue_.front().cmd != TuyaCommandType::PRODUCT_QUERY)
     return;
 
   this->send_raw_command_(this->command_queue_.front());
@@ -249,8 +243,7 @@ void Tuya::send_low_power_direct_(uint8_t command, const std::vector<uint8_t> &p
   if (payload.size() > 65535)
     return;
   const uint8_t header[] = {
-      0x55, 0xAA, 0x00, command,
-      static_cast<uint8_t>(payload.size() >> 8), static_cast<uint8_t>(payload.size()),
+      0x55, 0xAA, 0x00, command, static_cast<uint8_t>(payload.size() >> 8), static_cast<uint8_t>(payload.size()),
   };
   uint8_t checksum = 0;
   for (uint8_t b : header)
@@ -290,9 +283,14 @@ void Tuya::send_low_power_time_() {
     if (now.is_valid() && now.year >= 2000 && now.year <= 2255) {
       const uint8_t weekday = static_cast<uint8_t>(now.day_of_week == 1 ? 7 : now.day_of_week - 1);
       payload = {
-          1, static_cast<uint8_t>(now.year - 2000), static_cast<uint8_t>(now.month),
-          static_cast<uint8_t>(now.day_of_month), static_cast<uint8_t>(now.hour),
-          static_cast<uint8_t>(now.minute), static_cast<uint8_t>(now.second), weekday,
+          1,
+          static_cast<uint8_t>(now.year - 2000),
+          static_cast<uint8_t>(now.month),
+          static_cast<uint8_t>(now.day_of_month),
+          static_cast<uint8_t>(now.hour),
+          static_cast<uint8_t>(now.minute),
+          static_cast<uint8_t>(now.second),
+          weekday,
       };
     }
   }
@@ -343,8 +341,8 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       this->lp_v0_.product_received();
       this->init_state_ = TuyaInitState::INIT_DATAPOINT;
       ESP_LOGI(LP_TAG, "TRV16 PID %s version %s wk=%d mwk=%d sm=%d", this->lp_product_.pid.c_str(),
-               this->lp_product_.version.c_str(), this->lp_product_.wake_gpio,
-               this->lp_product_.mcu_wake_gpio, this->lp_product_.sleep_mode);
+               this->lp_product_.version.c_str(), this->lp_product_.wake_gpio, this->lp_product_.mcu_wake_gpio,
+               this->lp_product_.sleep_mode);
       this->send_low_power_network_();
       return;
     }
@@ -364,10 +362,8 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
           return;
         const size_t size = (static_cast<size_t>(data[offset + 2]) << 8) | data[offset + 3];
         const uint8_t type = data[offset + 1];
-        if (size > len - offset - 4 || type > 5 ||
-            ((type == 1 || type == 4) && size != 1) ||
-            (type == 2 && size != 4) ||
-            (type == 1 && data[offset + 4] > 1))
+        if (size > len - offset - 4 || type > 5 || ((type == 1 || type == 4) && size != 1) ||
+            (type == 2 && size != 4) || (type == 1 && data[offset + 4] > 1))
           return;
         offset += 4 + size;
       }
@@ -416,18 +412,16 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       const auto blockers = esphome::xr806::lowpower_policy().blockers();
       const bool ota_veto = (blockers & esphome::xr806::XR806LowPowerPolicy::OTA_BUSY) != 0;
       const bool owner_veto =
-          (blockers & (esphome::xr806::XR806LowPowerPolicy::NETWORK_BUSY |
-                       esphome::xr806::XR806LowPowerPolicy::API_BUSY |
-                       esphome::xr806::XR806LowPowerPolicy::MDNS_BUSY |
-                       esphome::xr806::XR806LowPowerPolicy::OTA_BUSY)) != 0;
+          (blockers &
+           (esphome::xr806::XR806LowPowerPolicy::NETWORK_BUSY | esphome::xr806::XR806LowPowerPolicy::API_BUSY |
+            esphome::xr806::XR806LowPowerPolicy::MDNS_BUSY | esphome::xr806::XR806LowPowerPolicy::OTA_BUSY)) != 0;
       const bool wake_matches_mcu = controller != nullptr && controller->has_wake_pin() &&
                                     controller->requires_external_sync() &&
                                     controller->wake_pin() == this->lp_product_.wake_gpio;
-      const bool accepted = wake_matches_mcu && this->lp_bridge_registered_ &&
-                            this->lp_standby_.accept_request(
-                                this->lp_product_.sleep_mode == 1,
-                                this->low_power_ready_for_sleep_(true),
-                                this->parent_ != nullptr && this->parent_->is_connected(), !owner_veto);
+      const bool accepted =
+          wake_matches_mcu && this->lp_bridge_registered_ &&
+          this->lp_standby_.accept_request(this->lp_product_.sleep_mode == 1, this->low_power_ready_for_sleep_(true),
+                                           this->parent_ != nullptr && this->parent_->is_connected(), !owner_veto);
       if (accepted) {
         flags = 0x00;
       } else if (ota_veto) {
