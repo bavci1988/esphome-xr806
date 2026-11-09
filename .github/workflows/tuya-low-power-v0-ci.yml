@@ -78,4 +78,3 @@ jobs:
           git clone --quiet --filter=blob:none https://github.com/bblanchon/ArduinoJson.git /tmp/tuya-arduinojson
           git -C /tmp/tuya-arduinojson checkout --quiet 77771d3c07668e01d8f52acb03910c1110bb373f
           g++ -std=gnu++20 -fsyntax-only -Wall -Wextra             -I/tmp/tuya-arduinojson/src -I.             esphome/components/tuya/tuya.cpp             esphome/components/tuya/tuya_low_power_v0.cpp
-
