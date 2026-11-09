@@ -72,6 +72,7 @@ class APIServer final : public Component
   void dump_config() override;
   void on_shutdown() override;
 #ifdef USE_XR806_STANDBY_CONTROLLER
+  bool can_pause_for_standby() const override;
   bool pause_for_standby() override;
   void cancel_standby_pause() override;
   void resume_after_standby() override;
