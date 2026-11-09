@@ -321,6 +321,12 @@ void Tuya::process_low_power_queue_() {
     this->lp_v0_.command_timeout();
     this->lp_network_status_ = 0xFF;
     this->invalidate_low_power_mode_epoch_();
+    if (product_query) {
+      // A first CMD01 can time out before any product epoch exists. The
+      // existing invalidate helper only schedules re-query once a product
+      // was previously received; explicitly start bounded bootstrap retry.
+      this->lp_product_retry_.begin(now);
+    }
     ESP_LOGW(LP_TAG, "MCU command ACK timeout (product=%s); quarantining writes until full resync",
              YESNO(product_query));
     // A late ACK cannot be distinguished from one for a subsequent write.
