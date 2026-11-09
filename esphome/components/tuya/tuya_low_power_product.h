@@ -17,7 +17,7 @@ struct TuyaLowPowerProductInfo {
   int sleep_mode{-1};    // sm: 1 standby request, 0 hibernation request
   bool parsed{false};
 
-  static bool find_key_(const std::string &s, const char *key, size_t &value) {
+  static bool find_key(const std::string &s, const char *key, size_t &value) {
     const std::string needle = std::string("\"") + key + "\"";
     const size_t pos = s.find(needle);
     if (pos == std::string::npos)
@@ -25,18 +25,20 @@ struct TuyaLowPowerProductInfo {
     size_t i = pos + needle.size();
     while (i < s.size() && (s[i] == ' ' || s[i] == '\t'))
       ++i;
-    if (i >= s.size() || s[i++] != ':')
+    if (i >= s.size() || s[i] != ':')
       return false;
+    ++i;
     while (i < s.size() && (s[i] == ' ' || s[i] == '\t'))
       ++i;
     value = i;
     return i < s.size();
   }
 
-  static bool get_string_(const std::string &s, const char *key, std::string &value) {
+  static bool get_string(const std::string &s, const char *key, std::string &value) {
     size_t i = 0;
-    if (!find_key_(s, key, i) || s[i++] != '"')
+    if (!find_key(s, key, i) || s[i] != '"')
       return false;
+    ++i;
     const size_t begin = i;
     while (i < s.size() && s[i] != '"') {
       if (s[i] == '\\' || static_cast<unsigned char>(s[i]) < 32)
@@ -49,9 +51,9 @@ struct TuyaLowPowerProductInfo {
     return true;
   }
 
-  static bool get_integer_(const std::string &s, const char *key, int &value) {
+  static bool get_integer(const std::string &s, const char *key, int &value) {
     size_t i = 0;
-    if (!find_key_(s, key, i) || !std::isdigit(static_cast<unsigned char>(s[i])))
+    if (!find_key(s, key, i) || !std::isdigit(static_cast<unsigned char>(s[i])))
       return false;
     unsigned n = 0;
     while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
@@ -70,10 +72,10 @@ struct TuyaLowPowerProductInfo {
     const std::string s(reinterpret_cast<const char *>(data), len);
     if (s.front() != '{' || s.back() != '}')
       return false;
-    parsed = get_string_(s, "p", pid) && get_string_(s, "v", version) &&
-             get_integer_(s, "wk", wake_gpio) &&
-             get_integer_(s, "mwk", mcu_wake_gpio) &&
-             get_integer_(s, "sm", sleep_mode) &&
+    parsed = get_string(s, "p", pid) && get_string(s, "v", version) &&
+             get_integer(s, "wk", wake_gpio) &&
+             get_integer(s, "mwk", mcu_wake_gpio) &&
+             get_integer(s, "sm", sleep_mode) &&
              sleep_mode <= 1;
     return parsed;
   }
