@@ -1,0 +1,70 @@
+name: XR806 one-time branch consolidation
+on:
+  push:
+    branches: [dev]
+    paths: ['.github/workflows/xr806-branch-cleanup-once.yml']
+permissions:
+  contents: write
+jobs:
+  archive-and-delete:
+    if: github.repository == 'bavci1988/esphome-xr806'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Archive exact branches as tags before deletion
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.parse, urllib.error
+          repo = "bavci1988/esphome-xr806"
+          expected = {
+            "feature/trv16-re-sleep-window-recovery": "ceb08fe3d1a39079c31628df9632a05dc2414863",
+            "feature/xr806-stage7d-race-hardening": "1f7898c86c3f8b297577760dc73e9f8ccdfb3c70",
+            "feature/xr806-stage8-concurrency-lifecycle": "d7337de73b912f48bb457fc9aae20cf30ff0784a",
+            "feature/xr806-stage8-race-hardening": "ad72509e8590fddd1cc3f1b47c968556e4089345",
+            "feature/xr806-standby-race-arbiter": "76d36171910d8c68c6e0d0d3950718f0f9d44e0f",
+            "feature/xr806-tuya-standby-bridge": "169f88134100b7778744e5672f16e35648f5b0dc",
+            "stage7b/standby-wakeup": "850cb0552a62e76d362c3ed342a4f7b2d9ec74c1"
+          }
+          token = os.environ["GH_TOKEN"]
+          def call(method, route, body=None):
+              url = "https://api.github.com/repos/" + repo + "/" + route
+              data = None if body is None else json.dumps(body).encode()
+              req = urllib.request.Request(url, data=data, method=method, headers={
+                  "Authorization": "Bearer " + token,
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "Content-Type": "application/json",
+              })
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      raw = response.read()
+                      return json.loads(raw) if raw else None
+              except urllib.error.HTTPError as error:
+                  if error.code == 404 and method == "GET":
+                      return None
+                  raise RuntimeError(f"GitHub {method} {route} HTTP {error.code}: {error.read().decode()[:350]}") from error
+          for branch, sha in expected.items():
+              encoded = urllib.parse.quote(branch, safe="/")
+              head = call("GET", "git/ref/heads/" + encoded)
+              if head is None:
+                  print("Already absent:", branch)
+                  continue
+              actual = head["object"]["sha"]
+              if actual != sha:
+                  raise SystemExit(f"Ref changed: {branch} ({actual} != {sha}); deletion refused")
+              tag = "archive/pre-consolidation-20261109/" + branch.replace("/", "-")
+              tagroute = "git/ref/tags/" + urllib.parse.quote(tag, safe="/")
+              existing = call("GET", tagroute)
+              if existing is None:
+                  call("POST", "git/refs", {"ref": "refs/tags/" + tag, "sha": sha})
+              verified = call("GET", tagroute)
+              if verified is None or verified["object"]["sha"] != sha:
+                  raise SystemExit(f"Missing or mismatched backup tag: {tag}")
+              print("Archived:", branch, "at", tag)
+              call("DELETE", "git/refs/heads/" + encoded)
+              if call("GET", "git/ref/heads/" + encoded) is not None:
+                  raise SystemExit(f"Branch deletion not confirmed: {branch}")
+              print("Deleted:", branch)
+          print("All allowlisted development branches archived/deleted; default branch untouched.")
+          PY
