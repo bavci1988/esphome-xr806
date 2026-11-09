@@ -183,6 +183,7 @@ class Tuya final : public Component,
   void poll_low_power_autobaud_();
   void send_low_power_product_query_(bool direct_probe);
   void process_low_power_queue_();
+  void schedule_low_power_resync_();
   void poll_low_power_product_recovery_();
   void invalidate_low_power_mode_epoch_();
   bool low_power_ready_for_sleep_(bool in_cmd38_handler = false) const;
@@ -234,6 +235,8 @@ class Tuya final : public Component,
   uint32_t lp_mode_requery_after_ms_{0};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_last_resync_ms_{0};
+  uint32_t lp_resync_due_ms_{0};
+  bool lp_resync_pending_{false};
   TuyaLowPowerStandbyState lp_standby_{};
   bool lp_bridge_registered_{false};
   uint8_t lp_network_status_{0xFF};
