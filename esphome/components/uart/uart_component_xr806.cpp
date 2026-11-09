@@ -61,6 +61,7 @@ void XR806UARTComponent::setup() {
   this->initialized_ = true;
 
 #ifdef USE_XR806_LOWPOWER
+  this->uart_pm_wakelock_.name = const_cast<char *>("esphome.xr806.uart0");
   this->note_uart_activity_();
 #endif
   ESP_LOGI(TAG, "UART0 initialized: %u baud",
@@ -86,6 +87,12 @@ bool XR806UARTComponent::reconfigure_baud_rate(uint32_t baud_rate) {
     ESP_LOGE(TAG, "UART0 baud change refused: untransmitted TX data");
     return false;
   }
+#ifdef USE_XR806_LOWPOWER
+  // Claim the native SDK PM wakelock BEFORE changing a live UART clock.
+  this->note_uart_activity_();
+  if (this->tx_fault_)
+    return false;
+#endif
   if (baud_rate != this->baud_rate_) {
     UART_InitParam cfg{};
     cfg.baudRate = baud_rate;
@@ -131,8 +138,17 @@ void XR806UARTComponent::check_logger_conflict() {
 #ifdef USE_XR806_LOWPOWER
 
 void XR806UARTComponent::note_uart_activity_() {
-  this->last_uart_activity_ms_ = millis();
   esphome::xr806::lowpower_policy().set_uart_idle(false);
+  if (!this->uart_pm_wakelock_held_) {
+    if (pm_wake_lock(&this->uart_pm_wakelock_) != 0) {
+      this->tx_fault_ = true;
+      ESP_LOGE(TAG, "Unable to claim native UART0 PM wakelock; standby disabled");
+      this->mark_failed();
+      return;
+    }
+    this->uart_pm_wakelock_held_ = true;
+  }
+  this->last_uart_activity_ms_ = millis();
 }
 
 void XR806UARTComponent::update_uart_idle_() {
@@ -144,6 +160,12 @@ void XR806UARTComponent::update_uart_idle_() {
   const bool buffer_empty = this->rx_count_ == 0;
   const bool rx_fifo_empty = !HAL_UART_IsRxReady(this->uart_);
   const bool tx_completed_on_wire = this->tx_hardware_idle_();
+  const uint32_t line_status = this->uart_->LINE_STATUS;
+  if (line_status & (UART_FIFO_ERROR_BIT | UART_FRAME_ERROR_BIT | UART_PARITY_ERROR_BIT |
+                     UART_OVERRUN_ERROR_BIT)) {
+    this->rx_overflow_fault_ = true;
+    ESP_LOGE(TAG, "UART0 line-status fault 0x%02lx; PM blocked", static_cast<unsigned long>(line_status));
+  }
   const bool peripheral_idle = (this->uart_->STATUS & UART_BUSY_BIT) == 0;
 
   const uint32_t elapsed =
@@ -158,7 +180,18 @@ void XR806UARTComponent::update_uart_idle_() {
       !this->tx_fault_ && !this->rx_overflow_fault_ &&
       elapsed >= UART_IDLE_GUARD_MS;
 
-  esphome::xr806::lowpower_policy().set_uart_idle(idle);
+  if (idle && this->uart_pm_wakelock_held_) {
+    if (pm_wake_unlock(&this->uart_pm_wakelock_) != 0) {
+      this->tx_fault_ = true;
+      ESP_LOGE(TAG, "UART0 native PM wakelock release failed; PM blocked");
+      esphome::xr806::lowpower_policy().set_uart_idle(false);
+      return;
+    }
+    this->uart_pm_wakelock_held_ = false;
+  } else if (!idle && !this->uart_pm_wakelock_held_) {
+    this->note_uart_activity_();
+  }
+  esphome::xr806::lowpower_policy().set_uart_idle(idle && !this->tx_fault_);
 }
 
 #endif  // USE_XR806_LOWPOWER
