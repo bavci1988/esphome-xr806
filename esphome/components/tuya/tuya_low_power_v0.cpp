@@ -111,8 +111,8 @@ void Tuya::poll_low_power_product_recovery_() {
   }
   const uint32_t now = millis();
   // Never inject an autonomous CMD01 during a report burst or a write ACK.
-  const bool idle = !this->lp_v0_.busy() && this->command_queue_.empty() &&
-                    !this->expected_response_.has_value() && this->rx_message_.empty();
+  const bool idle = !this->lp_v0_.busy() && this->command_queue_.empty() && !this->expected_response_.has_value() &&
+                    this->rx_message_.empty();
   if (this->lp_product_retry_.active()) {
     if (!this->lp_product_retry_.due(now) || !idle) {
       return;
@@ -131,8 +131,7 @@ void Tuya::poll_low_power_product_recovery_() {
     return;
   }
 
-  if (this->lp_mode_requery_pending_ && idle &&
-      static_cast<int32_t>(now - this->lp_mode_requery_after_ms_) >= 0) {
+  if (this->lp_mode_requery_pending_ && idle && static_cast<int32_t>(now - this->lp_mode_requery_after_ms_) >= 0) {
     this->lp_mode_requery_pending_ = false;
     // Unlike original cached sm, our MCU component can revalidate a new
     // product epoch without resetting the generic XR806 platform.
@@ -146,8 +145,8 @@ bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
   const bool guard_elapsed = static_cast<int32_t>(millis() - this->lp_wake_guard_until_) >= 0;
   const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
   return this->lp_v0_.ready() && this->lp_sleep_window_.standby_mode_stable() && !this->lp_product_retry_.active() &&
-         guard_elapsed && baud_locked && this->parent_ != nullptr &&
-         this->parent_->is_connected() && !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
+         guard_elapsed && baud_locked && this->parent_ != nullptr && this->parent_->is_connected() &&
+         !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
          !this->expected_response_.has_value() && (in_cmd38_handler || this->rx_message_.empty());
 }
 
