@@ -466,6 +466,7 @@ CONFIG_SCHEMA = cv.All(
                 host=4,  # Abundant resources
                 ln882x=4,  # Moderate RAM
                 nrf52=4,  # ~256KB RAM, BSD sockets
+                xr806=1,  # Battery-powered XRadio MCU, lwIP sockets
             ): cv.int_range(min=1, max=10),
             cv.SplitDefault(
                 CONF_MAX_CONNECTIONS,
@@ -477,6 +478,7 @@ CONFIG_SCHEMA = cv.All(
                 host=8,  # Abundant resources
                 ln882x=5,  # Moderate RAM
                 nrf52=4,  # ~256KB RAM, BSD sockets, Thread (single HA controller)
+                xr806=2,  # Bound native API RAM use on WXU
             ): cv.int_range(min=1, max=20),
             # Max queued messages per connection, and 2 KB of backlog per slot up
             # to 64 KB (a lone message is exempt), before the connection is dropped
@@ -490,6 +492,7 @@ CONFIG_SCHEMA = cv.All(
                 nrf52=8,  # Moderate RAM
                 rtl87xx=8,  # Moderate RAM
                 host=16,  # Abundant resources
+                xr806=4,  # Bound message backlog on WXU
                 ln882x=8,  # Moderate RAM
             ): cv.int_range(min=1, max=64),
         }
