@@ -22,7 +22,7 @@ jobs:
       - name: Test packager and corrupted or oversized images
         run: |
           python3 -m unittest discover -s tests/xr806 -p test_make_ota_xz.py -v
-          python3 -m unittest discover -s tests/xr806 -p test_ota_factory_migration.py -v
+          python3 -m unittest discover -s tests/xr806 -p test_ota_boot_stamp.py -v
       - name: Compile and execute flash-admission C++20 tests
         run: |
           g++ -std=c++20 -Wall -Wextra -Werror -I. tests/xr806/ota_writer_part_vi_test.cpp -o /tmp/xr806-ota-test
