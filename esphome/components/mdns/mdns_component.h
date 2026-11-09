@@ -76,7 +76,8 @@ struct MDNSService {
 
 class MDNSComponent final : public Component
 #ifdef USE_XR806_STANDBY_CONTROLLER
-    , public xr806::XR806StandbyParticipant
+    ,
+                            public xr806::XR806StandbyParticipant
 #endif
 #ifdef USE_MDNS_WIFI_LISTENER
     ,
