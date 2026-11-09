@@ -77,6 +77,20 @@ bool XR806UARTComponent::tx_hardware_idle_() const {
          (this->uart_->LINE_STATUS & UART_TX_EMPTY_BIT) != 0;
 }
 
+void XR806UARTComponent::set_baud_probe_mode(bool probing) {
+  if (this->baud_probe_mode_ == probing)
+    return;
+  this->baud_probe_mode_ = probing;
+  if (!probing && this->initialized_ && this->uart_ != nullptr) {
+    // Read line status to clear wrong-rate receive errors after a
+    // checksum-valid CMD01 response. The protocol owns baud selection.
+    (void) this->uart_->LINE_STATUS;
+  }
+#ifdef USE_XR806_LOWPOWER
+  this->note_uart_activity_();
+#endif
+}
+
 bool XR806UARTComponent::reconfigure_baud_rate(uint32_t baud_rate) {
   if (!this->initialized_ || this->uart_ == nullptr || this->uart_id_ != 0 ||
       this->tx_fault_ || this->rx_overflow_fault_)
@@ -163,8 +177,12 @@ void XR806UARTComponent::update_uart_idle_() {
   const uint32_t line_status = this->uart_->LINE_STATUS;
   if (line_status & (UART_FIFO_ERROR_BIT | UART_FRAME_ERROR_BIT | UART_PARITY_ERROR_BIT |
                      UART_OVERRUN_ERROR_BIT)) {
-    this->rx_overflow_fault_ = true;
-    ESP_LOGE(TAG, "UART0 line-status fault 0x%02lx; PM blocked", static_cast<unsigned long>(line_status));
+    if (this->baud_probe_mode_) {
+      ++this->ignored_probe_line_errors_;  // Invalid baud candidates are expected.
+    } else if (!this->rx_overflow_fault_) {
+      this->rx_overflow_fault_ = true;
+      ESP_LOGE(TAG, "UART0 line-status fault 0x%02lx; PM blocked", static_cast<unsigned long>(line_status));
+    }
   }
   const bool peripheral_idle = (this->uart_->STATUS & UART_BUSY_BIT) == 0;
 
@@ -177,7 +195,7 @@ void XR806UARTComponent::update_uart_idle_() {
       rx_fifo_empty &&
       tx_completed_on_wire &&
       peripheral_idle &&
-      !this->tx_fault_ && !this->rx_overflow_fault_ &&
+      !this->tx_fault_ && !this->rx_overflow_fault_ && !this->baud_probe_mode_ &&
       elapsed >= UART_IDLE_GUARD_MS;
 
   if (idle && this->uart_pm_wakelock_held_) {
@@ -218,8 +236,10 @@ void XR806UARTComponent::fill_rx_() {
 
     if (this->rx_count_ == this->rx_buffer_.size()) {
       ++this->rx_overflows_;
-      this->rx_overflow_fault_ = true;
-      // A truncated packet must never be treated as a synchronized MCU.
+      if (!this->baud_probe_mode_)
+        this->rx_overflow_fault_ = true;
+      // A truncated packet is never synchronized. During physical baud
+      // probing the wrong-rate byte stream can legitimately overflow RX.
       this->rx_head_ = this->rx_tail_ = this->rx_count_ = 0;
 #ifdef USE_XR806_LOWPOWER
       this->note_uart_activity_();  // Sticky fault will keep PM blocked.
