@@ -27,7 +27,7 @@ XR806_ESPHOME_OBJECTS := $(addprefix $(XR806_OBJDIR)/, \
     wake_freertos.o \
     main.o \
     runtime.o \
-    xr_wifi_component.o \
+    xr_wifi_standby.o \
     xr_socket_compat.o \
     xr_socket_core.o \
     xr_socket_lwip.o)
@@ -74,7 +74,6 @@ XR806_CXXFLAGS := \
     -I$(XR806_SRC) \
     -I$(XR806_REPO_ROOT) \
     -include $(XR806_DEFINES) \
-    -include $(XR806_SRC)/esphome/components/xr806/network_compat.h \
     -include $(XR806_SRC)/esphome/components/xr806/socket_compat.h \
     -include $(XR806_SRC)/esphome/components/xr806/api_compat.h \
     -I$(XR806_ARDUINOJSON_SRC) \
@@ -113,7 +112,7 @@ $(eval $(call XR806_COMPILE_CPP,hal,$(XR806_SRC)/esphome/components/xr806/hal.cp
 $(eval $(call XR806_COMPILE_CPP,wake_freertos,$(XR806_SRC)/esphome/core/wake/wake_freertos.cpp))
 $(eval $(call XR806_COMPILE_CPP,main,$(XR806_SRC)/main.cpp))
 $(eval $(call XR806_COMPILE_CPP,runtime,$(XR806_SRC)/esphome/components/xr806/runtime.cpp))
-$(eval $(call XR806_COMPILE_CPP,xr_wifi_component,$(XR806_SRC)/esphome/components/xr806/wifi_component.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_wifi_standby,$(XR806_SRC)/esphome/components/xr806/wifi_standby.cpp))
 
 $(eval $(call XR806_COMPILE_CPP,xr_socket_compat,$(XR806_SRC)/esphome/components/xr806/socket_compat.cpp))
 
@@ -300,11 +299,6 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_network_status.o
 $(eval $(call XR806_COMPILE_CPP,xr_network_status,$(XR806_SRC)/esphome/components/xr806/network_status.cpp))
 
 
-# XR806_NETWORK_BRIDGE_V1
-# The actual implementation compiles only when USE_XR806_NETWORK_BRIDGE is set.
-XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_network_bridge.o
-$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_network_bridge.o
-$(eval $(call XR806_COMPILE_CPP,xr_network_bridge,$(XR806_SRC)/esphome/components/xr806/network_bridge.cpp))
 
 
 # XR806_API_CORE_LINK_V1
