@@ -5,6 +5,7 @@
 
 #include "esphome/core/component.h"
 #include "standby_coordinator_state.h"
+#include "lowpower_policy.h"
 
 namespace esphome::xr806 {
 
@@ -29,6 +30,7 @@ class XR806StandbyParticipant {
   virtual void standby_preflight(bool requested) {}
   // Only the UART/MCU participant can satisfy the mandatory transport owner.
   virtual bool owns_uart() const { return false; }
+  virtual uint32_t owned_services() const { return 0; }
   // A connected network owner can veto before acknowledging MCU CMD38.
   virtual bool may_quiesce() const { return true; }
   virtual bool prepare_for_standby() = 0;
@@ -96,6 +98,8 @@ class XR806StandbyController final : public Component {
   bool external_sync_required_{false};
   bool require_uart_participant_{false};
   bool busy_{false};
+  uint32_t request_since_ms_{0};
+  static constexpr uint32_t PREFLIGHT_TIMEOUT_MS = 10000;
 };
 
 // nullptr when the production controller is not configured.
