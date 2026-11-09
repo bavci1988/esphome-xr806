@@ -48,7 +48,7 @@ struct Backend {
   // Published by setup() before any tcpip_callback runs; immutable afterward.
   std::string hostname;
   std::string service_type;
-  enum mdns_sd_proto protocol{DNSSD_PROTO_TCP};
+  enum mdns_sd_proto protocol { DNSSD_PROTO_TCP };
   uint16_t port{0};
   std::vector<std::string> txt;
   bool configured{false};
@@ -72,8 +72,7 @@ Backend &backend() {
 void append_txt(struct mdns_service *service, void *arg) {
   const auto *state = static_cast<const Backend *>(arg);
   for (const auto &entry : state->txt) {
-    const err_t err = mdns_resp_add_service_txtitem(
-        service, entry.data(), static_cast<u8_t>(entry.size()));
+    const err_t err = mdns_resp_add_service_txtitem(service, entry.data(), static_cast<u8_t>(entry.size()));
     if (err != ERR_OK) {
       ESP_LOGE(TAG, "Failed to build mDNS TXT entry (error %d)", static_cast<int>(err));
       break;
@@ -115,8 +114,7 @@ void refresh_mdns(void *context) {
 
   struct netif *iface = wlan_netif_get(WLAN_MODE_STA);
   const bool connected =
-      iface != nullptr && netif_is_up(iface) && netif_is_link_up(iface) &&
-      !ip4_addr_isany_val(*netif_ip4_addr(iface));
+      iface != nullptr && netif_is_up(iface) && netif_is_link_up(iface) && !ip4_addr_isany_val(*netif_ip4_addr(iface));
 
   if (!connected) {
     remove_netif(state);
@@ -143,9 +141,8 @@ void refresh_mdns(void *context) {
     return;
   }
 
-  const s8_t service = mdns_resp_add_service(
-      iface, state->hostname.c_str(), state->service_type.c_str(),
-      state->protocol, state->port, MDNS_TTL_SECONDS, append_txt, state);
+  const s8_t service = mdns_resp_add_service(iface, state->hostname.c_str(), state->service_type.c_str(),
+                                             state->protocol, state->port, MDNS_TTL_SECONDS, append_txt, state);
   if (service < 0) {
     ESP_LOGE(TAG, "mDNS service registration failed (%d)", static_cast<int>(service));
     mdns_resp_remove_netif(iface);
@@ -155,13 +152,11 @@ void refresh_mdns(void *context) {
   state->registered_netif = iface;
   state->last_ipv4 = ipv4;
   state->failures = 0;
-  ESP_LOGI(TAG, "mDNS: %s.local and %s registered on port %u",
-           state->hostname.c_str(), state->service_type.c_str(), state->port);
+  ESP_LOGI(TAG, "mDNS: %s.local and %s registered on port %u", state->hostname.c_str(), state->service_type.c_str(),
+           state->port);
 }
 
-void shutdown_mdns(void *context) {
-  remove_netif(static_cast<Backend *>(context));
-}
+void shutdown_mdns(void *context) { remove_netif(static_cast<Backend *>(context)); }
 
 void request_refresh() {
   const err_t err = tcpip_callback(refresh_mdns, &backend());
@@ -169,12 +164,10 @@ void request_refresh() {
     ESP_LOGW(TAG, "Cannot schedule mDNS refresh (%d)", static_cast<int>(err));
 }
 
-void register_xr806(MDNSComponent *component,
-                    StaticVector<MDNSService, MDNS_SERVICE_COUNT> &services) {
+void register_xr806(MDNSComponent *component, StaticVector<MDNSService, MDNS_SERVICE_COUNT> &services) {
   Backend &state = backend();
   if (services.size() != 1) {
-    ESP_LOGE(TAG, "XR806 mDNS expects one service, got %u",
-             static_cast<unsigned>(services.size()));
+    ESP_LOGE(TAG, "XR806 mDNS expects one service, got %u", static_cast<unsigned>(services.size()));
     component->mark_failed();
     return;
   }
@@ -184,8 +177,7 @@ void register_xr806(MDNSComponent *component,
   const char *protocol_name = MDNS_STR_ARG(entry.proto);
   const auto &hostname = App.get_name();
 
-  if (hostname.empty() || hostname.size() > MDNS_LABEL_MAXLEN ||
-      service_name == nullptr || service_name[0] != '_' ||
+  if (hostname.empty() || hostname.size() > MDNS_LABEL_MAXLEN || service_name == nullptr || service_name[0] != '_' ||
       std::strlen(service_name) > MDNS_LABEL_MAXLEN) {
     ESP_LOGE(TAG, "Invalid XR806 mDNS hostname or service type");
     component->mark_failed();
@@ -220,8 +212,7 @@ void register_xr806(MDNSComponent *component,
     }
 
     std::string txt = std::string(key) + "=" + value;
-    if (txt.size() > MAX_TXT_WIRE_BYTES ||
-        txt_bytes + 1 + txt.size() > MAX_TXT_WIRE_BYTES) {
+    if (txt.size() > MAX_TXT_WIRE_BYTES || txt_bytes + 1 + txt.size() > MAX_TXT_WIRE_BYTES) {
       ESP_LOGE(TAG, "XR806 mDNS TXT exceeds vendor 256-byte buffer");
       component->mark_failed();
       return;
