@@ -312,8 +312,12 @@ void Tuya::process_low_power_queue_() {
 
   // Standard Tuya's 300 ms retry logic is incompatible with the HC32's
   // delayed CMD05 report. ACK and report have separate timeouts.
+  // The session gate, not an optional ESPHome command field, owns the
+  // physical in-flight transaction. It can time out after a reset or an
+  // asynchronous recovery callback has already cleared expected_response_.
+  const bool product_in_flight = this->lp_wire_.kind() == TuyaLowPowerWireTransactions::Kind::PRODUCT;
   if (this->lp_wire_.expire(now)) {
-    const bool product_query = *this->expected_response_ == TuyaCommandType::PRODUCT_QUERY;
+    const bool product_query = product_in_flight;
     this->expected_response_.reset();
     if (!this->command_queue_.empty())
       this->command_queue_.erase(this->command_queue_.begin());
