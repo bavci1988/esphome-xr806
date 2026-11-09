@@ -86,6 +86,7 @@ class ESPHomeOTAComponent final : public ota::OTAComponent
   float get_setup_priority() const override;
   void loop() override;
 #ifdef USE_XR806_STANDBY_CONTROLLER
+  bool can_pause_for_standby() const override;
   bool pause_for_standby() override;
   void cancel_standby_pause() override;
   void resume_after_standby() override;
