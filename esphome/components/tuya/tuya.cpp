@@ -974,6 +974,11 @@ void Tuya::set_string_datapoint_value_(uint8_t datapoint_id, const std::string &
 
 void Tuya::send_datapoint_command_(uint8_t datapoint_id, TuyaDatapointType datapoint_type, std::vector<uint8_t> data) {
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    if (!this->lp_v0_.ready() || !this->lp_wire_.idle() || this->lp_standby_.requested()) {
+      ESP_LOGW(TAG, "Refusing DP%u write before MCU synchronization or while another transaction owns UART",
+               static_cast<unsigned>(datapoint_id));
+      return;
+    }
     // The original MCU DP102 handler blindly reads four bytes even for
     // RAW1 and can consume checksum/buffer memory. Reject unsafe writes
     // BEFORE serialization, regardless of whether a higher-level entity
