@@ -47,6 +47,26 @@ the generic XR806 controller only after protocol-level checks.
    does not impersonate GPIO wake; further standby is blocked pending
    verified MCU recovery.
 
+## UART physical baud-scan exception
+
+`tuya.low_power_v0` owns the 9600/115200 CMD01 scanner. On probe
+start it asks the XR806 UART0 **transport** to enable
+`set_baud_probe_mode(true)`; on a checksum-valid CMD01 lock it
+disables this window. While the scanner is active, receiving framing
+errors or a wrong-baud RX ring overflow is an **expected candidate
+mismatch**, not a permanently faulted UART. Crucially:
+
+- UART and MCU PM blockers remain asserted for the whole scan;
+- TX errors, UART clock configuration errors and PM wakelock failures
+  are **never** ignored by the probe exception;
+- After lock, framing/parity/overrun errors and ring overflow again
+  latch the transport fault and block standby;
+- A valid CMD01 *packet* locks baud, while product PID/wk/mwk/sm
+  validation separately determines whether the MCU is supported.
+
+The original HC32 baud rate and the PA20/PB04 electrical levels are
+still not proven by this software-only change.
+
 ## PB04 wake output (experimental, off by default)
 
 The board's ordinary GPIO schema conservatively reserves PB02..PB07
