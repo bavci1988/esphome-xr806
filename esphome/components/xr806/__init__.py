@@ -21,6 +21,7 @@ CONF_WLAN_SMOKE = "wlan_smoke"
 CONF_XR806_WIFI = "wifi"
 CONF_XR806_WLAN_SETTINGS = "wlan"
 CONF_NETWORK_BRIDGE = "network_bridge"
+CONF_NETWORK_SUSPEND = "network_suspend"
 CONF_DTIM = "dtim"
 CONF_LISTEN_INTERVAL = "listen_interval"
 CONF_POWER_SAVE = "power_save"
@@ -81,6 +82,7 @@ XR806_WIFI_SCHEMA = cv.Schema(
         cv.Required("ssid"): cv.All(cv.string_strict, cv.Length(min=1, max=32)),
         cv.Required("password"): validate_wlan_smoke_password,
         cv.Optional(CONF_NETWORK_BRIDGE, default=False): cv.boolean,
+        cv.Optional(CONF_NETWORK_SUSPEND, default=False): cv.boolean,
         cv.Optional(CONF_POWER_SAVE, default=False): cv.boolean,
         cv.Optional(CONF_SOCKET_PROBE, default=False): cv.boolean,
         cv.Optional(CONF_SOCKET_FACADE_PROBE, default=False): cv.boolean,
@@ -150,6 +152,15 @@ def _update_core_data(config):
         raise cv.Invalid(
             "Choose either xr806.wifi or legacy xr806.wlan_smoke, not both"
         )
+    if CONF_XR806_WIFI in config and config[CONF_XR806_WIFI][CONF_NETWORK_SUSPEND]:
+        if CONF_STANDBY not in config:
+            raise cv.Invalid(
+                "xr806.wifi.network_suspend requires xr806.standby and full PM gating"
+            )
+        if config[CONF_XR806_WIFI][CONF_SOCKET_PROBE] or config[CONF_XR806_WIFI][CONF_SOCKET_FACADE_PROBE]:
+            raise cv.Invalid(
+                "xr806.wifi.network_suspend cannot share ad-hoc socket probes"
+            )
     if CONF_STANDBY in config:
         standby_cfg = config[CONF_STANDBY]
         if (CONF_WAKE_PIN in standby_cfg) != (CONF_WAKE_EDGE in standby_cfg):
@@ -307,6 +318,8 @@ async def to_code(config):
         cg.add(wlan.set_ssid(wlan_config["ssid"]))
         cg.add(wlan.set_password(wlan_config["password"]))
         cg.add(wlan.set_power_save(wlan_config[CONF_POWER_SAVE]))
+        if new_wifi and CONF_STANDBY in config:
+            cg.add(wlan.set_network_suspend(wlan_config[CONF_NETWORK_SUSPEND]))
         cg.add(wlan.set_socket_probe(wlan_config[CONF_SOCKET_PROBE]))
         cg.add(wlan.set_socket_facade_probe(wlan_config[CONF_SOCKET_FACADE_PROBE]))
         if wlan_config[CONF_SOCKET_FACADE_PROBE]:
