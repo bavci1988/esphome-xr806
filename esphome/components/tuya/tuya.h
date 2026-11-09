@@ -12,6 +12,11 @@
 #include "tuya_low_power_v0.h"
 #include "tuya_low_power_product.h"
 #include "tuya_low_power_autobaud.h"
+#include "tuya_low_power_standby_state.h"
+
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/standby_controller.h"
+#endif
 
 #ifdef USE_TIME
 #include "esphome/components/time/real_time_clock.h"
@@ -98,7 +103,11 @@ struct TuyaCommand {
   std::vector<uint8_t> payload;
 };
 
-class Tuya final : public Component, public uart::UARTDevice {
+class Tuya final : public Component, public uart::UARTDevice
+#ifdef USE_XR806_STANDBY_CONTROLLER
+                   , public xr806::XR806StandbyParticipant
+#endif
+{
  public:
   float get_setup_priority() const override { return setup_priority::LATE; }
   void setup() override;
@@ -117,6 +126,11 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool request_low_power_refresh();
   // Called by an actual XR806 PM bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  bool prepare_for_standby() override;
+  void standby_cancelled() override;
+  void standby_resumed(const xr806::XR806StandbyResume &event) override;
+#endif
   void set_string_datapoint_value(uint8_t datapoint_id, const std::string &value);
   void set_enum_datapoint_value(uint8_t datapoint_id, uint8_t value);
   void set_bitmask_datapoint_value(uint8_t datapoint_id, uint32_t value, uint8_t length);
@@ -154,7 +168,9 @@ class Tuya final : public Component, public uart::UARTDevice {
   void poll_low_power_autobaud_();
   void send_low_power_product_query_(bool direct_probe);
   void process_low_power_queue_();
-  bool low_power_ready_for_sleep_() const;
+  bool low_power_ready_for_sleep_(bool in_cmd38_handler = false) const;
+  void cancel_low_power_standby_();
+  void send_low_power_awake_notification_();
   void send_raw_command_(TuyaCommand command);
   void process_command_queue_();
   void send_command_(const TuyaCommand &command);
@@ -188,7 +204,8 @@ class Tuya final : public Component, public uart::UARTDevice {
   TuyaLowPowerProductInfo lp_product_{};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_last_resync_ms_{0};
-  bool lp_sleep_notified_{false};
+  TuyaLowPowerStandbyState lp_standby_{};
+  bool lp_bridge_registered_{false};
   uint8_t lp_network_status_{0xFF};
   TuyaInitState init_state_ = TuyaInitState::INIT_HEARTBEAT;
   bool init_failed_{false};
