@@ -1,4 +1,7 @@
 #include "ota_esphome.h"
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/lowpower_policy.h"
+#endif
 #ifdef USE_OTA_ENCRYPTION_PROVISIONED
 #include "esphome/components/api/api_server.h"
 #endif
@@ -77,6 +80,22 @@ void ESPHomeOTAComponent::setup() {
     }
   }
 #endif
+  this->start_listener_();
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (auto *controller = xr806::standby_controller(); controller != nullptr) {
+    if (!controller->register_service_owner(xr806::XR806StandbyService::OTA, this)) {
+      ESP_LOGE(TAG, "XR806 OTA standby owner registration failed; retaining veto");
+    }
+  }
+  xr806::lowpower_policy().set_ota_idle(false);
+#endif
+
+#ifdef USE_OTA_PARTITIONS
+  ota::get_running_app_position(this->running_app_offset_, this->running_app_size_);
+#endif
+}
+
+void ESPHomeOTAComponent::start_listener_() {
   this->server_ = socket::socket_ip_loop_monitored(SOCK_STREAM, 0).release();  // monitored for incoming connections
   if (this->server_ == nullptr) {
     this->server_failed_(LOG_STR("creation"));
@@ -122,10 +141,42 @@ void ESPHomeOTAComponent::setup() {
   esphome_fast_select_set_ota_listener_sock(esphome_lwip_get_sock(this->server_->get_fd()));
 #endif
 
-#ifdef USE_OTA_PARTITIONS
-  ota::get_running_app_position(this->running_app_offset_, this->running_app_size_);
-#endif
 }
+
+#ifdef USE_XR806_STANDBY_CONTROLLER
+bool ESPHomeOTAComponent::pause_for_standby() {
+  if (this->standby_paused_) {
+    return true;
+  }
+  // Neither an OTA transfer nor an accepted/incoming connection may be
+  // discarded. The server listening socket is drained, never an OTA client.
+  if (this->client_ != nullptr || this->backend_ != nullptr || this->server_ == nullptr ||
+      this->server_->ready() || this->state_ != OTAState::IDLE) {
+    return false;
+  }
+  xr806::lowpower_policy().set_ota_idle(false);
+  delete this->server_;
+  this->server_ = nullptr;
+  this->standby_paused_ = true;
+#ifdef USE_LWIP_FAST_SELECT
+  esphome_fast_select_set_ota_listener_sock(nullptr);
+#endif
+  xr806::lowpower_policy().set_ota_idle(true);
+  return true;
+}
+
+void ESPHomeOTAComponent::cancel_standby_pause() { this->resume_after_standby(); }
+
+void ESPHomeOTAComponent::resume_after_standby() {
+  if (!this->standby_paused_) {
+    return;
+  }
+  xr806::lowpower_policy().set_ota_idle(false);
+  this->standby_paused_ = false;
+  this->start_listener_();
+  this->enable_loop();
+}
+#endif  // USE_XR806_STANDBY_CONTROLLER
 
 void ESPHomeOTAComponent::dump_config() {
   char addr_buf[network::USE_ADDRESS_BUFFER_SIZE];
@@ -186,6 +237,11 @@ void ESPHomeOTAComponent::dump_config() {
 }
 
 void ESPHomeOTAComponent::loop() {
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (this->standby_paused_) {
+    return;
+  }
+#endif
   // Self-disable idle loop where a wake path re-enables on listener readiness
   // (fast-select, raw-TCP accept_fn_). Host BSD select doesn't, so stay enabled.
   if (this->client_ == nullptr && !this->server_->ready()) {
