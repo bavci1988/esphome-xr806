@@ -16,6 +16,11 @@ on:
       - "tests/yaml/tuya_low_power_*.yaml"
       - "tests/yaml/xr806_ota_readonly_diagnostic.yaml"
       - "tests/yaml/xr806_ota_readonly_wifi_v0.yaml"
+      - "tests/yaml/xr806_ota_transport_noerase.yaml"
+      - "esphome/components/ota/ota_backend_xr806.cpp"
+      - "esphome/components/ota/ota_backend_xr806.h"
+      - "esphome/components/ota/ota_backend_factory.h"
+      - "esphome/components/esphome/ota/__init__.py"
   pull_request:
     # PR #12 is stacked on the upstream refactor branch until #13 lands.
     branches: [dev, claude/serene-franklin-jgpjuw]
@@ -80,6 +85,8 @@ jobs:
           python -m esphome compile tests/yaml/tuya_low_power_v0_xr806_network_suspend.yaml --only-generate
           python -m esphome config tests/yaml/xr806_ota_readonly_diagnostic.yaml
           python -m esphome compile tests/yaml/xr806_ota_readonly_diagnostic.yaml --only-generate
+          python -m esphome config tests/yaml/xr806_ota_transport_noerase.yaml
+          python -m esphome compile tests/yaml/xr806_ota_transport_noerase.yaml --only-generate
           python -m esphome config tests/yaml/xr806_ota_readonly_wifi_v0.yaml
           python -m esphome compile tests/yaml/xr806_ota_readonly_wifi_v0.yaml --only-generate
           python - <<'PY'
@@ -109,13 +116,17 @@ jobs:
             exit 1
           fi
           grep -q "requires xr806.standby" /tmp/wlan-invalid.log
-      - name: Reject unsupported XR806 OTA flash backend
+      - name: Admit XR806 OTA transport but reject flash writes in the platform backend
         run: |
-          if python -m esphome config tests/yaml/tuya_low_power_v0_xr806_ota_rejected.yaml > /tmp/ota-invalid.log 2>&1; then
-            echo "XR806 OTA unexpectedly accepted without flash backend" >&2
-            exit 1
-          fi
-          grep -q "not supported on xr806" /tmp/ota-invalid.log
+          set -euo pipefail
+          python -m esphome config tests/yaml/tuya_low_power_v0_xr806_ota_rejected.yaml
+          python -m esphome compile tests/yaml/tuya_low_power_v0_xr806_ota_rejected.yaml --only-generate
+          # Codegen acceptance is not a flash-write authorization. The backend
+          # intentionally contains no vendor OTA push or flash erase/write calls.
+          test -s esphome/components/ota/ota_backend_xr806.cpp
+          ! grep -E 'ota_push_(start|data|finish)|flash_(erase|write)\(' esphome/components/ota/ota_backend_xr806.cpp
+          grep -q 'OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION' esphome/components/ota/ota_backend_xr806.cpp
+          echo "PASS XR806 OTA transport-only YAML with no-write backend"
       - name: Reject tuya.refresh on a standard Tuya hub
         run: |
           if python -m esphome config tests/yaml/tuya_refresh_standard_rejected.yaml > /tmp/refresh-invalid.log 2>&1; then
