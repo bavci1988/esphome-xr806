@@ -29,6 +29,11 @@
 #define MD5_CTX_TYPE LT_MD5_CTX_T
 #endif
 
+#ifdef USE_XR806
+#include <mbedtls/md5.h>
+#define MD5_CTX_TYPE mbedtls_md5_context
+#endif
+
 namespace esphome::md5 {
 
 class MD5Digest final : public HashBase {
