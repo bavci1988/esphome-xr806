@@ -108,6 +108,7 @@ async def to_code(config: ConfigType) -> None:
     cg.add(cg.RawExpression(f"{web_server_base_ns}::global_web_server_base = {var}"))
 
     if CORE.is_xr806:
+        await cg.register_component(var, config)
         return
     if CORE.is_esp32:
         # Count for StaticVector in web_server_idf - matches headers added in init()
