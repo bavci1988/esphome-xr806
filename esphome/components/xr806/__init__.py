@@ -2,6 +2,7 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome.components.const import CONF_ENABLED
 from esphome.const import (
     CONF_BOARD,
     KEY_CORE,
@@ -27,7 +28,6 @@ CONF_SOCKET_PROBE = "socket_probe"
 CONF_SOCKET_FACADE_PROBE = "socket_facade_probe"
 CONF_STANDBY_TRIAL = "standby_trial"
 CONF_STANDBY = "standby"
-CONF_ENABLED = "enabled"
 CONF_QUIET_MS = "quiet_ms"
 CONF_MIN_AWAKE_MS = "min_awake_ms"
 CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
