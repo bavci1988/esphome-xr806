@@ -12,6 +12,7 @@
 #include <cstdint>
 #ifdef USE_XR806_STANDBY_CONTROLLER
 #include "esphome/components/xr806/lowpower_policy.h"
+#include "esphome/components/xr806/standby_async_epoch.h"
 #include "esphome/components/xr806/standby_controller.h"
 #endif
 #include <cstring>
@@ -53,10 +54,8 @@ struct Backend {
   std::vector<std::string> txt;
   bool configured{false};
 #ifdef USE_XR806_STANDBY_CONTROLLER
-  std::atomic<bool> suspend_requested{false};
+  xr806::XR806StandbyAsyncEpoch suspend_epoch{};
   std::atomic<bool> suspended{false};
-  // Distinguish callbacks from different preflight/cancellation epochs.
-  std::atomic<uint32_t> suspend_epoch{0};
 #endif
 
   // Owned exclusively by the SDK TCP/IP thread.
@@ -97,13 +96,12 @@ void refresh_mdns(void *context) {
   if (!state->configured)
     return;
 #ifdef USE_XR806_STANDBY_CONTROLLER
-  const uint32_t requested_epoch = state->suspend_epoch.load(std::memory_order_acquire);
-  if (state->suspend_requested.load(std::memory_order_acquire)) {
+  const uint32_t requested_epoch = state->suspend_epoch.epoch();
+  if (state->suspend_epoch.requested()) {
     // The lwIP thread owns the actual responder. A callback from an older
     // suspend epoch must never publish an idle vote for a newer request.
     remove_netif(state);
-    if (requested_epoch != state->suspend_epoch.load(std::memory_order_acquire) ||
-        !state->suspend_requested.load(std::memory_order_acquire)) {
+    if (!state->suspend_epoch.current(requested_epoch)) {
       state->suspended.store(false, std::memory_order_release);
       xr806::lowpower_policy().set_mdns_idle(false);
       return;
@@ -113,8 +111,7 @@ void refresh_mdns(void *context) {
     // A cancelling producer can race exactly between the check and vote.
     // Recheck AFTER publishing; it will either restore BUSY here or its
     // own preflight(false) will publish BUSY after this callback.
-    if (requested_epoch != state->suspend_epoch.load(std::memory_order_acquire) ||
-        !state->suspend_requested.load(std::memory_order_acquire)) {
+    if (!state->suspend_epoch.current(requested_epoch)) {
       state->suspended.store(false, std::memory_order_release);
       xr806::lowpower_policy().set_mdns_idle(false);
     }
@@ -266,15 +263,14 @@ void MDNSComponent::standby_preflight(bool requested) {
   auto &state = backend();
   if (!state.configured)
     return;
-  if (state.suspend_requested.load(std::memory_order_acquire) == requested)
+  if (state.suspend_epoch.requested() == requested)
     return;
   if (!requested) {
     // Busy must be asserted before scheduling a new multicast responder.
     xr806::lowpower_policy().set_mdns_idle(false);
     state.suspended.store(false, std::memory_order_release);
   }
-  state.suspend_requested.store(requested, std::memory_order_release);
-  state.suspend_epoch.fetch_add(1, std::memory_order_acq_rel);
+  state.suspend_epoch.request(requested);
   request_refresh();
 }
 
