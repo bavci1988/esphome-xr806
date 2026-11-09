@@ -29,7 +29,7 @@ class XR806StandbyServiceLifecycle {
   uint32_t generation() const { return generation_; }
 
   bool expired(uint32_t now) const {
-    return preparing() && static_cast<uint32_t>(now - prepared_at_) >= PREPARE_TIMEOUT_MS;
+    return (preparing() || quiesced()) && static_cast<uint32_t>(now - prepared_at_) >= PREPARE_TIMEOUT_MS;
   }
 
   bool ready(bool all_services_quiesced) {
