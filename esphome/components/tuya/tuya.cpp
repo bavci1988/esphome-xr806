@@ -138,8 +138,8 @@ void Tuya::loop() {
     }
     this->poll_low_power_product_recovery_();
     if (this->lp_v0_.expire(millis())) {
-      ESP_LOGW(TAG, "Low-power status/write report timeout; requesting state resynchronization");
-      this->lp_network_status_ = 0xFF;
+      ESP_LOGW(TAG, "Low-power status/write report timeout; discarding ambiguous queue and resynchronizing");
+      this->schedule_low_power_resync_();
     }
     this->update_low_power_sleep_lock_();
   }
@@ -724,8 +724,18 @@ void Tuya::process_command_queue_() {
 }
 
 void Tuya::send_command_(const TuyaCommand &command) {
-  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0 && this->lp_standby_.requested())
-    this->cancel_low_power_standby_();
+  if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
+    if (this->lp_standby_.requested()) {
+      this->cancel_low_power_standby_();
+    }
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    // An application-originated write invalidates even the preliminary
+    // API/OTA/mDNS/WLAN pause, before an MCU CMD38 has been accepted.
+    if (auto *controller = esphome::xr806::standby_controller(); controller != nullptr) {
+      controller->cancel_service_owners();
+    }
+#endif
+  }
   command_queue_.push_back(command);
   process_command_queue_();
 }
