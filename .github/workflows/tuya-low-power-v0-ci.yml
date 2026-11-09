@@ -1,0 +1,65 @@
+name: Tuya MCU Low-Power v0 (host tests)
+
+on:
+  push:
+    branches: [feature/tuya-low-power-v0]
+    paths:
+      - "esphome/components/tuya/**"
+      - "tests/tuya_low_power_v0_session_test.cpp"
+      - ".github/workflows/tuya-low-power-v0-ci.yml"
+      - "tests/yaml/tuya_low_power_v0_xr806.yaml"
+  pull_request:
+    branches: [dev]
+    paths:
+      - "esphome/components/tuya/**"
+      - "tests/tuya_low_power_v0_session_test.cpp"
+      - ".github/workflows/tuya-low-power-v0-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-session:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run Tuya low-power v0 state regression tests
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -Wall -Wextra -Werror -I. \
+            tests/tuya_low_power_v0_session_test.cpp \
+            -o /tmp/tuya-low-power-v0-test
+          /tmp/tuya-low-power-v0-test
+          echo "PASS Tuya Low-Power v0 host transaction state"
+
+  xr806-codegen:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ESPHome dependencies
+        run: python -m pip install -e .
+      - name: Validate native XR806 Tuya YAML
+        run: python -m esphome config tests/yaml/tuya_low_power_v0_xr806.yaml
+      - name: Generate XR806 C++ without a hardware SDK build
+        run: python -m esphome compile tests/yaml/tuya_low_power_v0_xr806.yaml --only-generate
+      - name: Syntax-check Tuya C++ against generated ESPHome headers (SDK neutral)
+        run: |
+          set -euo pipefail
+          DEFINES="$(find tests/yaml/.esphome -path "*/esphome/core/defines.h" -type f -print -quit)"
+          test -n "$DEFINES" && test -s "$DEFINES"
+          ROOT="${DEFINES%/esphome/core/defines.h}"
+          {
+            echo '#define USE_HOST'
+            sed -e '/^#define USE_XR806/d' -e '/^#define USE_LVGL/d' "$ROOT/esphome/core/defines.h"
+          } > /tmp/tuya-generated-defines.h
+          cp /tmp/tuya-generated-defines.h esphome/core/defines.h
+          git clone --quiet --filter=blob:none https://github.com/bblanchon/ArduinoJson.git /tmp/tuya-arduinojson
+          git -C /tmp/tuya-arduinojson checkout --quiet 77771d3c07668e01d8f52acb03910c1110bb373f
+          g++ -std=gnu++20 -fsyntax-only -Wall -Wextra             -I/tmp/tuya-arduinojson/src -I.             esphome/components/tuya/tuya.cpp             esphome/components/tuya/tuya_low_power_v0.cpp
+
