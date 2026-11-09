@@ -8,7 +8,12 @@
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
+#include <atomic>
 #include <cstdint>
+#ifdef USE_XR806_STANDBY_CONTROLLER
+#include "esphome/components/xr806/lowpower_policy.h"
+#include "esphome/components/xr806/standby_controller.h"
+#endif
 #include <cstring>
 #include <string>
 #include <vector>
@@ -47,6 +52,10 @@ struct Backend {
   uint16_t port{0};
   std::vector<std::string> txt;
   bool configured{false};
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  std::atomic<bool> suspend_requested{false};
+  std::atomic<bool> suspended{false};
+#endif
 
   // Owned exclusively by the SDK TCP/IP thread.
   bool initialized{false};
@@ -86,6 +95,18 @@ void refresh_mdns(void *context) {
   auto *state = static_cast<Backend *>(context);
   if (!state->configured)
     return;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (state->suspend_requested.load(std::memory_order_acquire)) {
+    // Removing the registered responder on the *lwIP thread* is the actual
+    // completion event. A scheduled callback is not proof it has drained.
+    remove_netif(state);
+    state->suspended.store(true, std::memory_order_release);
+    xr806::lowpower_policy().set_mdns_idle(true);
+    return;
+  }
+  state->suspended.store(false, std::memory_order_release);
+  xr806::lowpower_policy().set_mdns_idle(false);
+#endif
 
   if (!state->initialized) {
     mdns_resp_init();
@@ -217,10 +238,49 @@ void MDNSComponent::setup() {
   this->setup_buffers_and_register_(register_xr806);
   if (!backend().configured)
     return;
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  if (auto *controller = xr806::standby_controller(); controller != nullptr) {
+    if (!controller->register_participant(this)) {
+      ESP_LOGE(TAG, "Cannot register XR806 mDNS standby participant");
+      this->mark_failed();
+      return;
+    }
+    xr806::lowpower_policy().set_mdns_idle(false);
+  }
+#endif
 
   request_refresh();
   this->set_interval("xr806_mdns_refresh", 1000, []() { request_refresh(); });
 }
+
+#ifdef USE_XR806_STANDBY_CONTROLLER
+void MDNSComponent::standby_preflight(bool requested) {
+  auto &state = backend();
+  if (!state.configured)
+    return;
+  if (state.suspend_requested.load(std::memory_order_acquire) == requested)
+    return;
+  if (!requested) {
+    // Busy must be asserted before scheduling a new multicast responder.
+    xr806::lowpower_policy().set_mdns_idle(false);
+    state.suspended.store(false, std::memory_order_release);
+  }
+  state.suspend_requested.store(requested, std::memory_order_release);
+  request_refresh();
+}
+
+bool MDNSComponent::prepare_for_standby() {
+  return backend().suspend_requested.load(std::memory_order_acquire) &&
+         backend().suspended.load(std::memory_order_acquire);
+}
+
+void MDNSComponent::standby_cancelled() { this->standby_preflight(false); }
+
+void MDNSComponent::standby_resumed(const xr806::XR806StandbyResume &event) {
+  (void) event;
+  this->standby_preflight(false);
+}
+#endif
 
 void MDNSComponent::on_shutdown() {
   this->cancel_interval("xr806_mdns_refresh");
