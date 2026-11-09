@@ -73,11 +73,12 @@ void Tuya::poll_low_power_autobaud_() {
   this->rx_message_.clear();  // Drop a partial frame from the previous rate.
   this->lp_autobaud_.probe_sent(millis());
   this->send_low_power_product_query_(true);
-  if (this->lp_autobaud_.attempts() % 8 == 0)
+  if (this->lp_autobaud_.attempts() % 8 == 0) {
     ESP_LOGW(LP_TAG, "Still scanning MCU UART (9600/115200), %u probes",
              static_cast<unsigned>(this->lp_autobaud_.attempts()));
-  else
+  } else {
     ESP_LOGD(LP_TAG, "Autobaud CMD01 probe at %u", static_cast<unsigned>(baud));
+  }
 #else
   // Schema validation rejects auto_baud on non-XR806 targets.
   this->lp_autobaud_.stop();
