@@ -25,8 +25,9 @@ class XR806LowPowerPolicy {
   // Fail closed: initially all subsystems block standby.
   // This policy never enters standby by itself.
   void request_standby(bool requested) {
-    if (commit_active_.load(std::memory_order_acquire))
-      commit_aborted_.store(true, std::memory_order_release);
+    if (commit_active_.load(std::memory_order_acquire)) {
+      commit_abort_epoch_.fetch_add(1, std::memory_order_acq_rel);
+    }
     if (requested_.exchange(requested, std::memory_order_acq_rel) != requested)
       generation_.fetch_add(1, std::memory_order_acq_rel);
   }
@@ -45,8 +46,9 @@ class XR806LowPowerPolicy {
   // resume, but the platform never interprets any Tuya commands.
   void set_network_quiescing(bool value) {
     if (network_quiescing_.exchange(value, std::memory_order_acq_rel) != value) {
-      if (commit_active_.load(std::memory_order_acquire))
-        commit_aborted_.store(true, std::memory_order_release);
+      if (commit_active_.load(std::memory_order_acquire)) {
+        commit_abort_epoch_.fetch_add(1, std::memory_order_acq_rel);
+      }
       generation_.fetch_add(1, std::memory_order_acq_rel);
     }
   }
@@ -58,8 +60,9 @@ class XR806LowPowerPolicy {
   // A separate, optional MCU driver must explicitly request this gate.
   // Each transition from absent to present resets the synchronization gate.
   void require_external_mcu(bool required) {
-    if (commit_active_.load(std::memory_order_acquire))
-      commit_aborted_.store(true, std::memory_order_release);
+    if (commit_active_.load(std::memory_order_acquire)) {
+      commit_abort_epoch_.fetch_add(1, std::memory_order_acq_rel);
+    }
     if (required) {
       // Set the blocker BEFORE publishing the external-MCU requirement.
       // This avoids a transient unblocked window for a concurrent sleep voter.
@@ -100,14 +103,15 @@ class XR806LowPowerPolicy {
   // transition invalidates this claim. Hardware producers must ALSO take
   // their vendor SDK PM wake lock BEFORE starting asynchronous work.
   bool begin_commit(uint32_t observed_generation) {
-    if (commit_active_.load(std::memory_order_acquire))
-      return false;
-    // Clear stale abort *before* claiming the phase; clearing it after CAS
-    // could lose a concurrent producer's veto.
-    commit_aborted_.store(false, std::memory_order_release);
+    // Sample a monotonic veto counter BEFORE acquiring the commit claim.
+    // Clearing a shared abort flag would lose a concurrent worker's veto.
+    // Unlike owner-vote generation, this also detects repeated busy
+    // assertions while a final admission claim is being evaluated.
+    const uint32_t abort_before = commit_abort_epoch_.load(std::memory_order_acquire);
     bool expected = false;
     if (!commit_active_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
       return false;
+    commit_start_abort_epoch_.store(abort_before, std::memory_order_release);
     if (!this->commit_valid(observed_generation)) {
       this->end_commit();
       return false;
@@ -116,7 +120,9 @@ class XR806LowPowerPolicy {
   }
 
   bool commit_valid(uint32_t observed_generation) const {
-    return commit_active_.load(std::memory_order_acquire) && !commit_aborted_.load(std::memory_order_acquire) &&
+    return commit_active_.load(std::memory_order_acquire) &&
+           commit_abort_epoch_.load(std::memory_order_acquire) ==
+               commit_start_abort_epoch_.load(std::memory_order_acquire) &&
            generation_.load(std::memory_order_acquire) == observed_generation && blockers() == 0;
   }
 
@@ -125,8 +131,9 @@ class XR806LowPowerPolicy {
  private:
   void update_(uint32_t blocker, bool ready) {
     // Preempt an outstanding admission claim BEFORE changing an owner vote.
-    if (commit_active_.load(std::memory_order_acquire))
-      commit_aborted_.store(true, std::memory_order_release);
+    if (commit_active_.load(std::memory_order_acquire)) {
+      commit_abort_epoch_.fetch_add(1, std::memory_order_acq_rel);
+    }
     const uint32_t previous = ready ? blockers_.fetch_and(~blocker, std::memory_order_acq_rel)
                                     : blockers_.fetch_or(blocker, std::memory_order_acq_rel);
     if (((previous & blocker) == 0u) != ready)
@@ -139,7 +146,8 @@ class XR806LowPowerPolicy {
   std::atomic<bool> network_quiescing_{false};
   std::atomic<uint32_t> generation_{0};
   std::atomic<bool> commit_active_{false};
-  std::atomic<bool> commit_aborted_{false};
+  std::atomic<uint32_t> commit_abort_epoch_{0};
+  std::atomic<uint32_t> commit_start_abort_epoch_{0};
 };
 
 #ifdef USE_XR806_LOWPOWER
