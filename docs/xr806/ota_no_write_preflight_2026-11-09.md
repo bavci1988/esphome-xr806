@@ -1,8 +1,8 @@
-# XR806 OTA development – no-write Stage A (2026-11-09)
+# XR806 OTA development – Stages A–C, transport-only (2026-11-09)
 
 ## Status and why it is fail-closed
 
-This branch is exploratory. **It does not enable ESPHome `ota: - platform: esphome` on XR806.** That platform is rejected in `esphome/components/esphome/ota/__init__.py` until a compatible XR806 `OTABackend` exists. The existing `XR806OTAStandbyGuard` always retains `OTA_BUSY` when an OTA component is configured. It would be unsafe to interpret OTA progress callbacks as proof that listening sockets and flash writes have stopped.
+**Current status (Stage C):** ESPHome now accepts `ota: - platform: esphome` on XR806 and compiles a platform-owned OTA backend. The backend explicitly rejects all flash writes because the vendor image format and power-loss-safe recovery are unverified. The existing `XR806OTAStandbyGuard` retains `OTA_BUSY` when OTA and standby are both configured; do not mistake OTA state notifications for safe shutdown of listeners and flash writers.
 
 ## Evidence from the uploaded XR806 vendor package
 
@@ -57,7 +57,7 @@ The updated read-only `inspect_ota_geometry.py` decodes this selection with stri
 1. Decode and verify the current TRV16 bootloader's actual `image_get_ota_param()` geometry, running sequence, flash IDs, compressed-image region and update-sequence erase boundaries. Compare runtime values with dump, not a generic project image.cfg.
 2. Identify build output format for `ota_push_data()`: AWIH sections, XZ packaging, verify metadata and resulting bootloader behavior. Preserve the original WXU dump and prove recovery on spare hardware.
 3. Determine secure boot/anti-rollback/signature requirements and power-loss recovery. MD5/checksum alone is not image authentication; use authenticated upload and independent firmware verification.
-4. Provide a real XR806 `OTABackend` that calls the vendor writer only after full preflight, and test abort at every write boundary. Until that is implemented, **keep OTA rejected in YAML**.
+4. Replace the existing no-write XR806 `OTABackend` with a validated vendor flash writer after full preflight and tests at each write boundary. OTA YAML is accepted now, but actual updates are still refused.
 5. Only then implement listener suspend/restore for Native OTA and every enabled OTA transport (including web-server OTA) with drain/accept-race proof and SDK PM locks. Run WLAN, OTA and CMD38 races on a spare WXU, with power measurement.
 
 ## Safety note
@@ -82,7 +82,7 @@ xr806:
   ota_diagnostic_readonly: true
 ```
 
-Do not configure `ota:` on XR806 at this stage: ESPHome lacks a real XR806 flash backend and continues to reject it. The optional diagnostics have not yet been tested on actual hardware; first cross-compile against the pinned XR806 SDK.
+`ota:` is now allowed for transport-only integration experiments; the XR806 backend rejects uploads before flash erase. This does not yet enable working updates. The optional ROM diagnostic has not been tested on actual hardware.
 
 ### Why the writer remains disabled
 
@@ -90,7 +90,7 @@ The vendor's `ota_push_start()` erases the inactive image slot IMMEDIATELY; with
 
 ### Parallel USE_TUYA_LOW_POWER_V0 work
 
-The OTA branch now includes Claude's upstream-compatible refactor as a second Git parent. Standard `wifi:`, platform-owned API/WLAN/mDNS standby, and `USE_TUYA_LOW_POWER_V0` remain intact and unchanged. The pull request is stacked on the Claude branch until that refactor reaches `dev`. The OTA PM state machine is kept in the XR806 platform; it is NOT attached to shared `ota::UpdateLock` until a real vendor OTA backend exists. Future integration must run both Standard Tuya and low_power_v0 regression tests and real CMD38/network/OTA standby races.
+PRs #12 and #13 have been merged into `dev`; the upstream-compatible standard `wifi:`, platform-owned API/WLAN/mDNS standby and `USE_TUYA_LOW_POWER_V0` code remain in place. The OTA PM state machine is not wired to shared `ota::UpdateLock` until a real flash writer exists. Standard Tuya/V0 and CMD38/network/OTA standby race verification remain necessary.
 
 ## Upstream-compatible integration with standard WiFi and Standby (2026-11-09)
 
