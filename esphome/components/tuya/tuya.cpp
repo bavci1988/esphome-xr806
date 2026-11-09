@@ -105,10 +105,9 @@ void Tuya::loop() {
 #ifdef USE_XR806_STANDBY_CONTROLLER
     if (this->lp_standby_.requested()) {
       const auto &policy = esphome::xr806::lowpower_policy();
-      const uint32_t busy_owners = esphome::xr806::XR806LowPowerPolicy::NETWORK_BUSY |
-                                   esphome::xr806::XR806LowPowerPolicy::API_BUSY |
-                                   esphome::xr806::XR806LowPowerPolicy::OTA_BUSY |
-                                   esphome::xr806::XR806LowPowerPolicy::MDNS_BUSY;
+      const uint32_t busy_owners =
+          esphome::xr806::XR806LowPowerPolicy::NETWORK_BUSY | esphome::xr806::XR806LowPowerPolicy::API_BUSY |
+          esphome::xr806::XR806LowPowerPolicy::OTA_BUSY | esphome::xr806::XR806LowPowerPolicy::MDNS_BUSY;
       if (!policy.standby_requested() || (policy.blockers() & busy_owners) != 0 ||
           !this->low_power_ready_for_sleep_()) {
         // Withdraw the HC32 logical-sleep signal on any new protocol,
@@ -149,8 +148,9 @@ void Tuya::loop() {
 
 void Tuya::dump_config() {
   ESP_LOGCONFIG(TAG, "Tuya:");
-  ESP_LOGCONFIG(TAG, "  Protocol: %s", this->protocol_ == TuyaProtocol::LOW_POWER_V0
-                                           ? LOG_STR_LITERAL("low_power_v0") : LOG_STR_LITERAL("standard"));
+  ESP_LOGCONFIG(
+      TAG, "  Protocol: %s",
+      this->protocol_ == TuyaProtocol::LOW_POWER_V0 ? LOG_STR_LITERAL("low_power_v0") : LOG_STR_LITERAL("standard"));
   if (this->protocol_ == TuyaProtocol::LOW_POWER_V0) {
     ESP_LOGCONFIG(TAG, "  Auto baud: %s", YESNO(this->auto_baud_));
     if (this->auto_baud_ && this->lp_autobaud_.locked()) {
@@ -194,8 +194,7 @@ void Tuya::dump_config() {
   const char *product_text = this->protocol_ == TuyaProtocol::LOW_POWER_V0
                                  ? this->lp_product_text_.data()
                                  : (this->product_ ? this->product_.get() : LOG_STR_LITERAL(""));
-  ESP_LOGCONFIG(TAG, "  Product: '%s'",
-                this->product_invalid_ ? LOG_STR_LITERAL(R"({"p":"INVALID"})") : product_text);
+  ESP_LOGCONFIG(TAG, "  Product: '%s'", this->product_invalid_ ? LOG_STR_LITERAL(R"({"p":"INVALID"})") : product_text);
 #ifdef USE_TIME
   if (this->time_id_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Force time sync: %s", YESNO(this->force_time_sync_));
@@ -966,14 +965,13 @@ void Tuya::send_datapoint_command_(uint8_t datapoint_id, TuyaDatapointType datap
     // RAW1 and can consume checksum/buffer memory. Reject unsafe writes
     // BEFORE serialization, regardless of whether a higher-level entity
     // calls a forced setter or sends an unknown datapoint.
-    if (!TuyaLowPowerSleepWindow::valid_datapoint(datapoint_id, static_cast<uint8_t>(datapoint_type),
-                                                  data.data(), data.size())) {
+    if (!TuyaLowPowerSleepWindow::valid_datapoint(datapoint_id, static_cast<uint8_t>(datapoint_type), data.data(),
+                                                  data.size())) {
       ESP_LOGE(TAG, "Refusing malformed TRV16 DP%u (type=%u, len=%u)", datapoint_id,
                static_cast<unsigned>(datapoint_type), static_cast<unsigned>(data.size()));
       return;
     }
-    if (datapoint_id == TuyaLowPowerSleepWindow::ENABLE_DP ||
-        datapoint_id == TuyaLowPowerSleepWindow::WINDOW_DP) {
+    if (datapoint_id == TuyaLowPowerSleepWindow::ENABLE_DP || datapoint_id == TuyaLowPowerSleepWindow::WINDOW_DP) {
       this->lp_sleep_window_.on_write(datapoint_id);
       this->invalidate_low_power_mode_epoch_();
     }
