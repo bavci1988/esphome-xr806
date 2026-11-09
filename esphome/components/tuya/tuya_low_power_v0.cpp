@@ -145,6 +145,7 @@ bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
   const bool guard_elapsed = static_cast<int32_t>(millis() - this->lp_wake_guard_until_) >= 0;
   const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
   return this->lp_v0_.ready() && this->lp_sleep_window_.standby_mode_stable() && !this->lp_product_retry_.active() &&
+         !this->lp_transaction_.pending() && !this->lp_transaction_.quarantined(millis()) &&
          guard_elapsed && baud_locked && this->parent_ != nullptr && this->parent_->is_connected() &&
          !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
          !this->expected_response_.has_value() && (in_cmd38_handler || this->rx_message_.empty());
@@ -263,9 +264,11 @@ void Tuya::process_low_power_queue_() {
   // delayed CMD05 report. ACK and report have separate timeouts.
   if (this->expected_response_.has_value() && static_cast<uint32_t>(now - this->last_command_timestamp_) >= 1500) {
     const bool product_query = *this->expected_response_ == TuyaCommandType::PRODUCT_QUERY;
+    this->lp_transaction_.timeout(now);
     this->expected_response_.reset();
-    if (!this->command_queue_.empty())
+    if (!this->command_queue_.empty()) {
       this->command_queue_.erase(this->command_queue_.begin());
+    }
     this->lp_v0_.command_timeout();
     this->lp_network_status_ = 0xFF;
     ESP_LOGW(LP_TAG, "MCU command ACK timeout (product=%s); scheduling resync", YESNO(product_query));
@@ -280,9 +283,11 @@ void Tuya::process_low_power_queue_() {
     }
   }
 
-  if (this->lp_v0_.busy() || this->expected_response_.has_value() || !this->rx_message_.empty() ||
-      this->command_queue_.empty() || static_cast<uint32_t>(now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS)
+  if (this->lp_v0_.busy() || this->lp_v0_.faulted() || this->expected_response_.has_value() ||
+      !this->lp_transaction_.can_send(now) || !this->rx_message_.empty() ||
+      this->command_queue_.empty() || static_cast<uint32_t>(now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS) {
     return;
+  }
   if (!this->lp_v0_.has_product() && this->command_queue_.front().cmd != TuyaCommandType::PRODUCT_QUERY)
     return;
 
