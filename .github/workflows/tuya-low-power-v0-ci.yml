@@ -2,12 +2,19 @@ name: Tuya MCU Low-Power v0 (host tests)
 
 on:
   push:
-    branches: [dev, feature/trv16-re-sleep-window-recovery]
+    branches: [dev, feature/xr806-stage8-concurrency-lifecycle]
     paths:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
       - "tests/tuya_low_power_standby_state_test.cpp"
       - "tests/tuya_low_power_sleep_window_test.cpp"
+      - "tests/tuya_low_power_transaction_gate_test.cpp"
+      - "tests/xr806/standby_service_lifecycle_test.cpp"
+      - "esphome/components/xr806/**"
+      - "esphome/components/api/**"
+      - "esphome/components/ota/**"
+      - "esphome/components/esphome/ota/**"
+      - "esphome/components/mdns/**"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
       - "tests/yaml/tuya_low_power_*.yaml"
   pull_request:
@@ -17,6 +24,13 @@ on:
       - "tests/tuya_low_power_v0_session_test.cpp"
       - "tests/tuya_low_power_standby_state_test.cpp"
       - "tests/tuya_low_power_sleep_window_test.cpp"
+      - "tests/tuya_low_power_transaction_gate_test.cpp"
+      - "tests/xr806/standby_service_lifecycle_test.cpp"
+      - "esphome/components/xr806/**"
+      - "esphome/components/api/**"
+      - "esphome/components/ota/**"
+      - "esphome/components/esphome/ota/**"
+      - "esphome/components/mdns/**"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
   workflow_dispatch:
 
@@ -44,7 +58,15 @@ jobs:
             tests/tuya_low_power_sleep_window_test.cpp \
             -o /tmp/tuya-low-power-window-test
           /tmp/tuya-low-power-window-test
-          echo "PASS Tuya MCU transaction, standby, daily sleep-window and CMD01 recovery states"
+          g++ -std=c++17 -Wall -Wextra -Werror -I. \
+            tests/tuya_low_power_transaction_gate_test.cpp \
+            -o /tmp/tuya-transaction-gate-test
+          /tmp/tuya-transaction-gate-test
+          g++ -std=c++17 -Wall -Wextra -Werror -pthread -I. \
+            tests/xr806/standby_service_lifecycle_test.cpp \
+            -o /tmp/xr806-standby-lifecycle-test
+          /tmp/xr806-standby-lifecycle-test
+          echo "PASS transaction gating, CMD38 veto models, 10k concurrent PM votes and owner recovery"
 
   xr806-codegen:
     runs-on: ubuntu-24.04
