@@ -2,13 +2,16 @@ name: Tuya MCU Low-Power v0 (host tests)
 
 on:
   push:
-    branches: [dev, feature/xr806-standby-race-arbiter]
+    branches: [dev, feature/xr806-stage7d-race-hardening]
     paths:
       - "esphome/components/tuya/**"
       - "tests/tuya_low_power_v0_session_test.cpp"
       - "tests/tuya_low_power_standby_state_test.cpp"
       - "tests/tuya_low_power_sleep_window_test.cpp"
       - "tests/tuya_low_power_wire_transactions_test.cpp"
+      - "tests/xr806/standby_interleaving_test.cpp"
+      - "esphome/components/xr806/lowpower_policy.h"
+      - "esphome/components/xr806/mdns.cpp"
       - ".github/workflows/tuya-low-power-v0-ci.yml"
       - "tests/yaml/tuya_low_power_*.yaml"
   pull_request:
@@ -49,7 +52,11 @@ jobs:
             tests/tuya_low_power_wire_transactions_test.cpp \
             -o /tmp/tuya-low-power-wire-transactions-test
           /tmp/tuya-low-power-wire-transactions-test
-          echo "PASS Tuya MCU state, serialized ACK quarantine, and CMD38 interleaving"
+          g++ -std=c++17 -pthread -Wall -Wextra -Werror -I. \
+            tests/xr806/standby_interleaving_test.cpp \
+            -o /tmp/xr806-standby-interleaving-test
+          /tmp/xr806-standby-interleaving-test
+          echo "PASS MCU wire serialization, cross-task PM fencing, CMD38 and standby interleavings"
 
   xr806-codegen:
     runs-on: ubuntu-24.04
