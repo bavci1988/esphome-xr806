@@ -29,6 +29,7 @@ CONF_SOCKET_PROBE = "socket_probe"
 CONF_SOCKET_FACADE_PROBE = "socket_facade_probe"
 CONF_STANDBY_TRIAL = "standby_trial"
 CONF_STANDBY = "standby"
+CONF_OTA_GUARD_ID = "ota_guard_id"
 CONF_QUIET_MS = "quiet_ms"
 CONF_MIN_AWAKE_MS = "min_awake_ms"
 CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
@@ -43,6 +44,7 @@ XR806WLANSmoke = xr806_ns.class_("XR806WLANSmoke", cg.Component)
 XR806WiFiComponent = xr806_ns.class_("XR806WiFiComponent", cg.Component)
 XR806StandbyTrial = xr806_ns.class_("XR806StandbyTrial", cg.Component)
 XR806StandbyController = xr806_ns.class_("XR806StandbyController", cg.Component)
+XR806OTAStandbyGuard = xr806_ns.class_("XR806OTAStandbyGuard", cg.Component)
 
 
 def validate_wlan_smoke_password(value):
@@ -120,6 +122,7 @@ STANDBY_TRIAL_SCHEMA = cv.Schema(
 STANDBY_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(XR806StandbyController),
+        cv.GenerateID(CONF_OTA_GUARD_ID): cv.declare_id(XR806OTAStandbyGuard),
         cv.Required(CONF_ENABLED): cv.boolean,
         cv.Optional(CONF_WAKE_AFTER_MS, default=3000): cv.int_range(
             min=500, max=60000
@@ -255,6 +258,17 @@ async def to_code(config):
         )
         cg.add(controller.set_require_uart_participant("uart" in CORE.config))
         await cg.register_component(controller, cfg)
+        if "ota" in CORE.config:
+            # OTA state updates are informative, NOT evidence that the
+            # OTA listener and flash writer are already disarmed.
+            cg.add_define("USE_OTA_STATE_LISTENER")
+            cg.add_global(
+                cg.RawStatement(
+                    '#include "esphome/components/xr806/standby_ota_guard.h"'
+                )
+            )
+            ota_guard = cg.new_Pvariable(cfg[CONF_OTA_GUARD_ID])
+            await cg.register_component(ota_guard, cfg)
 
     if CONF_STANDBY_TRIAL in config:
         forbidden = (
