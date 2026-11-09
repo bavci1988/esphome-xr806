@@ -24,6 +24,7 @@ struct XR806OTARuntimeGeometry {
   uint8_t fdcm_selected_seq{0xff};  // Derived from actual FDCM, not guessed.
   bool compression_policy{false};
   bool runtime_snapshot_observed{false};
+  bool fdcm_state_verified{false};
 };
 
 enum class XR806OTARuntimeError : uint8_t {
@@ -31,6 +32,7 @@ enum class XR806OTARuntimeError : uint8_t {
   SNAPSHOT_NOT_OBSERVED,
   INVALID_SEQUENCE,
   SELECTION_MISMATCH,
+  FDCM_UNVERIFIED,
   FLASH_ID_UNSUPPORTED,
   INVALID_GEOMETRY,
   EXCEEDS_SLOT,
@@ -69,12 +71,17 @@ constexpr XR806OTARuntimeResult xr806_preflight_runtime_ota(const XR806OTARuntim
     out.error = XR806OTARuntimeError::SELECTION_MISMATCH;
     return out;
   }
+  if (!g.fdcm_state_verified) {
+    out.error = XR806OTARuntimeError::FDCM_UNVERIFIED;
+    return out;
+  }
 
   const uint8_t candidate = g.running_seq ^ 1u;
   out.candidate_seq = candidate;
   // A single flash device is the only verified case; do not assume external
   // SPI flash IDs or address spaces are interchangeable.
-  if (g.image_flash[g.running_seq] != g.image_flash[candidate]) {
+  if (g.image_flash[g.running_seq] != g.image_flash[candidate] ||
+      g.image_flash[g.running_seq] != g.metadata_flash) {
     out.error = XR806OTARuntimeError::FLASH_ID_UNSUPPORTED;
     return out;
   }
