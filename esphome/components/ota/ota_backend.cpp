@@ -1,6 +1,9 @@
 #include "ota_backend.h"
 #ifdef USE_XR806_STANDBY_CONTROLLER
 #include "esphome/components/xr806/lowpower_policy.h"
+extern "C" {
+#include "pm/pm.h"
+}
 #endif
 
 #ifdef ESPHOME_THREAD_MULTI_ATOMICS
@@ -76,6 +79,34 @@ static void update_lock_clear() {
 }
 #endif
 
+#ifdef USE_XR806_STANDBY_CONTROLLER
+static struct wakelock ota_update_pm_wakelock{};  // NOLINT
+static bool ota_update_pm_wakelock_held = false;  // Single global UpdateLock owner.
+
+static bool ota_update_pm_lock_acquire() {
+  if (ota_update_pm_wakelock_held) {
+    return true;
+  }
+  ota_update_pm_wakelock.name = const_cast<char *>("esphome.xr806.ota-update");
+  if (pm_wake_lock(&ota_update_pm_wakelock) != 0) {
+    return false;
+  }
+  ota_update_pm_wakelock_held = true;
+  return true;
+}
+
+static void ota_update_pm_lock_release() {
+  if (!ota_update_pm_wakelock_held) {
+    return;
+  }
+  if (pm_wake_unlock(&ota_update_pm_wakelock) == 0) {
+    ota_update_pm_wakelock_held = false;
+  } else {
+    xr806::lowpower_policy().set_ota_idle(false);  // Sticky fail closed.
+  }
+}
+#endif
+
 bool global_update_active() {
 #ifdef ESPHOME_THREAD_MULTI_ATOMICS
   return update_locked.load(std::memory_order_acquire) != 0;
@@ -87,25 +118,37 @@ bool global_update_active() {
 bool UpdateLock::try_acquire() {
   if (!this->held_) {
     this->held_ = update_lock_test_and_set();
-  }
 #ifdef USE_XR806_STANDBY_CONTROLLER
-  if (this->held_) {
-    // A flash write from *any* OTA frontend wins over standby, including
-    // writes not serviced by the native OTA TCP listener.
-    xr806::lowpower_policy().set_ota_idle(false);
-  }
+    if (this->held_) {
+      xr806::lowpower_policy().set_ota_idle(false);  // Publish veto BEFORE any flash work.
+      if (!ota_update_pm_lock_acquire()) {
+        this->held_ = false;
+        update_lock_clear();
+        return false;
+      }
+    }
 #endif
+  }
   return this->held_;
 }
 
 void UpdateLock::release() {
-  if (!this->held_)
+  if (!this->held_) {
     return;
+  }
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  ota_update_pm_lock_release();
+#endif
   update_lock_clear();
   this->held_ = false;
 }
 
-void UpdateLock::force_release() { update_lock_clear(); }
+void UpdateLock::force_release() {
+#ifdef USE_XR806_STANDBY_CONTROLLER
+  ota_update_pm_lock_release();
+#endif
+  update_lock_clear();
+}
 
 #ifdef USE_OTA_STATE_LISTENER
 OTAGlobalCallback *global_ota_callback{nullptr};  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
