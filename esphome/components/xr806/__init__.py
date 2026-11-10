@@ -9,6 +9,7 @@ import esphome.config_validation as cv
 from esphome.const import (
     CONF_BOARD,
     CONF_ID,
+    CONF_PORT,
     KEY_CORE,
     KEY_TARGET_FRAMEWORK,
     KEY_TARGET_PLATFORM,
@@ -27,7 +28,6 @@ OTA_IMAGE_NAME = "firmware.ota.bin"
 CONF_WLAN = "wlan"
 CONF_HTTP_SERVER = "http_server"
 CONF_CAPTIVE_DNS = "captive_dns"
-CONF_HTTP_PORT = "port"
 CONF_NETWORK_SUSPEND = "network_suspend"
 CONF_DTIM = "dtim"
 CONF_LISTEN_INTERVAL = "listen_interval"
@@ -71,7 +71,7 @@ XR806_WLAN_SCHEMA = cv.Schema(
 XR806_HTTP_SERVER_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(XR806HTTPServer),
-        cv.Optional(CONF_HTTP_PORT, default=80): cv.port,
+        cv.Optional(CONF_PORT, default=80): cv.port,
         cv.Optional(CONF_CAPTIVE_DNS, default=False): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -123,7 +123,7 @@ STANDBY_SCHEMA = cv.Schema(
 def _update_core_data(config: ConfigType) -> None:
     if CONF_HTTP_SERVER in config and config[CONF_HTTP_SERVER][CONF_CAPTIVE_DNS]:
         # Full-config checks for wifi.ap are deferred until final validation.
-        if config[CONF_HTTP_SERVER][CONF_HTTP_PORT] != 80:
+        if config[CONF_HTTP_SERVER][CONF_PORT] != 80:
             raise cv.Invalid("XR806 captive portal requires HTTP port 80")
     if config[CONF_WLAN][CONF_NETWORK_SUSPEND] and CONF_STANDBY not in config:
         raise cv.Invalid(
@@ -232,7 +232,7 @@ async def to_code(config: ConfigType) -> None:
             cg.RawStatement('#include "esphome/components/xr806/http_portal.h"')
         )
         native_http = cg.new_Pvariable(http[CONF_ID])
-        cg.add(native_http.set_port(http[CONF_HTTP_PORT]))
+        cg.add(native_http.set_port(http[CONF_PORT]))
         cg.add(native_http.set_captive_dns(http[CONF_CAPTIVE_DNS]))
         await cg.register_component(native_http, http)
 
