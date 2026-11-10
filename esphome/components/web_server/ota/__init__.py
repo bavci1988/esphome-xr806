@@ -33,7 +33,7 @@ def _web_server_ota_final_validate(config: ConfigType) -> None:
     Multiple web_server OTA instances register duplicate HTTP handlers for /update,
     causing undefined behavior. Merge them into a single instance.
     """
-    if CORE.is_xr806:
+    if CORE.is_configured and CORE.is_xr806:
         # No validated multipart upload, verified flash writer or interrupted-
         # update recovery yet. Reject it rather than advertising broken OTA.
         raise cv.Invalid(
