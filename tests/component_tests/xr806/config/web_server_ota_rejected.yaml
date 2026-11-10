@@ -1,9 +1,0 @@
-esphome:
-  name: xr806-web-ota-reject
-xr806:
-  board: wxu
-wifi:
-  ssid: TEST-NETWORK-NO-HARDWARE
-  password: TestOnlyPassword123
-ota:
-  - platform: web_server
