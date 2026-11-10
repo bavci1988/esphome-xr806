@@ -33,6 +33,7 @@ CONF_STANDBY = "standby"
 CONF_OTA_GUARD_ID = "ota_guard_id"
 CONF_OTA_DIAGNOSTIC_READONLY = "ota_diagnostic_readonly"
 CONF_API_STANDBY_ID = "api_standby_id"
+CONF_HTTP_STANDBY_ID = "http_standby_id"
 CONF_QUIET_MS = "quiet_ms"
 CONF_MIN_AWAKE_MS = "min_awake_ms"
 CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
@@ -48,6 +49,7 @@ XR806APIStandby = xr806_ns.class_("XR806APIStandby", cg.Component)
 XR806StandbyTrial = xr806_ns.class_("XR806StandbyTrial", cg.Component)
 XR806StandbyController = xr806_ns.class_("XR806StandbyController", cg.Component)
 XR806OTAStandbyGuard = xr806_ns.class_("XR806OTAStandbyGuard", cg.Component)
+XR806HTTPStandby = xr806_ns.class_("XR806HTTPStandby", cg.Component)
 
 
 # Radio settings for the standard wifi: component. DTIM and the listen interval
@@ -92,6 +94,7 @@ STANDBY_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(XR806StandbyController),
         cv.GenerateID(CONF_OTA_GUARD_ID): cv.declare_id(XR806OTAStandbyGuard),
         cv.GenerateID(CONF_API_STANDBY_ID): cv.declare_id(XR806APIStandby),
+        cv.GenerateID(CONF_HTTP_STANDBY_ID): cv.declare_id(XR806HTTPStandby),
         cv.Required(CONF_ENABLED): cv.boolean,
         cv.Optional(CONF_WAKE_AFTER_MS, default=3000): cv.int_range(min=500, max=60000),
         cv.Optional(CONF_QUIET_MS, default=250): cv.int_range(min=200, max=30000),
@@ -162,20 +165,6 @@ XR806_UART0_RX = 33  # PB1, WXU pad 16
 
 def _final_validate_uart(config: ConfigType) -> ConfigType:
     full_config = fv.full_config.get()
-    # The XR806 HTTP listener has no suspend participant or socket-drain
-    # handshake. Keep guarded standby fail-closed until those exist.
-    if CONF_STANDBY in config:
-        http_services = [
-            name for name in ("web_server", "captive_portal")
-            if name in full_config
-        ]
-        if http_services:
-            raise cv.Invalid(
-                "xr806.standby cannot be combined with "
-                + ", ".join(http_services)
-                + " until HTTP listener, active-client and DNS suspend/resume "
-                "are registered as standby participants"
-            )
     for index, uart in enumerate(full_config.get("uart", [])):
         path = ["uart", index]
         for key, expected, name in (
@@ -227,9 +216,20 @@ async def to_code(config: ConfigType) -> None:
         cg.add(controller.set_no_api("api" not in CORE.config))
         cg.add(controller.set_no_ota("ota" not in CORE.config))
         cg.add(controller.set_no_mdns("mdns" not in CORE.config))
+        has_http = any(domain in CORE.config for domain in ("web_server", "captive_portal"))
+        cg.add(controller.set_no_http(not has_http))
         cg.add(controller.set_external_sync_required(cfg[CONF_REQUIRE_EXTERNAL_SYNC]))
         cg.add(controller.set_require_uart_participant("uart" in CORE.config))
         await cg.register_component(controller, cfg)
+        if has_http:
+            # Dedicated HTTP + SSE socket owner holds a physical PM wakelock,
+            # closes only the listener during preflight, and waits for clients.
+            cg.add_define("USE_XR806_HTTP_STANDBY")
+            cg.add_global(
+                cg.RawStatement('#include "esphome/components/xr806/http_standby.h"')
+            )
+            http_standby = cg.new_Pvariable(cfg[CONF_HTTP_STANDBY_ID])
+            await cg.register_component(http_standby, {})
         if "api" in CORE.config:
             # Votes API_BUSY from the public APIServer state.
             cg.add_global(
