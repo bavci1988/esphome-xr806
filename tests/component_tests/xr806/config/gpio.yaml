@@ -1,0 +1,19 @@
+esphome:
+  name: xr806-gpio
+xr806:
+  board: wxu
+logger:
+switch:
+  - platform: gpio
+    id: relay
+    pin:
+      number: PA20
+      inverted: true
+binary_sensor:
+  - platform: gpio
+    id: button
+    pin:
+      number: pa19
+      mode: INPUT_PULLUP
+    use_interrupt: true
+    interrupt_type: FALLING

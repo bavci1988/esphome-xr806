@@ -272,3 +272,57 @@ def test_mdns_announces_api_web_server_and_prometheus(
         str(define) for define in CORE.defines if define.name == "MDNS_SERVICE_COUNT"
     }
     assert counts == {"MDNS_SERVICE_COUNT=3"}
+
+
+def test_gpio_pins(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("gpio.yaml"))
+
+    assert "xr806::XR806GPIOPin" in generated
+    assert "set_pin(20)" in generated
+    assert "set_pin(19)" in generated
+    assert "set_inverted(true)" in generated
+    assert "(gpio::Flags::FLAG_INPUT | gpio::Flags::FLAG_PULLUP)" in generated
+    assert "set_interrupt_type(gpio::INTERRUPT_FALLING_EDGE)" in generated
+
+
+@pytest.mark.parametrize(
+    ("pin_block", "message"),
+    [
+        ("      number: PA21\n", "GPIO PA21 is reserved: UART2 RX"),
+        ("      number: PB5\n", "GPIO PB5 is reserved: Flash/XIP"),
+        ("      number: PA0\n", "GPIO PA0 is not exposed on the WXU module"),
+        ("      number: 20\n", "XR806 pins must use PAx or PBx notation"),
+        (
+            (
+                "      number: PA20\n      mode:\n        output: true\n"
+                "        pullup: true\n        pulldown: true\n"
+            ),
+            "Pull-up and pull-down cannot both be enabled",
+        ),
+    ],
+)
+def test_gpio_rejects_invalid_pins(
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    pin_block: str,
+    message: str,
+) -> None:
+    config = component_config_path("gpio.yaml").read_text()
+    CORE.config_path = tmp_path / "gpio.yaml"
+    CORE.config_path.write_text(
+        config.replace("      number: PA20\n      inverted: true\n", pin_block)
+    )
+
+    assert read_config({}) is None
+    assert message in capsys.readouterr().out
+
+
+def test_gpio_accepts_input_and_output() -> None:
+    from esphome.components.xr806.gpio import validate_gpio_mode
+
+    mode = {"input": True, "output": True, "pullup": False, "pulldown": False}
+    assert validate_gpio_mode(mode) == mode
