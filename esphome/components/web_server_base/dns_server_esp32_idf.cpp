@@ -98,8 +98,14 @@ void DNSServer::process_next_request() {
     return;
   }
 
+#ifdef USE_XR806
+  // The XR806 build turns off the lwIP BSD name macros, so only lwip_recvfrom() exists.
+  ssize_t len = lwip_recvfrom(fd, this->buffer_, sizeof(this->buffer_), MSG_DONTWAIT, (struct sockaddr *) &client_addr,
+                              &client_addr_len);
+#else
   ssize_t len = recvfrom(fd, this->buffer_, sizeof(this->buffer_), MSG_DONTWAIT, (struct sockaddr *) &client_addr,
                          &client_addr_len);
+#endif
 
   if (len < 0) {
     const int err = errno;

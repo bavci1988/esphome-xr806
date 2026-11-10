@@ -29,6 +29,7 @@ XR806_ESPHOME_OBJECTS := $(addprefix $(XR806_OBJDIR)/, \
     runtime.o \
     xr_wifi_standby.o \
     xr_api_standby.o \
+    xr_http_standby.o \
     xr_socket_compat.o \
     xr_socket_core.o \
     xr_socket_lwip.o)
@@ -115,6 +116,7 @@ $(eval $(call XR806_COMPILE_CPP,main,$(XR806_SRC)/main.cpp))
 $(eval $(call XR806_COMPILE_CPP,runtime,$(XR806_SRC)/esphome/components/xr806/runtime.cpp))
 $(eval $(call XR806_COMPILE_CPP,xr_wifi_standby,$(XR806_SRC)/esphome/components/xr806/wifi_standby.cpp))
 $(eval $(call XR806_COMPILE_CPP,xr_api_standby,$(XR806_SRC)/esphome/components/xr806/api_standby.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_http_standby,$(XR806_SRC)/esphome/components/xr806/http_standby.cpp))
 
 $(eval $(call XR806_COMPILE_CPP,xr_socket_compat,$(XR806_SRC)/esphome/components/xr806/socket_compat.cpp))
 
