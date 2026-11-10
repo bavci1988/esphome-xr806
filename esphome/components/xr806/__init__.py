@@ -188,7 +188,16 @@ def _final_validate_uart(config: ConfigType) -> ConfigType:
     return config
 
 
-FINAL_VALIDATE_SCHEMA = _final_validate_uart
+def _final_validate_standby_mqtt(config: ConfigType) -> ConfigType:
+    # Standby parks the WLAN link, and no standby participant waits for MQTT traffic yet
+    if CONF_STANDBY in config and "mqtt" in fv.full_config.get():
+        raise cv.Invalid(
+            "xr806.standby cannot be combined with mqtt yet", path=[CONF_STANDBY]
+        )
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = cv.All(_final_validate_uart, _final_validate_standby_mqtt)
 
 
 async def to_code(config: ConfigType) -> None:

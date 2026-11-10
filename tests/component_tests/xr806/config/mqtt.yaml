@@ -1,0 +1,43 @@
+esphome:
+  name: xr806-mqtt-ci
+xr806:
+  board: wxu
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+logger:
+  level: DEBUG
+mqtt:
+  broker: mqtt.example.com
+  username: esphome
+  password: test-only-not-secret
+  persist_subscriptions: true
+  log_topic: xr806-mqtt-ci/debug
+  birth_message:
+    topic: xr806-mqtt-ci/status
+    payload: online
+  will_message:
+    topic: xr806-mqtt-ci/status
+    payload: offline
+  on_message:
+    - topic: xr806-mqtt-ci/command
+      qos: 1
+      then:
+        - mqtt.publish:
+            topic: xr806-mqtt-ci/reply
+            payload: !lambda return x;
+            qos: 2
+  on_json_message:
+    topic: xr806-mqtt-ci/json
+    then:
+      - logger.log:
+          format: "Value %d"
+          args: ['x["value"].as<int>()']
+binary_sensor:
+  - platform: gpio
+    name: Button
+    pin: PA20
+sensor:
+  - platform: mqtt_subscribe
+    name: Outside temperature
+    topic: outside/temperature

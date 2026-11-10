@@ -1,0 +1,12 @@
+esphome:
+  name: xr806-mqtt-standby
+xr806:
+  board: wxu
+  lowpower: true
+  standby:
+    enabled: true
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+mqtt:
+  broker: 192.168.1.10
