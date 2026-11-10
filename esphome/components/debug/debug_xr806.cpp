@@ -51,14 +51,15 @@ uint32_t DebugComponent::get_free_heap_() {
   uint8_t *start;
   uint8_t *end;
   uint8_t *current;
-  heap_get_space(&start, &end, &current);
-  const auto capacity = reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start);
-  // Subtract live allocations so freed Newlib chunks and uncommitted SRAM both count as free.
-  // XRadio serializes malloc/free by suspending the scheduler. Newlib's own lock may be a no-op,
-  // so take the SDK allocator lock while examining its heap metadata.
+  // XRadio malloc/free suspends the scheduler, while Newlib's default lock is a no-op.
+  // Read both the heap cursor and allocator counters under the same SDK lock.
   malloc_mutex_lock();
+  heap_get_space(&start, &end, &current);
   const auto used = static_cast<uint32_t>(mallinfo().uordblks);
   malloc_mutex_unlock();
+
+  const auto capacity = reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start);
+  // Subtract live allocations so freed Newlib chunks and uncommitted SRAM both count as free.
   return used < capacity ? capacity - used : 0;
 }
 
