@@ -4,6 +4,36 @@ This is an **opt-in bring-up implementation**, not ESPHome's normal
 `web_server:` or `captive_portal:` integration. The existing ESPHome
 AsyncWebServer backend requires Arduino/ESP-IDF and has not been ported to XR806.
 
+## Upstream-facing ESPHome captive portal (experimental)
+
+The ordinary `captive_portal:` key is now wired to an XR806-native
+implementation and does **not** require `xr806.http_server:`.
+The normal `wifi.ap:` syntax is retained. Unlike the separate diagnostic
+server, this backend serves the ESPHome captive portal's compressed `INDEX_GZ`
+UI, `/config.json` and the UI's `/wifisave` credential submission.
+
+```yaml
+esphome:
+  name: xr806-captive-lab
+xr806:
+  board: wxu
+wifi:
+  ap:
+    ssid: XR806-Lab
+    password: xr806test123
+captive_portal:
+```
+
+This is not complete ESPHome parity: native XR806 SoftAP operates exclusively
+against STA, therefore `/config.json` currently reports no scan entries.
+The UI supports manually entering an SSID. No flash-backed ESPHome preferences
+manager is available, so saving Wi-Fi settings only applies them for the
+current runtime (the firmware must not falsely claim otherwise).
+**Native standard `web_server:` support is still blocked** by the missing
+AsyncWebServer-compatible XR806 HTTP/SSE/REST backend, and remains a separate
+upstream integration task. The normal portal and native experimental
+`xr806.http_server:` must not be enabled simultaneously.
+
 ## Firmware example
 
 ```yaml
