@@ -453,7 +453,10 @@ void AsyncWebServer::process_upload_(Client &c) {
     return !c.upload_request->has_response();
   };
   if (!c.multipart->feed(reinterpret_cast<const uint8_t *>(c.input.data()), length, callback)) {
-    c.response = std::make_unique<AsyncWebServerResponseContent>(400, "text/plain", "Malformed firmware upload");
+    // Keep the OTA handler's own error; only a framing error gets the generic answer.
+    c.response = c.upload_request->take_response();
+    if (c.response == nullptr)
+      c.response = std::make_unique<AsyncWebServerResponseContent>(400, "text/plain", "Malformed firmware upload");
     c.upload_done = true;
     return;
   }

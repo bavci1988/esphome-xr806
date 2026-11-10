@@ -37,6 +37,7 @@ from esphome.const import (
     PLATFORM_LN882X,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import CORE, coroutine_with_priority
 from esphome.coroutine import CoroPriority
@@ -291,8 +292,8 @@ _SUPPORTED_PLATFORMS = [
     PLATFORM_BK72XX,
     PLATFORM_LN882X,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
     PLATFORM_HOST,
-    "xr806",  # Platform has an explicit read-only OTA backend; writes fail closed.
 ]
 
 
@@ -365,12 +366,6 @@ def enable_deflate() -> None:
 
 @coroutine_with_priority(CoroPriority.OTA_UPDATES)
 async def to_code(config: ConfigType) -> None:
-    if CORE.target_platform == "xr806":
-        _LOGGER.warning(
-            "XR806 OTA is transport-only: firmware uploads are rejected "
-            "without modifying flash until the vendor OTA backend and "
-            "recovery path are verified"
-        )
     var = cg.new_Pvariable(config[CONF_ID])
     cg.add(var.set_port(config[CONF_PORT]))
 
