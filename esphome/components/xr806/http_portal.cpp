@@ -2,6 +2,7 @@
 
 #if defined(USE_XR806) && defined(USE_XR806_HTTP_PORTAL)
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
