@@ -43,6 +43,9 @@ class MiddlewareHandler : public AsyncWebHandler {
     next_->handleBody(request, data, len, index, total);
   }
   bool isRequestHandlerTrivial() const override { return next_->isRequestHandlerTrivial(); }
+#ifdef USE_XR806
+  void onServerStop() override { next_->onServerStop(); }
+#endif
 
  protected:
   AsyncWebHandler *next_;
