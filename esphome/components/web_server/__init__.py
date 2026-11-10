@@ -399,7 +399,8 @@ def _final_validate_ap_mode(config: ConfigType) -> None:
     full_config = fv.full_config.get()
     wifi_config = full_config.get(CONF_WIFI)
     if (
-        CORE.is_xr806
+        CORE.is_configured
+        and CORE.is_xr806
         and (auth := config.get(CONF_AUTH)) is not None
         and auth.get(CONF_TYPE) == AUTH_TYPE_DIGEST
     ):
