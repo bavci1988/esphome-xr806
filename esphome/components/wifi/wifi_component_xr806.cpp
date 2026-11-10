@@ -20,9 +20,11 @@ extern "C" {
 #include "xr_config.h"
 #include "demo/trv16_port/prj_config.h"
 #include "common/framework/net_ctrl.h"
+#include "common/framework/sysinfo.h"
 #include "common/framework/sys_ctrl/sys_ctrl.h"
 #include "net/wlan/wlan.h"
 #include "net/wlan/wlan_ext_req.h"
+#include "net/udhcp/usr_dhcpd.h"
 #include "lwip/dns.h"
 #include "lwip/netif.h"
 }
@@ -86,20 +88,28 @@ static struct netif *sta_netif() { return wlan_netif_get(WLAN_MODE_STA); }
 
 static bool sta_ready() { return xr806::read_xr806_network_snapshot(sta_netif()).ready(); }
 
+#ifdef USE_WIFI_AP
+// XR806 uses a single radio and netif, so the AP must be fully stopped before the station starts.
+static bool leave_ap_mode() {
+  if (s_ap_enabled && wlan_ap_disable() != 0)
+    return false;
+  s_ap_enabled = false;
+  // net_switch_mode() does not stop the vendor DHCP server. The new station netif reuses the
+  // AP netif name, so the server would otherwise answer DHCP requests on the station network.
+  dhcp_server_stop();
+  if (net_switch_mode(WLAN_MODE_STA) != 0)
+    return false;
+  s_ap_mode = false;
+  return true;
+}
+#endif
+
 static bool sta_enable() {
   if (s_sta_enabled)
     return true;
 #ifdef USE_WIFI_AP
-  if (s_ap_mode) {
-    // XR806 uses a single radio/netif: a fallback AP must be completely stopped
-    // before a station attempt, including the vendor DHCP server and old netif.
-    if (s_ap_enabled && wlan_ap_disable() != 0)
-      return false;
-    s_ap_enabled = false;
-    if (net_switch_mode(WLAN_MODE_STA) != 0)
-      return false;
-    s_ap_mode = false;
-  }
+  if (s_ap_mode && !leave_ap_mode())
+    return false;
 #endif
   if (wlan_sta_enable() != 0)
     return false;
@@ -142,14 +152,13 @@ bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
         s_ap_mode = true;
       }
     } else if (s_ap_mode) {
-      if (s_ap_enabled && wlan_ap_disable() != 0)
+      const bool left = leave_ap_mode();
+      if (!s_ap_enabled) {
+        this->ap_started_ = false;
+        this->ap_clients_ = 0;
+      }
+      if (!left)
         return false;
-      s_ap_enabled = false;
-      this->ap_started_ = false;
-      this->ap_clients_ = 0;
-      if (net_switch_mode(WLAN_MODE_STA) != 0)
-        return false;
-      s_ap_mode = false;
     }
   }
 #endif
@@ -198,9 +207,16 @@ bool WiFiComponent::wifi_start_ap_(const WiFiAP &ap) {
 
 network::IPAddress WiFiComponent::wifi_soft_ap_ip() {
   struct netif *nif = wlan_netif_get(WLAN_MODE_HOSTAP);
-  if (nif == nullptr || ip4_addr_isany(netif_ip4_addr(nif)))
+  if (nif != nullptr && !ip4_addr_isany(netif_ip4_addr(nif)))
+    return network::IPAddress(netif_ip_addr4(nif));
+  // The SDK sets the static AP address from sysinfo only after wlan_ap_enable() returns, on its own
+  // task. The captive portal DNS reads this address once when the AP starts, so return it already.
+  const struct sysinfo *info = s_ap_enabled ? sysinfo_get() : nullptr;
+  if (info == nullptr || ip4_addr_isany_val(info->netif_ap_param.ip_addr))
     return {};
-  return network::IPAddress(netif_ip_addr4(nif));
+  ip_addr_t addr{};
+  ip_addr_copy_from_ip4(addr, info->netif_ap_param.ip_addr);
+  return network::IPAddress(&addr);
 }
 #endif  // USE_WIFI_AP
 

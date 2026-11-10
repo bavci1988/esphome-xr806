@@ -140,19 +140,24 @@ class MultipartStream {
       return false;
     const size_t start = fn + 12;
     const size_t end = disposition.find('"', start);
-    if (end == std::string::npos || end == start || end - start > 96)
+    if (end == std::string::npos || end == start || end - start > 255)
       return false;
+    // The name is only logged. Browsers rename repeated downloads ("firmware (1).ota"),
+    // so allow any printable text and reject only control characters.
     filename_ = std::string(disposition.substr(start, end - start));
     for (char c : filename_) {
-      if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-' && c != '.')
+      const auto ch = static_cast<unsigned char>(c);
+      if (ch < 0x20 || ch == 0x7F)
         return false;
     }
-    // The only optional extra header we permit is Content-Type for the blob.
+    // The only optional extra header is the part's Content-Type, whatever type the browser picked.
     auto remainder = headers.substr(first + 2);
     if (remainder == "\r\n")
       return true;
-    constexpr char content_type_header[] = "Content-Type: application/octet-stream\r\n\r\n";
-    return remainder == content_type_header;
+    constexpr char content_type_prefix[] = "Content-Type: ";
+    const size_t line_end = remainder.find("\r\n");
+    return remainder.starts_with(content_type_prefix) && line_end > sizeof(content_type_prefix) - 1 &&
+           remainder.size() == line_end + 4 && remainder.ends_with("\r\n\r\n");
   }
 
   std::string boundary_;

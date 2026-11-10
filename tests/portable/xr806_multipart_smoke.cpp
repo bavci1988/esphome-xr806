@@ -69,4 +69,23 @@ int main() {
     MultipartStream parser("xr806-boundary", wrong_name.size());
     assert(!parser.feed(reinterpret_cast<const uint8_t *>(wrong_name.data()), wrong_name.size(), safe_sink));
   }
+  // Browser-renamed downloads and other part types are accepted.
+  {
+    const std::string renamed = "--xr806-boundary\r\nContent-Disposition: form-data; name=\"update\"; "
+                                "filename=\"firmware (1).ota\"\r\nContent-Type: application/x-ota\r\n\r\n"
+                                "firmware" +
+                                kEnd;
+    MultipartStream parser("xr806-boundary", renamed.size());
+    assert(parser.feed(reinterpret_cast<const uint8_t *>(renamed.data()), renamed.size(), safe_sink));
+    assert(parser.complete());
+    assert(parser.filename() == "firmware (1).ota");
+  }
+  // Control characters in the name, an empty type or a second part header are still rejected.
+  for (const char *headers : {"filename=\"a\tb.ota\"\r\n\r\n", "filename=\"a.ota\"\r\nContent-Type: \r\n\r\n",
+                              "filename=\"a.ota\"\r\nContent-Type: a/b\r\nX-Extra: 1\r\n\r\n"}) {
+    const std::string bad = std::string("--xr806-boundary\r\nContent-Disposition: form-data; name=\"update\"; ") +
+                            headers + "firmware" + kEnd;
+    MultipartStream parser("xr806-boundary", bad.size());
+    assert(!parser.feed(reinterpret_cast<const uint8_t *>(bad.data()), bad.size(), safe_sink));
+  }
 }
