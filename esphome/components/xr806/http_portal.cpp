@@ -12,6 +12,7 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "captive_dns_packet.h"
+#include "http_request_parser.h"
 #ifdef USE_CAPTIVE_PORTAL
 #include "esphome/components/captive_portal/captive_index.h"
 #include "esphome/core/application.h"
@@ -51,36 +52,6 @@ static int socket_nonblocking(int fd) {
 }
 
 static bool transient_error() { return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR; }
-
-// HTTP header names are ASCII case-insensitive (RFC 9110). Never search
-// across the request body; look only at complete CRLF-delimited lines.
-static const char *find_header_value(const char *start, const char *end, const char *name) {
-  const size_t wanted = strlen(name);
-  const char *line = strstr(start, "\r\n");
-  if (line == nullptr || line >= end)
-    return nullptr;
-  while ((line += 2) < end) {
-    const char *next = strstr(line, "\r\n");
-    if (next == nullptr || next > end)
-      return nullptr;
-    const char *colon = static_cast<const char *>(memchr(line, ':', static_cast<size_t>(next - line)));
-    if (colon != nullptr && static_cast<size_t>(colon - line) == wanted) {
-      bool same = true;
-      for (size_t i = 0; i < wanted; i++) {
-        const char a = line[i] >= 'A' && line[i] <= 'Z' ? line[i] + ('a' - 'A') : line[i];
-        const char b = name[i] >= 'A' && name[i] <= 'Z' ? name[i] + ('a' - 'A') : name[i];
-        if (a != b) {
-          same = false;
-          break;
-        }
-      }
-      if (same)
-        return colon + 1;
-    }
-    line = next;
-  }
-  return nullptr;
-}
 
 static int hex_digit(char ch) {
   if (ch >= '0' && ch <= '9')
@@ -283,23 +254,26 @@ void XR806HTTPServer::send_static_response_(int status, const char *content_type
 }
 
 void XR806HTTPServer::prepare_request_() {
-  const char *header_end = strstr(this->request_, "\r\n\r\n");
-  if (header_end == nullptr)
-    return;
-  const size_t header_len = static_cast<size_t>(header_end + 4 - this->request_);
-  const bool is_get = strncmp(this->request_, "GET ", 4) == 0;
-  const bool is_post = strncmp(this->request_, "POST ", 5) == 0;
-  if (!is_get && !is_post) {
-    this->send_response_(405, "text/plain", "Only GET and POST are supported");
-    return;
+  HttpRequestView req{};
+  switch (parse_http_request(this->request_, this->request_used_, MAX_REQUEST, &req)) {
+    case HttpParseStatus::INCOMPLETE:
+      return;
+    case HttpParseStatus::TOO_LARGE:
+      this->send_response_(413, "text/plain", "Request too large");
+      return;
+    case HttpParseStatus::METHOD_NOT_ALLOWED:
+      this->send_response_(405, "text/plain", "Only GET and POST are supported");
+      return;
+    case HttpParseStatus::BAD_REQUEST:
+      this->send_response_(400, "text/plain", "Malformed HTTP request");
+      return;
+    case HttpParseStatus::COMPLETE:
+      break;
   }
-  const char *path = this->request_ + (is_get ? 4 : 5);
-  const char *path_end = strchr(path, ' ');
-  if (path_end == nullptr || path_end >= header_end || path_end - path > 512) {
-    this->send_response_(400, "text/plain", "Malformed request");
-    return;
-  }
-  const size_t path_len = static_cast<size_t>(path_end - path);
+  const bool is_get = req.method == HttpMethod::GET;
+  const char *path = req.uri;
+  const char *path_end = path + req.uri_length;
+  const size_t path_len = req.uri_length;
   const char *question = static_cast<const char *>(memchr(path, '?', path_len));
   const size_t route_len = question == nullptr ? path_len : static_cast<size_t>(question - path);
   if (is_get) {
@@ -351,31 +325,9 @@ void XR806HTTPServer::prepare_request_() {
     return;
   }
 
-  const char *digits = find_header_value(this->request_, header_end, "Content-Length");
-  if (digits == nullptr) {
-    this->send_response_(400, "text/plain", "Missing Content-Length");
-    return;
-  }
-  while (digits < header_end && *digits == ' ')
-    digits++;
-  if (digits == header_end || *digits < '0' || *digits > '9') {
-    this->send_response_(400, "text/plain", "Malformed Content-Length");
-    return;
-  }
-  unsigned body_length = 0;
-  while (digits < header_end && *digits >= '0' && *digits <= '9') {
-    body_length = body_length * 10 + static_cast<unsigned>(*digits - '0');
-    if (body_length > 512) {
-      this->send_response_(413, "text/plain", "Form too large");
-      return;
-    }
-    digits++;
-  }
-  if (this->request_used_ < header_len + body_length)
-    return;
   this->pending_ssid_[0] = '\0';
   this->pending_password_[0] = '\0';
-  if (!parse_wifi_form(this->request_ + header_len, body_length, this->pending_ssid_, this->pending_password_)) {
+  if (!parse_wifi_form(req.body, req.body_length, this->pending_ssid_, this->pending_password_)) {
     this->send_response_(400, "text/plain", "Invalid SSID or password");
     return;
   }
