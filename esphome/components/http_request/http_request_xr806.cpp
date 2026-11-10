@@ -28,6 +28,9 @@ ESPHOME_LOG_TAG(TAG, "http_request");
 // Responses not yet closed; only touched from the main loop.
 static uint8_t open_sessions = 0;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
+// The http_request component; there is at most one.
+static HttpRequestXR806 *instance = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
 // Longest response header line that is read; longer ones end the search for that header.
 static constexpr size_t HEADER_LINE_MAX = 512;
 
@@ -93,6 +96,20 @@ template<typename F> static void for_each_header(uint32_t session, const char *n
     on_value(std::string(value, value_len));
   }
   HTTPClientFindCloseHeader(session);
+}
+
+HttpRequestXR806::HttpRequestXR806() { instance = this; }
+
+bool HttpRequestXR806::any_busy() {
+  if (HttpContainerXR806::any_open())
+    return true;
+  if (instance == nullptr)
+    return false;
+  for (const PendingRequest *request = instance->requests_; request != nullptr; request = request->next) {
+    if (!request->finished && !request->cancelled)
+      return true;
+  }
+  return false;
 }
 
 std::shared_ptr<HttpContainer> HttpRequestXR806::perform(const char *url, const char *method, const std::string &body,
