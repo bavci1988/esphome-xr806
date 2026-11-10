@@ -42,7 +42,7 @@ def test_explicit_flash_safe_mode_and_manual_recovery_button(
 
     assert "safe_mode::SafeModeComponent" in generated
     assert re.search(
-        r"should_enter_safe_mode\\(\\s*4\\s*,\\s*120000\\s*,\\s*30000\\s*,\\s*true\\s*\\)",
+        r"should_enter_safe_mode\(\s*4\s*,\s*120000\s*,\s*30000\s*,\s*true\s*\)",
         generated,
     )
     assert "restart_in_safe_mode()" in generated
