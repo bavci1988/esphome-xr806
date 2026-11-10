@@ -46,6 +46,8 @@ def test_explicit_flash_safe_mode_and_manual_recovery_button(
         generated,
     )
     assert "restart_in_safe_mode()" in generated
+    assert "USE_SAFE_MODE_CALLBACK" in _defines()
+    assert "add_on_safe_mode_callback" in generated
     assert "USE_PREFERENCE_KEY_LOOKUP" in _defines()
     assert "preferences::IntervalSyncer" in generated
 
