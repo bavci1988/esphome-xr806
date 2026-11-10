@@ -13,14 +13,14 @@ int main() {
       0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 0x03, 'c', 'o', 'm', 0x00,
       0x00, 0x01, 0x00, 0x01,
   };
-  constexpr uint8_t ip[] = {192, 168, 176, 1};
+  constexpr uint8_t ip[] = {192, 168, 4, 1};
   std::array<uint8_t, 272> answer{};
   size_t n = esphome::xr806::make_captive_dns_reply(query, sizeof(query), ip, answer.data(), answer.size());
   assert(n == sizeof(query) + 16);
   assert(answer[0] == 0x12 && answer[1] == 0x34);
   assert(answer[2] == 0x85);  // QR + AA + RD
   assert(answer[7] == 1);
-  assert(answer[n - 4] == 192 && answer[n - 3] == 168 && answer[n - 2] == 176 && answer[n - 1] == 1);
+  assert(answer[n - 4] == 192 && answer[n - 3] == 168 && answer[n - 2] == 4 && answer[n - 1] == 1);
 
   auto aaaa = std::array<uint8_t, sizeof(query)>{};
   for (size_t i = 0; i < sizeof(query); i++)
