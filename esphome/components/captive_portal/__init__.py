@@ -43,6 +43,7 @@ DOMAIN = "captive_portal"
 captive_portal_ns = cg.esphome_ns.namespace("captive_portal")
 CaptivePortal = captive_portal_ns.class_("CaptivePortal", cg.Component)
 
+
 def _validate_schema(config: ConfigType) -> ConfigType:
     """Select only the backend-specific ID dependency during validation.
 
