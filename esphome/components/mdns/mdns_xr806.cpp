@@ -8,6 +8,7 @@
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #ifdef USE_XR806_STANDBY_CONTROLLER
@@ -36,22 +37,26 @@ namespace esphome::mdns {
 
 ESPHOME_LOG_TAG(TAG, "xr806.mdns");
 
-// The pinned XR806 vendor SDK compiles its liblwip.a with exactly one mDNS
-// service slot. Do not silently drop a YAML-configured extra service.
+// The SDK's lwipopts.h sets how many services one netif can announce.
 static_assert(MDNS_SERVICE_COUNT <= MDNS_MAX_SERVICES,
-              "XR806 vendor lwIP mDNS supports one service; extra mDNS services need an SDK rebuild");
+              "More mDNS services than MDNS_MAX_SERVICES in the XR806 SDK's lwipopts.h");
 
 namespace {
 constexpr uint32_t MDNS_TTL_SECONDS = 120;
 constexpr size_t MAX_TXT_WIRE_BYTES = 255;  // SDK mdns.c has a 256-byte TXT buffer.
 
-struct Backend {
-  // Published by setup() before any tcpip_callback runs; immutable afterward.
-  std::string hostname;
-  std::string service_type;
+struct Service {
+  std::string type;
   enum mdns_sd_proto protocol { DNSSD_PROTO_TCP };
   uint16_t port{0};
   std::vector<std::string> txt;
+};
+
+struct Backend {
+  // Published by setup() before any tcpip_callback runs; immutable afterward.
+  std::string hostname;
+  std::array<Service, MDNS_SERVICE_COUNT> services{};
+  size_t service_count{0};
   bool configured{false};
 #ifdef USE_XR806_STANDBY_CONTROLLER
   xr806::XR806StandbyAsyncEpoch suspend_epoch{};
@@ -71,8 +76,8 @@ Backend &backend() {
 }
 
 void append_txt(struct mdns_service *service, void *arg) {
-  const auto *state = static_cast<const Backend *>(arg);
-  for (const auto &entry : state->txt) {
+  const auto *entry_service = static_cast<const Service *>(arg);
+  for (const auto &entry : entry_service->txt) {
     const err_t err = mdns_resp_add_service_txtitem(service, entry.data(), static_cast<u8_t>(entry.size()));
     if (err != ERR_OK) {
       ESP_LOGE(TAG, "Failed to build mDNS TXT entry (error %d)", static_cast<int>(err));
@@ -156,19 +161,22 @@ void refresh_mdns(void *context) {
     return;
   }
 
-  const s8_t service = mdns_resp_add_service(iface, state->hostname.c_str(), state->service_type.c_str(),
-                                             state->protocol, state->port, MDNS_TTL_SECONDS, append_txt, state);
-  if (service < 0) {
-    ESP_LOGE(TAG, "mDNS service registration failed (%d)", static_cast<int>(service));
-    mdns_resp_remove_netif(iface);
-    return;
+  for (size_t i = 0; i < state->service_count; i++) {
+    Service &entry = state->services[i];
+    const s8_t slot = mdns_resp_add_service(iface, state->hostname.c_str(), entry.type.c_str(), entry.protocol,
+                                            entry.port, MDNS_TTL_SECONDS, append_txt, &entry);
+    if (slot < 0) {
+      ESP_LOGE(TAG, "mDNS service %s registration failed (%d)", entry.type.c_str(), static_cast<int>(slot));
+      mdns_resp_remove_netif(iface);
+      return;
+    }
   }
 
   state->registered_netif = iface;
   state->last_ipv4 = ipv4;
   state->failures = 0;
-  ESP_LOGI(TAG, "mDNS: %s.local and %s registered on port %u", state->hostname.c_str(), state->service_type.c_str(),
-           state->port);
+  ESP_LOGI(TAG, "mDNS: %s.local registered with %u services", state->hostname.c_str(),
+           static_cast<unsigned>(state->service_count));
 }
 
 void shutdown_mdns(void *context) { remove_netif(static_cast<Backend *>(context)); }
@@ -180,42 +188,25 @@ void request_refresh() {
   }
 }
 
-void register_xr806(MDNSComponent *component, StaticVector<MDNSService, MDNS_SERVICE_COUNT> &services) {
-  Backend &state = backend();
-  if (services.size() != 1) {
-    ESP_LOGE(TAG, "XR806 mDNS expects one service, got %u", static_cast<unsigned>(services.size()));
-    component->mark_failed();
-    return;
-  }
-
-  const auto &entry = services[0];
+/// Copies one ESPHome service into out; false if the lwIP responder cannot announce it.
+bool convert_service(const MDNSService &entry, Service &out) {
   const char *service_name = MDNS_STR_ARG(entry.service_type);
   const char *protocol_name = MDNS_STR_ARG(entry.proto);
-  const auto &hostname = App.get_name();
-
-  if (hostname.empty() || hostname.size() > MDNS_LABEL_MAXLEN || service_name == nullptr || service_name[0] != '_' ||
-      std::strlen(service_name) > MDNS_LABEL_MAXLEN) {
-    ESP_LOGE(TAG, "Invalid XR806 mDNS hostname or service type");
-    component->mark_failed();
-    return;
+  if (service_name == nullptr || service_name[0] != '_' || std::strlen(service_name) > MDNS_LABEL_MAXLEN) {
+    ESP_LOGE(TAG, "Invalid mDNS service type");
+    return false;
   }
-
-  enum mdns_sd_proto protocol;
   if (std::strcmp(protocol_name, "_tcp") == 0) {
-    protocol = DNSSD_PROTO_TCP;
+    out.protocol = DNSSD_PROTO_TCP;
   } else if (std::strcmp(protocol_name, "_udp") == 0) {
-    protocol = DNSSD_PROTO_UDP;
+    out.protocol = DNSSD_PROTO_UDP;
   } else {
-    ESP_LOGE(TAG, "Unsupported XR806 mDNS service protocol");
-    component->mark_failed();
-    return;
+    ESP_LOGE(TAG, "Unsupported mDNS service protocol %s", protocol_name);
+    return false;
   }
-
-  state.hostname = hostname;
-  state.service_type = service_name;
-  state.protocol = protocol;
-  state.port = entry.port.value();
-  state.txt.clear();
+  out.type = service_name;
+  out.port = entry.port.value();
+  out.txt.clear();
 
   size_t txt_bytes = 0;
   for (const auto &record : entry.txt_records) {
@@ -223,20 +214,35 @@ void register_xr806(MDNSComponent *component, StaticVector<MDNSService, MDNS_SER
     const char *value = MDNS_STR_ARG(record.value);
     if (key == nullptr || value == nullptr) {
       ESP_LOGE(TAG, "Invalid empty mDNS TXT key/value pointer");
-      component->mark_failed();
-      return;
+      return false;
     }
-
     std::string txt = std::string(key) + "=" + value;
     if (txt.size() > MAX_TXT_WIRE_BYTES || txt_bytes + 1 + txt.size() > MAX_TXT_WIRE_BYTES) {
-      ESP_LOGE(TAG, "XR806 mDNS TXT exceeds vendor 256-byte buffer");
-      component->mark_failed();
-      return;
+      ESP_LOGE(TAG, "mDNS TXT records of %s exceed the 256-byte lwIP buffer", service_name);
+      return false;
     }
     txt_bytes += 1 + txt.size();
-    state.txt.push_back(std::move(txt));
+    out.txt.push_back(std::move(txt));
   }
+  return true;
+}
 
+void register_xr806(MDNSComponent *component, StaticVector<MDNSService, MDNS_SERVICE_COUNT> &services) {
+  Backend &state = backend();
+  const auto &hostname = App.get_name();
+  if (hostname.empty() || hostname.size() > MDNS_LABEL_MAXLEN) {
+    component->mark_failed(LOG_STR("Invalid mDNS hostname"));
+    return;
+  }
+  state.hostname = hostname;
+  state.service_count = 0;
+  for (const auto &entry : services) {
+    if (!convert_service(entry, state.services[state.service_count])) {
+      component->mark_failed(LOG_STR("Invalid mDNS service"));
+      return;
+    }
+    state.service_count++;
+  }
   state.configured = true;
 }
 

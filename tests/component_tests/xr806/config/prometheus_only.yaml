@@ -1,0 +1,19 @@
+esphome:
+  name: xr806-prometheus-only-ci
+xr806:
+  board: wxu
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+prometheus:
+  include_internal: true
+  relabel:
+    xr806_temperature:
+      id: xr806_board_temperature
+      name: Board Temperature
+sensor:
+  - platform: template
+    id: xr806_temperature
+    name: Temperature
+    lambda: return 21.5f;
+    update_interval: 10s

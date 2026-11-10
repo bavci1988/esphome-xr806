@@ -101,9 +101,6 @@ class AsyncWebServerRequest {
   void set_content_length(size_t value) { this->content_length_ = value; }
   void onDisconnect(std::function<void()> callback) { this->on_disconnect_ = std::move(callback); }
   StringRef url_to(std::span<char, URL_BUF_SIZE> buf) const;
-  // Match the ESPAsyncWebServer URL accessor used by upstream HTTP handlers
-  // (including Prometheus). Decode the path just like url_to() does.
-  std::string url() const { return decode(this->uri_); }
   bool hasHeader(const char *name) const;
   size_t get_header_to(const char *name, std::span<char> buf) const;
   std::string arg(const char *name) const;

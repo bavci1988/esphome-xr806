@@ -213,3 +213,25 @@ def test_prometheus_with_shared_web_server(
     assert "set_include_internal(true)" in generated
     assert "add_label_id(" in generated
     assert "add_label_name(" in generated
+
+
+def test_prometheus_without_web_server(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("prometheus_only.yaml"))
+
+    assert "prometheus::PrometheusHandler" in generated
+    assert "web_server_xr806::WebServerXR806" in generated
+
+
+def test_mdns_announces_api_web_server_and_prometheus(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generate_main(component_config_path("prometheus_api.yaml"))
+
+    counts = {
+        str(define) for define in CORE.defines if define.name == "MDNS_SERVICE_COUNT"
+    }
+    assert counts == {"MDNS_SERVICE_COUNT=3"}
