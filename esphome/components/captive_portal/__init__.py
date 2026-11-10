@@ -105,6 +105,8 @@ async def to_code(config: ConfigType) -> None:
         # The XR806 implementation uses its own lwIP HTTP/DNS transport.
         cg.add_define("USE_CAPTIVE_PORTAL")
         cg.add_define("USE_XR806_HTTP_PORTAL")
+        if config[CONF_COMPRESSION] == "gzip":
+            cg.add_define("USE_CAPTIVE_PORTAL_GZIP")
         cg.add_global(
             cg.RawStatement(
                 '#include "esphome/components/captive_portal/captive_portal.h"'
