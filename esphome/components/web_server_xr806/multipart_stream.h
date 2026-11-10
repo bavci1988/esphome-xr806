@@ -7,6 +7,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace esphome::web_server_xr806 {
 
