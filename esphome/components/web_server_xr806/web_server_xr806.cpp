@@ -256,6 +256,7 @@ void AsyncWebServer::dispatch_(Client &c) {
   size_t header_cursor = line_end + 2;
   size_t content_length = 0;
   bool has_length = false, unsupported_transfer = false, bad_length = false;
+  if (c.header_end > MAX_HEADER_BYTES) { c.socket.reset(); return; }
   while (header_cursor < c.header_end - 2) {
     const size_t end = c.input.find("\r\n", header_cursor);
     if (end == std::string::npos || end > c.header_end) { c.socket.reset(); return; }
@@ -266,15 +267,19 @@ void AsyncWebServer::dispatch_(Client &c) {
     const size_t start = line.find_first_not_of(" \t", colon + 1);
     std::string value = start == std::string::npos ? "" : line.substr(start);
     if (equals_ci(name, "Content-Length")) {
+      if (has_length) { bad_length = true; break; }
       has_length = true;
       char *tail = nullptr;
       const unsigned long parsed = std::strtoul(value.c_str(), &tail, 10);
-      if (tail == value.c_str() || *tail != 0 || parsed > MAX_BODY_BYTES)
+      if (value.empty() || value.front() < '0' || value.front() > '9' ||
+          tail == value.c_str() || *tail != 0 || parsed > MAX_BODY_BYTES)
         bad_length = true;
       else
         content_length = static_cast<size_t>(parsed);
     }
-    if (equals_ci(name, "Transfer-Encoding") && !equals_ci(value, "identity"))
+    // XR806 handles only Content-Length framing. Even "identity" alongside
+    // Content-Length is ambiguous across proxies; fail closed.
+    if (equals_ci(name, "Transfer-Encoding"))
       unsupported_transfer = true;
     headers.emplace_back(std::move(name), std::move(value));
     header_cursor = end + 2;
@@ -329,7 +334,8 @@ void AsyncWebServer::process_(Client &c) {
         const size_t marker = c.input.find("\r\n\r\n");
         if (marker != std::string::npos) c.header_end = marker + 4;
       }
-      if (c.header_end == 0 && c.input.size() > MAX_HEADER_BYTES) { c.socket.reset(); return; }
+      if ((c.header_end == 0 && c.input.size() > MAX_HEADER_BYTES) ||
+          c.header_end > MAX_HEADER_BYTES) { c.socket.reset(); return; }
       if (c.input.size() > MAX_HEADER_BYTES + MAX_BODY_BYTES) { c.socket.reset(); return; }
     }
     if (c.header_end == 0) return;
