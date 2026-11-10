@@ -26,10 +26,20 @@ class CaptivePortal final : public AsyncWebHandler, public Component {
   }
 
   bool canHandle(AsyncWebServerRequest *request) const override {
-    // Handle all GET requests when captive portal is active
-    // This allows us to respond with the portal page for any URL,
-    // triggering OS captive portal detection
-    return this->active_ && request->method() == HTTP_GET;
+    if (!this->active_)
+      return false;
+    // Captive detection and the upstream portal UI use GET. Also accept a
+    // bounded POST to /wifisave: browsers may submit credentials as a form.
+    if (request->method() == HTTP_GET)
+      return true;
+    if (request->method() != HTTP_POST)
+      return false;
+#if defined(USE_ESP32) || defined(USE_XR806)
+    char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    return request->url_to(url_buf) == ESPHOME_F("/wifisave");
+#else
+    return request->url() == ESPHOME_F("/wifisave");
+#endif
   }
 
   void handle_config(AsyncWebServerRequest *request);
