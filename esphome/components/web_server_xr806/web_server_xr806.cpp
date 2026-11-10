@@ -224,6 +224,10 @@ void AsyncWebServer::begin() {
 }
 
 void AsyncWebServer::end() {
+  // SSE owns accepted sockets independently of Client. Close these before
+  // the TCP listener is torn down; no stale HTTP streams may survive a stop.
+  for (auto *handler : handlers_)
+    handler->onServerStop();
   clients_.clear();
   listener_.reset();
 }
