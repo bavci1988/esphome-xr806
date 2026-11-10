@@ -25,7 +25,7 @@ namespace esphome::web_server {
 class WebServer;
 }
 
-namespace esphome::web_server_idf {
+namespace esphome::web_server_xr806 {
 
 // ESPHome HTTP handler contract; implemented on the existing lwIP sockets, not
 // the ESP-IDF httpd, ESPAsyncWebServer or a vendor-specific duplicate REST API.
@@ -56,8 +56,8 @@ class AsyncWebServerResponseContent : public AsyncWebServerResponse {
  public:
   AsyncWebServerResponseContent(int code, const char *type, std::string text)
       : AsyncWebServerResponse(code, type), text_(std::move(text)) {}
-  const char *get_content_data() const override { return text_.data(); }
-  size_t get_content_size() const override { return text_.size(); }
+  const char *get_content_data() const override { return this->text_.data(); }
+  size_t get_content_size() const override { return this->text_.size(); }
 
  protected:
   std::string text_;
@@ -67,8 +67,8 @@ class AsyncWebServerResponseProgmem : public AsyncWebServerResponse {
  public:
   AsyncWebServerResponseProgmem(int code, const char *type, const uint8_t *data, size_t size)
       : AsyncWebServerResponse(code, type), data_(data), size_(size) {}
-  const char *get_content_data() const override { return reinterpret_cast<const char *>(data_); }
-  size_t get_content_size() const override { return size_; }
+  const char *get_content_data() const override { return reinterpret_cast<const char *>(this->data_); }
+  size_t get_content_size() const override { return this->size_; }
 
  protected:
   const uint8_t *data_;
@@ -78,28 +78,28 @@ class AsyncWebServerResponseProgmem : public AsyncWebServerResponse {
 class AsyncResponseStream : public AsyncWebServerResponseContent {
  public:
   explicit AsyncResponseStream(const char *type) : AsyncWebServerResponseContent(200, type, "") {}
-  void print(const char *text) { text_.append(text); }
-  void print(const std::string &text) { text_.append(text); }
+  void print(const char *text) { this->text_.append(text); }
+  void print(const std::string &text) { this->text_.append(text); }
   void print(float value);
   void print(int value);
   void printf(const char *format, ...) __attribute__((format(printf, 2, 3)));
-  void write(uint8_t value) { text_.push_back(static_cast<char>(value)); }
+  void write(uint8_t value) { this->text_.push_back(static_cast<char>(value)); }
 };
 
 class AsyncWebServerRequest {
  public:
   static constexpr size_t URL_BUF_SIZE = 257;
   ~AsyncWebServerRequest() {
-    if (on_disconnect_)
-      on_disconnect_();
+    if (this->on_disconnect_)
+      this->on_disconnect_();
   }
   AsyncWebServerRequest(http_method method, std::string uri, std::string query, std::string body,
                         std::vector<std::pair<std::string, std::string>> headers,
                         std::unique_ptr<socket::Socket> *socket);
-  http_method method() const { return method_; }
-  size_t contentLength() const { return content_length_; }
-  void set_content_length(size_t value) { content_length_ = value; }
-  void onDisconnect(std::function<void()> callback) { on_disconnect_ = std::move(callback); }
+  http_method method() const { return this->method_; }
+  size_t contentLength() const { return this->content_length_; }
+  void set_content_length(size_t value) { this->content_length_ = value; }
+  void onDisconnect(std::function<void()> callback) { this->on_disconnect_ = std::move(callback); }
   StringRef url_to(std::span<char, URL_BUF_SIZE> buf) const;
   bool hasHeader(const char *name) const;
   size_t get_header_to(const char *name, std::span<char> buf) const;
@@ -116,9 +116,11 @@ class AsyncWebServerRequest {
   AsyncWebServerResponse *beginResponse(int status, const char *type, const std::string &text);
   AsyncWebServerResponse *beginResponse(int status, const char *type, const uint8_t *data, size_t len);
   AsyncResponseStream *beginResponseStream(const char *type);
-  std::unique_ptr<AsyncWebServerResponse> take_response() { return std::move(response_); }
-  std::unique_ptr<socket::Socket> take_socket() { return socket_ == nullptr ? nullptr : std::move(*socket_); }
-  bool has_response() const { return response_ != nullptr; }
+  std::unique_ptr<AsyncWebServerResponse> take_response() { return std::move(this->response_); }
+  std::unique_ptr<socket::Socket> take_socket() {
+    return this->socket_ == nullptr ? nullptr : std::move(*this->socket_);
+  }
+  bool has_response() const { return this->response_ != nullptr; }
 
  protected:
   static std::string decode_(const std::string &s);
@@ -143,8 +145,6 @@ class AsyncWebHandler {
                             size_t len, bool final) {}
   virtual void handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {}
   virtual bool isRequestHandlerTrivial() const { return true; }
-  // Listener shutdown also closes detached SSE sockets owned by handlers.
-  virtual void onServerStop() {}
 };
 
 class AsyncWebServer {
@@ -158,14 +158,11 @@ class AsyncWebServer {
   // retain ownership and must drain before the network can suspend.
   void stop_accepting();
   bool has_active_connections() const;
-#ifdef USE_WEBSERVER
-  void register_event_source(AsyncEventSource *source);
-#endif
   AsyncWebHandler &addHandler(AsyncWebHandler *handler) {
-    handlers_.push_back(handler);
+    this->handlers_.push_back(handler);
     return *handler;
   }
-  void onNotFound(std::function<void(AsyncWebServerRequest *)> fn) { not_found_ = std::move(fn); }
+  void onNotFound(std::function<void(AsyncWebServerRequest *)> fn) { this->not_found_ = std::move(fn); }
 
  protected:
   struct Client {
@@ -200,9 +197,6 @@ class AsyncWebServer {
   std::list<Client> clients_;
   std::vector<AsyncWebHandler *> handlers_;
   std::function<void(AsyncWebServerRequest *)> not_found_;
-#ifdef USE_WEBSERVER
-  std::vector<AsyncEventSource *> event_sources_;
-#endif
 };
 
 struct HttpHeader {
@@ -213,8 +207,8 @@ struct HttpHeader {
 class DefaultHeaders {
  public:
   static DefaultHeaders &Instance();
-  void addHeader(const char *name, const char *value) { headers_.push_back({name, value}); }
-  const std::vector<HttpHeader> &headers() const { return headers_; }
+  void addHeader(const char *name, const char *value) { this->headers_.push_back({name, value}); }
+  const std::vector<HttpHeader> &headers() const { return this->headers_; }
 
  protected:
   std::vector<HttpHeader> headers_;
@@ -225,16 +219,23 @@ using message_generator_t = void(esphome::web_server::WebServer *, void *, json:
 
 class AsyncEventSource : public AsyncWebHandler {
  public:
-  AsyncEventSource(StringRef path, esphome::web_server::WebServer *web_server) : path_(path), web_server_(web_server) {}
+  AsyncEventSource(StringRef path, esphome::web_server::WebServer *web_server)
+      : path_(path), web_server_(web_server), next_source_(first_source) {
+    // Event sources hold their sockets outside the server's client list; the server finds them here.
+    first_source = this;
+  }
+  AsyncEventSource(const AsyncEventSource &) = delete;
+  AsyncEventSource &operator=(const AsyncEventSource &) = delete;
+  static AsyncEventSource *first_source;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+  AsyncEventSource *next_source() const { return this->next_source_; }
   bool canHandle(AsyncWebServerRequest *request) const override;
   void handleRequest(AsyncWebServerRequest *request) override;
   void try_send_nodefer(const char *message, size_t len, const char *event = nullptr, uint32_t id = 0,
                         uint32_t reconnect = 0);
   void deferrable_send_state(void *source, bool detail_all, message_generator_t *generator);
   bool loop();
-  bool empty() const { return sessions_.empty(); }
+  bool empty() const { return this->sessions_.empty(); }
   void close_all();
-  void onServerStop() override { sessions_.clear(); }
 
  protected:
   struct Session {
@@ -251,11 +252,12 @@ class AsyncEventSource : public AsyncWebHandler {
   esphome::web_server::WebServer *web_server_;
   std::vector<Session> sessions_;
   Session *listing_session_{nullptr};
+  AsyncEventSource *next_source_;
 };
 #endif
 
-}  // namespace esphome::web_server_idf
+}  // namespace esphome::web_server_xr806
 
-// Keep the WebServerBase/REST handler surface shared with ESPHome's native IDF backend.
-using namespace esphome::web_server_idf;  // NOLINT(google-global-names-in-headers)
-#endif                                    // USE_XR806
+// The shared web_server, captive_portal and OTA handlers use these names unqualified, as with web_server_idf.
+using namespace esphome::web_server_xr806;  // NOLINT(google-global-names-in-headers)
+#endif                                      // USE_XR806

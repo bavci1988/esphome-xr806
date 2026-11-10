@@ -9,10 +9,15 @@ class JsonBuilder;
 }  // namespace esphome::json
 
 namespace esphome::web_server_idf {
-#if defined(USE_ESP32) || defined(USE_XR806)
+#ifdef USE_ESP32
 class AsyncEventSource;
 #endif
 }  // namespace esphome::web_server_idf
+#ifdef USE_XR806
+namespace esphome::web_server_xr806 {
+class AsyncEventSource;
+}  // namespace esphome::web_server_xr806
+#endif
 
 namespace esphome::web_server {
 
@@ -23,8 +28,10 @@ class WebServer;
 
 class ListEntitiesIterator final : public ComponentIterator {
  public:
-#if defined(USE_ESP32) || defined(USE_XR806)
+#ifdef USE_ESP32
   ListEntitiesIterator(const WebServer *ws, esphome::web_server_idf::AsyncEventSource *es);
+#elif defined(USE_XR806)
+  ListEntitiesIterator(const WebServer *ws, esphome::web_server_xr806::AsyncEventSource *es);
 #elif defined(USE_ARDUINO)
   ListEntitiesIterator(const WebServer *ws, DeferredUpdateEventSource *es);
 #endif
@@ -45,8 +52,10 @@ class ListEntitiesIterator final : public ComponentIterator {
   void send_all_(void *source, void (*generator)(WebServer *, void *, json::JsonBuilder &));
 
   const WebServer *web_server_;
-#if defined(USE_ESP32) || defined(USE_XR806)
+#ifdef USE_ESP32
   esphome::web_server_idf::AsyncEventSource *events_;
+#elif defined(USE_XR806)
+  esphome::web_server_xr806::AsyncEventSource *events_;
 #elif USE_ARDUINO
   DeferredUpdateEventSource *events_;
 #endif

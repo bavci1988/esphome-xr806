@@ -10,6 +10,7 @@
 #include <cstring>
 #include <string>
 
+#include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
@@ -17,7 +18,7 @@
 #include "esphome/components/web_server/web_server.h"
 #endif
 
-namespace esphome::web_server_idf {
+namespace esphome::web_server_xr806 {
 
 ESPHOME_LOG_TAG(TAG, "web_server_xr806");
 
@@ -71,7 +72,7 @@ static const char *reason_phrase(int status) {
 
 void AsyncWebServerResponse::addHeader(const char *name, const char *value) {
   if (name != nullptr && value != nullptr)
-    headers_.emplace_back(name, value);
+    this->headers_.emplace_back(name, value);
 }
 
 void AsyncResponseStream::print(float value) {
@@ -92,10 +93,10 @@ void AsyncResponseStream::printf(const char *format, ...) {
   const int count = std::vsnprintf(nullptr, 0, format, copy);
   va_end(copy);
   if (count > 0 && count <= 8192) {
-    const size_t offset = text_.size();
-    text_.resize(offset + static_cast<size_t>(count) + 1);
-    std::vsnprintf(text_.data() + offset, static_cast<size_t>(count) + 1, format, args);
-    text_.resize(offset + static_cast<size_t>(count));
+    const size_t offset = this->text_.size();
+    this->text_.resize(offset + static_cast<size_t>(count) + 1);
+    std::vsnprintf(this->text_.data() + offset, static_cast<size_t>(count) + 1, format, args);
+    this->text_.resize(offset + static_cast<size_t>(count));
   }
   va_end(args);
 }
@@ -138,14 +139,14 @@ std::string AsyncWebServerRequest::decode_(const std::string &s) {
   return out;
 }
 StringRef AsyncWebServerRequest::url_to(std::span<char, URL_BUF_SIZE> buf) const {
-  const std::string decoded = decode_(uri_);
+  const std::string decoded = decode_(this->uri_);
   const size_t n = std::min(decoded.size(), buf.size() - 1);
   std::memcpy(buf.data(), decoded.data(), n);
   buf[n] = 0;
   return StringRef(buf.data(), n);
 }
 size_t AsyncWebServerRequest::get_header_to(const char *name, std::span<char> buf) const {
-  for (const auto &h : headers_) {
+  for (const auto &h : this->headers_) {
     if (!equals_ci(h.first, name))
       continue;
     if (h.second.size() >= buf.size())
@@ -157,7 +158,7 @@ size_t AsyncWebServerRequest::get_header_to(const char *name, std::span<char> bu
   return 0;
 }
 bool AsyncWebServerRequest::hasHeader(const char *name) const {
-  for (const auto &h : headers_)
+  for (const auto &h : this->headers_)
     if (equals_ci(h.first, name))
       return true;
   return false;
@@ -178,18 +179,18 @@ bool AsyncWebServerRequest::find_arg_(const std::string &query, const char *name
   return false;
 }
 bool AsyncWebServerRequest::hasArg(const char *name) const {
-  return find_arg_(query_, name, nullptr) || find_arg_(body_, name, nullptr);
+  return find_arg_(this->query_, name, nullptr) || find_arg_(this->body_, name, nullptr);
 }
 std::string AsyncWebServerRequest::arg(const char *name) const {
   std::string val;
-  if (find_arg_(body_, name, &val) || find_arg_(query_, name, &val))
+  if (find_arg_(this->body_, name, &val) || find_arg_(this->query_, name, &val))
     return val;
   return {};
 }
 bool AsyncWebServerRequest::authenticate(const char *basic_auth_hash) const {
   if (basic_auth_hash == nullptr)
     return false;
-  for (const auto &h : headers_) {
+  for (const auto &h : this->headers_) {
     if (!equals_ci(h.first, "Authorization"))
       continue;
     const std::string expected = std::string("Basic ") + basic_auth_hash;
@@ -215,7 +216,7 @@ void AsyncWebServerRequest::redirect(const char *url) {
 void AsyncWebServerRequest::send(int status, const char *type, const char *text) {
   this->send(new AsyncWebServerResponseContent(status, type, text == nullptr ? "" : text));
 }
-void AsyncWebServerRequest::send(AsyncWebServerResponse *response) { response_.reset(response); }
+void AsyncWebServerRequest::send(AsyncWebServerResponse *response) { this->response_.reset(response); }
 AsyncWebServerResponse *AsyncWebServerRequest::beginResponse(int status, const char *type) {
   return new AsyncWebServerResponseContent(status, type, "");
 }
@@ -235,7 +236,7 @@ DefaultHeaders &DefaultHeaders::Instance() {
 }
 
 void AsyncWebServer::begin() {
-  if (listener_ != nullptr)
+  if (this->listener_ != nullptr)
     return;
   auto socket = socket::socket_ip(SOCK_STREAM, IPPROTO_TCP);
   if (socket == nullptr) {
@@ -245,45 +246,39 @@ void AsyncWebServer::begin() {
   int reuse = 1;
   socket->setsockopt(SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
   sockaddr_storage addr{};
-  const socklen_t len = socket::set_sockaddr_any(reinterpret_cast<sockaddr *>(&addr), sizeof(addr), port_);
+  const socklen_t len = socket::set_sockaddr_any(reinterpret_cast<sockaddr *>(&addr), sizeof(addr), this->port_);
   if (len == 0 || socket->bind(reinterpret_cast<const sockaddr *>(&addr), len) != 0 ||
       socket->listen(MAX_CLIENTS) != 0 || socket->setblocking(false) != 0) {
-    ESP_LOGE(TAG, "Cannot bind/listen on HTTP port %u (errno=%d)", port_, errno);
+    ESP_LOGE(TAG, "Cannot bind/listen on HTTP port %u (errno=%d)", this->port_, errno);
     return;
   }
-  listener_ = std::move(socket);
-  ESP_LOGI(TAG, "Native XR806 HTTP listener on port %u", port_);
+  this->listener_ = std::move(socket);
+  ESP_LOGI(TAG, "Native XR806 HTTP listener on port %u", this->port_);
 }
 
 void AsyncWebServer::end() {
-  // SSE owns accepted sockets independently of Client. Close these before
-  // the TCP listener is torn down; no stale HTTP streams may survive a stop.
-  for (auto *handler : handlers_)
-    handler->onServerStop();
-  clients_.clear();
+  // Event streams own their sockets apart from the client list; close them too.
+#ifdef USE_WEBSERVER
+  for (auto *source = AsyncEventSource::first_source; source != nullptr; source = source->next_source())
+    source->close_all();
+#endif
+  this->clients_.clear();
   this->stop_accepting();
 }
 
-void AsyncWebServer::stop_accepting() { listener_.reset(); }
+void AsyncWebServer::stop_accepting() { this->listener_.reset(); }
 
 bool AsyncWebServer::has_active_connections() const {
-  if (!clients_.empty())
+  if (!this->clients_.empty())
     return true;
 #ifdef USE_WEBSERVER
-  for (auto *source : event_sources_) {
-    if (source != nullptr && !source->empty())
+  for (auto *source = AsyncEventSource::first_source; source != nullptr; source = source->next_source()) {
+    if (!source->empty())
       return true;
   }
 #endif
   return false;
 }
-
-#ifdef USE_WEBSERVER
-void AsyncWebServer::register_event_source(AsyncEventSource *source) {
-  if (source != nullptr && std::find(event_sources_.begin(), event_sources_.end(), source) == event_sources_.end())
-    event_sources_.push_back(source);
-}
-#endif
 
 void AsyncWebServer::dispatch_(Client &c) {
   // Split headers and body only after Content-Length bytes have arrived.
@@ -379,7 +374,7 @@ void AsyncWebServer::dispatch_(Client &c) {
     std::string boundary;
     for (const auto &h : headers) {
       if (equals_ci(h.first, "Content-Type")) {
-        boundary = web_server_xr806::MultipartStream::boundary_from_content_type(h.second);
+        boundary = MultipartStream::boundary_from_content_type(h.second);
         break;
       }
     }
@@ -389,7 +384,7 @@ void AsyncWebServer::dispatch_(Client &c) {
     }
     c.upload_request = std::make_unique<AsyncWebServerRequest>(method, uri, query, "", std::move(headers), &c.socket);
     c.upload_request->set_content_length(content_length);
-    for (auto *handler : handlers_) {
+    for (auto *handler : this->handlers_) {
       if (handler->canHandle(c.upload_request.get())) {
         c.upload_handler = handler;
         break;
@@ -405,7 +400,7 @@ void AsyncWebServer::dispatch_(Client &c) {
       c.response = c.upload_request->take_response();
       return;
     }
-    c.multipart = std::make_unique<web_server_xr806::MultipartStream>(std::move(boundary), content_length);
+    c.multipart = std::make_unique<MultipartStream>(std::move(boundary), content_length);
     c.is_upload = true;
     c.upload_expected = content_length;
     c.input.erase(0, c.header_end);
@@ -420,15 +415,15 @@ void AsyncWebServer::dispatch_(Client &c) {
   const std::string body = c.input.substr(c.header_end, content_length);
   AsyncWebServerRequest request(method, uri, query, body, std::move(headers), &c.socket);
   bool handled = false;
-  for (auto *handler : handlers_) {
+  for (auto *handler : this->handlers_) {
     if (handler->canHandle(&request)) {
       handler->handleRequest(&request);
       handled = true;
       break;
     }
   }
-  if (!handled && not_found_)
-    not_found_(&request);
+  if (!handled && this->not_found_)
+    this->not_found_(&request);
   c.response = request.take_response();
   if (c.socket != nullptr && c.response == nullptr)
     c.response = std::make_unique<AsyncWebServerResponseContent>(404, "text/plain", "Not found");
@@ -479,7 +474,7 @@ void AsyncWebServer::process_upload_(Client &c) {
 void AsyncWebServer::process_(Client &c) {
   if (!c.socket)
     return;
-  const uint32_t now = millis();
+  const uint32_t now = App.get_loop_component_start_time();
   if (now - c.started > CLIENT_TIMEOUT_MS) {
     c.socket.reset();
     return;
@@ -515,7 +510,7 @@ void AsyncWebServer::process_(Client &c) {
     }
     if (c.header_end == 0)
       return;
-    dispatch_(c);
+    this->dispatch_(c);
   }
 #ifdef USE_WEBSERVER_OTA
   if (c.is_upload && !c.upload_done && c.socket != nullptr) {
@@ -599,39 +594,42 @@ void AsyncWebServer::process_(Client &c) {
 void AsyncWebServer::loop() {
   // The listener is parked during standby preflight, but previously accepted
   // requests must still drain and complete before HTTP_BUSY can be cleared.
-  if (listener_ != nullptr && clients_.size() < MAX_CLIENTS) {
+  if (this->listener_ != nullptr && this->clients_.size() < MAX_CLIENTS) {
     sockaddr_storage peer{};
     socklen_t len = sizeof(peer);
-    auto incoming = listener_->accept(reinterpret_cast<sockaddr *>(&peer), &len);
+    auto incoming = this->listener_->accept(reinterpret_cast<sockaddr *>(&peer), &len);
     if (incoming != nullptr) {
       incoming->setblocking(false);
       Client client{};
       client.socket = std::move(incoming);
-      client.started = millis();
-      clients_.push_back(std::move(client));
+      client.started = App.get_loop_component_start_time();
+      this->clients_.push_back(std::move(client));
     }
   }
-  for (auto &client : clients_)
-    process_(client);
-  clients_.remove_if([](const Client &c) { return c.socket == nullptr; });
+  for (auto &client : this->clients_)
+    this->process_(client);
+  this->clients_.remove_if([](const Client &c) { return c.socket == nullptr; });
 }
 
 #ifdef USE_WEBSERVER
+AsyncEventSource *AsyncEventSource::first_source =
+    nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
 void AsyncEventSource::close_all() {
-  sessions_.clear();
-  listing_session_ = nullptr;
+  this->sessions_.clear();
+  this->listing_session_ = nullptr;
 }
 
 bool AsyncEventSource::canHandle(AsyncWebServerRequest *req) const {
   if (req->method() != HTTP_GET)
     return false;
   char url[AsyncWebServerRequest::URL_BUF_SIZE];
-  return req->url_to(url) == path_;
+  return req->url_to(url) == this->path_;
 }
 void AsyncEventSource::handleRequest(AsyncWebServerRequest *req) {
   // Keep one enumeration cursor per browser. The previous shared cursor
   // restarted for all users on every new connection.
-  if (sessions_.size() >= 2) {
+  if (this->sessions_.size() >= 2) {
     req->send(503, "text/plain", "Too many event clients");
     return;
   }
@@ -640,25 +638,28 @@ void AsyncEventSource::handleRequest(AsyncWebServerRequest *req) {
     return;
   Session session{};
   session.socket = std::move(sock);
-  session.last_progress = millis();
+  session.last_progress = App.get_loop_component_start_time();
   session.pending = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n"
                     "Connection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n";
-  session.entities_iterator = std::make_unique<web_server::ListEntitiesIterator>(web_server_, this);
-  session.entities_iterator->begin(web_server_->get_include_internal());
-  sessions_.push_back(std::move(session));
+  session.entities_iterator = std::make_unique<web_server::ListEntitiesIterator>(this->web_server_, this);
+  session.entities_iterator->begin(this->web_server_->include_internal_);
+  this->sessions_.push_back(std::move(session));
+  // WebServer::loop() drives the event streams and stops itself while none is open.
+  this->web_server_->enable_loop();
 
   // The standard web frontend expects a config-bearing ping immediately,
   // not only the periodic uptime pings.
-  auto config = web_server_->get_config_json();
-  this->queue_to_session_(sessions_.back(), config.c_str(), config.size(), "ping", millis(), 30000);
+  auto config = this->web_server_->get_config_json();
+  this->queue_to_session_(this->sessions_.back(), config.c_str(), config.size(), "ping",
+                          App.get_loop_component_start_time(), 30000);
 #ifdef USE_WEBSERVER_SORTING
-  for (const auto &group : web_server_->get_sorting_groups()) {
+  for (const auto &group : this->web_server_->sorting_groups_) {
     json::JsonBuilder builder;
     auto root = builder.root();
     root["name"] = json::linked(group.second.name);
     root["sorting_weight"] = group.second.weight;
     auto message = builder.serialize();
-    this->queue_to_session_(sessions_.back(), message.c_str(), message.size(), "sorting_group", 0, 0);
+    this->queue_to_session_(this->sessions_.back(), message.c_str(), message.size(), "sorting_group", 0, 0);
   }
 #endif
 }
@@ -700,7 +701,7 @@ void AsyncEventSource::queue_to_session_(Session &session, const char *message, 
   session.pending += "\r\n";
 }
 void AsyncEventSource::queue_(const char *message, size_t len, const char *event, uint32_t id, uint32_t reconnect) {
-  for (auto &session : sessions_)
+  for (auto &session : this->sessions_)
     this->queue_to_session_(session, message, len, event, id, reconnect);
 }
 void AsyncEventSource::try_send_nodefer(const char *message, size_t len, const char *event, uint32_t id,
@@ -708,35 +709,35 @@ void AsyncEventSource::try_send_nodefer(const char *message, size_t len, const c
   this->queue_(message, len, event, id, reconnect);
 }
 void AsyncEventSource::deferrable_send_state(void *source, bool detail_all, message_generator_t *generator) {
-  if (sessions_.empty())
+  if (this->sessions_.empty())
     return;
   if (detail_all) {
-    if (listing_session_ == nullptr || listing_session_->socket == nullptr)
+    if (this->listing_session_ == nullptr || this->listing_session_->socket == nullptr)
       return;
   } else {
     bool has_ready_client = false;
-    for (const auto &session : sessions_)
+    for (const auto &session : this->sessions_)
       has_ready_client |= session.socket != nullptr && session.entities_iterator->completed();
     if (!has_ready_client)
       return;
   }
   json::JsonBuilder builder;
-  generator(web_server_, source, builder);
+  generator(this->web_server_, source, builder);
   auto message = builder.serialize();
   if (detail_all) {
     this->queue_to_session_(*listing_session_, message.c_str(), message.size(), "state", 0, 0);
   } else {
-    for (auto &session : sessions_) {
+    for (auto &session : this->sessions_) {
       if (session.socket != nullptr && session.entities_iterator->completed())
         this->queue_to_session_(session, message.c_str(), message.size(), "state", 0, 0);
     }
   }
 }
 bool AsyncEventSource::loop() {
-  if (sessions_.empty())
+  if (this->sessions_.empty())
     return false;
-  const uint32_t now = millis();
-  for (auto &session : sessions_) {
+  const uint32_t now = App.get_loop_component_start_time();
+  for (auto &session : this->sessions_) {
     if (session.socket == nullptr)
       continue;
     if (!session.entities_iterator->completed()) {
@@ -769,12 +770,12 @@ bool AsyncEventSource::loop() {
       }
     }
   }
-  sessions_.erase(
-      std::remove_if(sessions_.begin(), sessions_.end(), [](const Session &s) { return s.socket == nullptr; }),
-      sessions_.end());
-  return !sessions_.empty();
+  this->sessions_.erase(std::remove_if(this->sessions_.begin(), this->sessions_.end(),
+                                       [](const Session &s) { return s.socket == nullptr; }),
+                        this->sessions_.end());
+  return !this->sessions_.empty();
 }
 #endif
 
-}  // namespace esphome::web_server_idf
+}  // namespace esphome::web_server_xr806
 #endif  // USE_XR806

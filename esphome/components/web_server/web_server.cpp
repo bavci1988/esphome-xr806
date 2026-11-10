@@ -422,9 +422,6 @@ void WebServer::setup() {
 
 #if defined(USE_ESP32) || defined(USE_XR806)
   this->base_->add_handler(&this->events_);
-#ifdef USE_XR806
-  this->base_->get_server()->register_event_source(&this->events_);
-#endif
 #endif
   this->base_->add_handler(this);
 #ifdef USE_WEBSERVER_CAPTIVE
@@ -458,12 +455,8 @@ void WebServer::loop() {
   // - deferrable_send_state early-outs when no clients are connected
   // - try_send_nodefer (log, ping) iterates sessions which are empty
   // - REST API handlers use defer() which runs via the Scheduler
-#ifndef USE_XR806
   if (!keep_looping)
     this->disable_loop();
-#else
-  (void) keep_looping;  // XR806 HTTP runs in the main loop; keep polling client streams.
-#endif
 }
 
 #ifdef USE_WEBSERVER_CAPTIVE

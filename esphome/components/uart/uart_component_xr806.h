@@ -33,8 +33,10 @@ class XR806UARTComponent final : public UARTComponent, public Component {
 
   float get_setup_priority() const override { return setup_priority::BUS; }
 
-  bool reconfigure_baud_rate(uint32_t baud_rate) override;
-  void set_baud_probe_mode(bool probing) override;
+  /// Applies a new baud rate without setting up the pins again.
+  bool reconfigure_baud_rate(uint32_t baud_rate);
+  /// While probing baud rates, framing errors are expected and do not latch a fault.
+  void set_baud_probe_mode(bool probing);
   bool is_connected() override { return initialized_ && !tx_fault_ && !rx_overflow_fault_; }
 
   void write_array(const uint8_t *data, size_t len) override;
