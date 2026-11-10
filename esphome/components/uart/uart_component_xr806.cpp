@@ -4,6 +4,9 @@
 
 #include "uart_component_xr806.h"
 
+#include <cinttypes>
+
+#include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
@@ -13,235 +16,194 @@
 
 namespace esphome::uart {
 
-ESPHOME_LOG_TAG(TAG, "xr806.uart");
+ESPHOME_LOG_TAG(TAG, "uart.xr806");
+
+// The SDK console uses UART2 and UART1 shares pins with flash, so the backend drives UART0.
+static constexpr UART_ID UART_PORT = UART0_ID;
+// Bounds the bytes moved from the hardware FIFO per call, so a fast sender cannot starve the main loop.
+static constexpr size_t MAX_RX_BYTES_PER_CALL = 512;
+static constexpr uint32_t TX_READY_TIMEOUT_MS = 20;
+static constexpr uint32_t FLUSH_TIMEOUT_MS = 100;
+static constexpr uint32_t ERROR_LOG_INTERVAL_MS = 5000;
+#ifdef USE_XR806_LOWPOWER
+// Quiet time after the last UART activity before the UART allows standby.
+static constexpr uint32_t UART_IDLE_GUARD_MS = 200;
+#endif
+static constexpr uint32_t LINE_ERROR_BITS =
+    UART_FIFO_ERROR_BIT | UART_FRAME_ERROR_BIT | UART_PARITY_ERROR_BIT | UART_OVERRUN_ERROR_BIT;
+
+UART_InitParam XR806UARTComponent::make_init_param_() const {
+  UART_InitParam param{};
+  param.baudRate = this->baud_rate_;
+  switch (this->data_bits_) {
+    case 5:
+      param.dataBits = UART_DATA_BITS_5;
+      break;
+    case 6:
+      param.dataBits = UART_DATA_BITS_6;
+      break;
+    case 7:
+      param.dataBits = UART_DATA_BITS_7;
+      break;
+    default:
+      param.dataBits = UART_DATA_BITS_8;
+      break;
+  }
+  switch (this->parity_) {
+    case UART_CONFIG_PARITY_EVEN:
+      param.parity = UART_PARITY_EVEN;
+      break;
+    case UART_CONFIG_PARITY_ODD:
+      param.parity = UART_PARITY_ODD;
+      break;
+    default:
+      param.parity = UART_PARITY_NONE;
+      break;
+  }
+  param.stopBits = this->stop_bits_ == 2 ? UART_STOP_BITS_2 : UART_STOP_BITS_1;
+  param.isAutoHwFlowCtrl = 0;
+  return param;
+}
 
 void XR806UARTComponent::setup() {
-  if (this->uart_id_ != 0 || this->baud_rate_ == 0 || this->data_bits_ != 8 || this->stop_bits_ != 1 ||
-      this->parity_ != UART_CONFIG_PARITY_NONE) {
-    ESP_LOGE(TAG, "Unsupported UART configuration");
-    this->mark_failed();
+  this->rx_buffer_ = std::make_unique<uint8_t[]>(this->rx_buffer_size_);
+
+  const UART_InitParam param = this->make_init_param_();
+  if (HAL_UART_Init(UART_PORT, &param) != HAL_OK) {
+    this->mark_failed(LOG_STR("UART0 init failed"));
     return;
   }
-
-  if (this->rx_buffer_size_ == 0 || this->rx_buffer_size_ > 4096) {
-    ESP_LOGE(TAG, "Invalid RX buffer size");
-    this->mark_failed();
-    return;
-  }
-
-  this->rx_buffer_.resize(this->rx_buffer_size_);
-
-  UART_InitParam config{};
-  config.baudRate = this->baud_rate_;
-  config.parity = UART_PARITY_NONE;
-  config.stopBits = UART_STOP_BITS_1;
-  config.dataBits = UART_DATA_BITS_8;
-  config.isAutoHwFlowCtrl = 0;
-
-  HAL_Status result = HAL_UART_Init(static_cast<UART_ID>(this->uart_id_), &config);
-
-  if (result != HAL_OK) {
-    ESP_LOGE(TAG, "HAL_UART_Init failed: %d", static_cast<int>(result));
-    this->mark_failed();
-    return;
-  }
-
-  this->uart_ = HAL_UART_GetInstance(static_cast<UART_ID>(this->uart_id_));
-
+  this->uart_ = HAL_UART_GetInstance(UART_PORT);
   if (this->uart_ == nullptr) {
-    ESP_LOGE(TAG, "UART0 instance unavailable");
-    HAL_UART_DeInit(static_cast<UART_ID>(this->uart_id_));
-    this->mark_failed();
+    HAL_UART_DeInit(UART_PORT);
+    this->mark_failed(LOG_STR("UART0 instance unavailable"));
     return;
   }
-
   this->initialized_ = true;
 
 #ifdef USE_XR806_LOWPOWER
-  this->uart_pm_wakelock_.name = const_cast<char *>("esphome.xr806.uart0");
-  this->note_uart_activity_();
-#endif
-  ESP_LOGI(TAG, "UART0 initialized: %u baud", static_cast<unsigned>(this->baud_rate_));
-}
-
-// The vendor HAL's HAL_UART_IsTxEmpty() checks only the FIFO. A shift
-// register may still be emitting the final UART frame on the physical line.
-// XR806 has a 16550-compatible LSR transmitter-empty flag and BUSY status.
-bool XR806UARTComponent::tx_hardware_idle_() const {
-  return this->initialized_ && this->uart_ != nullptr && HAL_UART_IsTxEmpty(this->uart_) &&
-         (this->uart_->LINE_STATUS & UART_TX_EMPTY_BIT) != 0;
-}
-
-void XR806UARTComponent::set_baud_probe_mode(bool probing) {
-  if (this->baud_probe_mode_ == probing)
-    return;
-  this->baud_probe_mode_ = probing;
-  if (!probing && this->initialized_ && this->uart_ != nullptr) {
-    // Read line status to clear wrong-rate receive errors after a
-    // checksum-valid CMD01 response. The protocol owns baud selection.
-    (void) this->uart_->LINE_STATUS;
-  }
-#ifdef USE_XR806_LOWPOWER
+  this->uart_pm_wakelock_.name = const_cast<char *>("esphome.uart0");
   this->note_uart_activity_();
 #endif
 }
 
-bool XR806UARTComponent::reconfigure_baud_rate(uint32_t baud_rate) {
-  if (!this->initialized_ || this->uart_ == nullptr || this->uart_id_ != 0 || this->tx_fault_ ||
-      this->rx_overflow_fault_)
-    return false;
-  if (baud_rate != 9600 && baud_rate != 115200)
-    return false;
+void XR806UARTComponent::load_settings(bool dump_config) {
+  if (!this->initialized_)
+    return;  // setup() applies the settings.
   if (this->flush() != UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
-    ESP_LOGE(TAG, "UART0 baud change refused: untransmitted TX data");
-    return false;
+    ESP_LOGE(TAG, "UART0 settings not applied: TX did not complete");
+    return;
   }
 #ifdef USE_XR806_LOWPOWER
-  // Claim the native SDK PM wakelock BEFORE changing a live UART clock.
+  // Hold the PM wakelock before the UART clock divider changes.
   this->note_uart_activity_();
   if (this->tx_fault_)
-    return false;
+    return;
 #endif
-  if (baud_rate != this->baud_rate_) {
-    UART_InitParam cfg{};
-    cfg.baudRate = baud_rate;
-    cfg.parity = UART_PARITY_NONE;
-    cfg.stopBits = UART_STOP_BITS_1;
-    cfg.dataBits = UART_DATA_BITS_8;
-    cfg.isAutoHwFlowCtrl = 0;
-    if (HAL_UART_SetConfig(static_cast<UART_ID>(this->uart_id_), &cfg) != HAL_OK) {
-      this->tx_fault_ = true;
-#ifdef USE_XR806_LOWPOWER
-      esphome::xr806::lowpower_policy().set_uart_idle(false);
-#endif
-      ESP_LOGE(TAG, "UART0 baud reconfiguration failed at %u", static_cast<unsigned>(baud_rate));
-      return false;
-    }
-    this->baud_rate_ = baud_rate;
+  const UART_InitParam param = this->make_init_param_();
+  if (HAL_UART_SetConfig(UART_PORT, &param) != HAL_OK) {
+    this->set_tx_fault_();
+    ESP_LOGE(TAG, "UART0 reconfiguration to %" PRIu32 " baud failed", this->baud_rate_);
+    return;
   }
-  // A wrong-rate CMD01 probe can have left partial hardware/software RX.
-  this->rx_head_ = this->rx_tail_ = this->rx_count_ = 0;
-  for (size_t i = 0; i < 512 && HAL_UART_IsRxReady(this->uart_); ++i)
-    (void) HAL_UART_GetRxData(this->uart_);
-#ifdef USE_XR806_LOWPOWER
-  this->note_uart_activity_();
-#endif
-  return true;
+  // Bytes received at the previous settings are meaningless now.
+  this->discard_rx_();
+  if (dump_config) {
+    ESP_LOGCONFIG(TAG, "Reloaded UART0");
+    this->dump_config();
+  }
 }
 
 void XR806UARTComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "XR806 UART0:");
-  ESP_LOGCONFIG(TAG, "  Baud rate: %u", static_cast<unsigned>(this->baud_rate_));
-  ESP_LOGCONFIG(TAG, "  RX buffer: %u bytes", static_cast<unsigned>(this->rx_buffer_.size()));
-  ESP_LOGCONFIG(TAG, "  Dropped RX bytes: %u", static_cast<unsigned>(this->rx_overflows_));
+  ESP_LOGCONFIG(TAG, "UART Bus 0:");
+  LOG_PIN("  TX Pin: ", this->tx_pin_);
+  LOG_PIN("  RX Pin: ", this->rx_pin_);
+  if (this->rx_pin_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  RX Buffer Size: %u", static_cast<unsigned>(this->rx_buffer_size_));
+  }
+  ESP_LOGCONFIG(TAG,
+                "  Baud Rate: %" PRIu32 " baud\n"
+                "  Data Bits: %u\n"
+                "  Parity: %s\n"
+                "  Stop bits: %u",
+                this->baud_rate_, this->data_bits_, LOG_STR_ARG(parity_to_str(this->parity_)), this->stop_bits_);
+  this->check_logger_conflict();
 }
 
 void XR806UARTComponent::check_logger_conflict() {
-  // The SDK console uses UART2; this backend owns UART0 only.
+  // The logger is fixed to UART2 on XR806, and its validation rejects UART0.
 }
 
+void XR806UARTComponent::set_tx_fault_() {
+  this->tx_fault_ = true;
 #ifdef USE_XR806_LOWPOWER
-
-void XR806UARTComponent::note_uart_activity_() {
-  // Physical UART traffic must not begin until the native PM driver has
-  // acknowledged its wakelock. A software-only idle vote cannot stop a
-  // concurrent vendor PM thread that has already started admission.
-  if (!this->uart_pm_wakelock_held_) {
-    if (pm_wake_lock(&this->uart_pm_wakelock_) != 0) {
-      this->tx_fault_ = true;
-      esphome::xr806::lowpower_policy().set_uart_idle(false);
-      ESP_LOGE(TAG, "Unable to claim native UART0 PM wakelock; standby disabled");
-      this->mark_failed();
-      return;
-    }
-    this->uart_pm_wakelock_held_ = true;
-  }
   esphome::xr806::lowpower_policy().set_uart_idle(false);
-  this->last_uart_activity_ms_ = millis();
+#endif
 }
 
-void XR806UARTComponent::update_uart_idle_() {
-  if (!this->initialized_ || this->uart_ == nullptr) {
-    esphome::xr806::lowpower_policy().set_uart_idle(false);
-    return;
-  }
+// Reading the line status register clears its error bits, so every read goes through here.
+void XR806UARTComponent::check_line_status_() {
+  if ((this->uart_->LINE_STATUS & LINE_ERROR_BITS) != 0)
+    ++this->rx_line_errors_;
+}
 
-  const bool buffer_empty = this->rx_count_ == 0;
-  const bool rx_fifo_empty = !HAL_UART_IsRxReady(this->uart_);
-  const bool tx_completed_on_wire = this->tx_hardware_idle_();
+// HAL_UART_IsTxEmpty() checks only the TX FIFO. The transmitter-empty bit also covers
+// the shift register, so the last frame has left the TX line.
+bool XR806UARTComponent::tx_hardware_idle_() {
+  if (!HAL_UART_IsTxEmpty(this->uart_))
+    return false;
   const uint32_t line_status = this->uart_->LINE_STATUS;
-  if (line_status & (UART_FIFO_ERROR_BIT | UART_FRAME_ERROR_BIT | UART_PARITY_ERROR_BIT | UART_OVERRUN_ERROR_BIT)) {
-    if (this->baud_probe_mode_) {
-      ++this->ignored_probe_line_errors_;  // Invalid baud candidates are expected.
-    } else if (!this->rx_overflow_fault_) {
-      this->rx_overflow_fault_ = true;
-      ESP_LOGE(TAG, "UART0 line-status fault 0x%02lx; PM blocked", static_cast<unsigned long>(line_status));
-    }
-  }
-  const bool peripheral_idle = (this->uart_->STATUS & UART_BUSY_BIT) == 0;
-
-  const uint32_t elapsed = static_cast<uint32_t>(millis() - this->last_uart_activity_ms_);
-
-  const bool idle = buffer_empty && rx_fifo_empty && tx_completed_on_wire && peripheral_idle && !this->tx_fault_ &&
-                    !this->rx_overflow_fault_ && !this->baud_probe_mode_ && elapsed >= UART_IDLE_GUARD_MS;
-
-  if (idle && this->uart_pm_wakelock_held_) {
-    if (pm_wake_unlock(&this->uart_pm_wakelock_) != 0) {
-      this->tx_fault_ = true;
-      ESP_LOGE(TAG, "UART0 native PM wakelock release failed; PM blocked");
-      esphome::xr806::lowpower_policy().set_uart_idle(false);
-      return;
-    }
-    this->uart_pm_wakelock_held_ = false;
-  } else if (!idle && !this->uart_pm_wakelock_held_) {
-    this->note_uart_activity_();
-  }
-  esphome::xr806::lowpower_policy().set_uart_idle(idle && !this->tx_fault_);
+  if ((line_status & LINE_ERROR_BITS) != 0)
+    ++this->rx_line_errors_;
+  return (line_status & UART_TX_EMPTY_BIT) != 0;
 }
-
-#endif  // USE_XR806_LOWPOWER
 
 void XR806UARTComponent::fill_rx_() {
-  if (!this->initialized_ || this->uart_ == nullptr || this->rx_buffer_.empty()) {
+  if (!this->initialized_)
     return;
-  }
 
+  this->check_line_status_();
+  for (size_t i = 0; i < MAX_RX_BYTES_PER_CALL && HAL_UART_IsRxReady(this->uart_); ++i) {
 #ifdef USE_XR806_LOWPOWER
-  bool saw_rx = false;
-#endif
-
-  // Bound work per call to avoid starving the ESPHome main loop.
-  for (size_t i = 0; i < 512 && HAL_UART_IsRxReady(this->uart_); ++i) {
-#ifdef USE_XR806_LOWPOWER
-    if (!saw_rx) {
-      // Claim the SDK PM wakelock before consuming even the first RX byte.
-      // The HC32 wake GPIO is independent and not proof that UART is idle.
+    if (i == 0) {
+      // Hold the PM wakelock before the first byte is taken from the FIFO.
       this->note_uart_activity_();
       if (this->tx_fault_)
         return;
-      saw_rx = true;
     }
 #endif
-    uint8_t byte = HAL_UART_GetRxData(this->uart_);
-
-    if (this->rx_count_ == this->rx_buffer_.size()) {
-      ++this->rx_overflows_;
-      if (!this->baud_probe_mode_)
-        this->rx_overflow_fault_ = true;
-      // A truncated packet is never synchronized. During physical baud
-      // probing the wrong-rate byte stream can legitimately overflow RX.
+    const uint8_t byte = HAL_UART_GetRxData(this->uart_);
+    if (this->rx_count_ == this->rx_buffer_size_) {
+      // The ring is full: drop everything, so the reader never joins two unrelated byte runs.
+      this->rx_dropped_ += this->rx_count_ + 1;
       this->rx_head_ = this->rx_tail_ = this->rx_count_ = 0;
       continue;
     }
-
     this->rx_buffer_[this->rx_tail_] = byte;
-    this->rx_tail_ = (this->rx_tail_ + 1) % this->rx_buffer_.size();
+    this->rx_tail_ = (this->rx_tail_ + 1) % this->rx_buffer_size_;
     ++this->rx_count_;
   }
 }
 
+void XR806UARTComponent::discard_rx_() {
+  this->rx_head_ = this->rx_tail_ = this->rx_count_ = 0;
+  for (size_t i = 0; i < MAX_RX_BYTES_PER_CALL && HAL_UART_IsRxReady(this->uart_); ++i)
+    HAL_UART_GetRxData(this->uart_);
+  this->check_line_status_();
+}
+
 void XR806UARTComponent::loop() {
   this->fill_rx_();
+
+  const uint32_t errors = this->rx_dropped_ + this->rx_line_errors_;
+  const uint32_t now = App.get_loop_component_start_time();
+  if (errors != this->rx_errors_logged_ && now - this->last_error_log_ms_ >= ERROR_LOG_INTERVAL_MS) {
+    // Expected while a protocol probes for the baud rate; framed protocols resynchronize.
+    ESP_LOGW(TAG, "RX errors: %" PRIu32 " bytes dropped (buffer full), %" PRIu32 " line errors", this->rx_dropped_,
+             this->rx_line_errors_);
+    this->rx_errors_logged_ = errors;
+    this->last_error_log_ms_ = now;
+  }
 
 #ifdef USE_XR806_LOWPOWER
   this->update_uart_idle_();
@@ -254,96 +216,110 @@ size_t XR806UARTComponent::available() {
 }
 
 bool XR806UARTComponent::peek_byte(uint8_t *data) {
-  if (data == nullptr)
+  if (!this->check_read_timeout_())
     return false;
-
-  this->fill_rx_();
-
-  if (this->rx_count_ == 0)
-    return false;
-
   *data = this->rx_buffer_[this->rx_head_];
   return true;
 }
 
 bool XR806UARTComponent::read_array(uint8_t *data, size_t len) {
-  if (len == 0)
-    return true;
-
-  if (data == nullptr)
+  if (!this->check_read_timeout_(len))
     return false;
-
-  this->fill_rx_();
-
-  // Do not consume a partial frame on insufficient data.
-  if (this->rx_count_ < len)
-    return false;
-
   for (size_t i = 0; i < len; ++i) {
     data[i] = this->rx_buffer_[this->rx_head_];
-    this->rx_head_ = (this->rx_head_ + 1) % this->rx_buffer_.size();
-    --this->rx_count_;
+    this->rx_head_ = (this->rx_head_ + 1) % this->rx_buffer_size_;
+#ifdef USE_UART_DEBUGGER
+    this->debug_callback_.call(UART_DIRECTION_RX, data[i]);
+#endif
   }
-
+  this->rx_count_ -= len;
   return true;
 }
 
 void XR806UARTComponent::write_array(const uint8_t *data, size_t len) {
-  if (len == 0)
-    return;
-  if (!this->initialized_ || this->uart_ == nullptr || data == nullptr) {
-    this->tx_fault_ = true;
-#ifdef USE_XR806_LOWPOWER
-    esphome::xr806::lowpower_policy().set_uart_idle(false);
-#endif
-    return;
-  }
-  if (this->tx_fault_)
+  if (len == 0 || !this->is_connected())
     return;
 
 #ifdef USE_XR806_LOWPOWER
+  // Never start TX without the native PM wakelock.
   this->note_uart_activity_();
-  // An SDK PM wakelock acquisition failure is a hard transport fault:
-  // NEVER push even the first TX byte when the native lock was refused.
-  if (this->tx_fault_ || !this->uart_pm_wakelock_held_)
+  if (this->tx_fault_)
     return;
 #endif
 
   for (size_t i = 0; i < len; ++i) {
     const uint32_t start = millis();
-
     while (!HAL_UART_IsTxReady(this->uart_)) {
-      if (static_cast<uint32_t>(millis() - start) >= 20) {
-        this->tx_fault_ = true;
-#ifdef USE_XR806_LOWPOWER
-        esphome::xr806::lowpower_policy().set_uart_idle(false);
-#endif
-        ESP_LOGE(TAG, "UART0 TX FIFO timeout (transport unhealthy, PM blocked)");
+      if (millis() - start >= TX_READY_TIMEOUT_MS) {
+        this->set_tx_fault_();
+        ESP_LOGE(TAG, "UART0 TX timed out");
         return;
       }
     }
-
     HAL_UART_PutTxData(this->uart_, data[i]);
+#ifdef USE_UART_DEBUGGER
+    this->debug_callback_.call(UART_DIRECTION_TX, data[i]);
+#endif
   }
 }
 
 UARTFlushResult XR806UARTComponent::flush() {
-  if (!this->initialized_ || this->uart_ == nullptr || this->tx_fault_ || this->rx_overflow_fault_)
+  if (!this->is_connected())
     return UARTFlushResult::UART_FLUSH_RESULT_FAILED;
 
   const uint32_t start = millis();
   while (!this->tx_hardware_idle_()) {
-    if (static_cast<uint32_t>(millis() - start) >= 100) {
-      this->tx_fault_ = true;
-#ifdef USE_XR806_LOWPOWER
-      esphome::xr806::lowpower_policy().set_uart_idle(false);
-#endif
-      ESP_LOGE(TAG, "UART0 flush timed out before TX shifter was empty; PM blocked");
+    if (millis() - start >= FLUSH_TIMEOUT_MS) {
+      this->set_tx_fault_();
+      ESP_LOGE(TAG, "UART0 flush timed out");
       return UARTFlushResult::UART_FLUSH_RESULT_TIMEOUT;
     }
   }
   return UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
 }
+
+#ifdef USE_XR806_LOWPOWER
+
+void XR806UARTComponent::note_uart_activity_() {
+  // UART traffic must not begin until the SDK PM driver holds the wakelock. A vote in the
+  // policy alone cannot stop a PM thread that has already started to suspend.
+  if (!this->uart_pm_wakelock_held_) {
+    if (pm_wake_lock(&this->uart_pm_wakelock_) != 0) {
+      this->set_tx_fault_();
+      ESP_LOGE(TAG, "UART0 PM wakelock refused; standby blocked");
+      return;
+    }
+    this->uart_pm_wakelock_held_ = true;
+  }
+  esphome::xr806::lowpower_policy().set_uart_idle(false);
+  this->last_uart_activity_ms_ = App.get_loop_component_start_time();
+}
+
+void XR806UARTComponent::update_uart_idle_() {
+  auto &policy = esphome::xr806::lowpower_policy();
+  if (!this->is_connected()) {
+    policy.set_uart_idle(false);
+    return;
+  }
+
+  const uint32_t elapsed = App.get_loop_component_start_time() - this->last_uart_activity_ms_;
+  const bool idle = this->rx_count_ == 0 && !HAL_UART_IsRxReady(this->uart_) && this->tx_hardware_idle_() &&
+                    (this->uart_->STATUS & UART_BUSY_BIT) == 0 && elapsed >= UART_IDLE_GUARD_MS;
+
+  if (idle && this->uart_pm_wakelock_held_) {
+    if (pm_wake_unlock(&this->uart_pm_wakelock_) != 0) {
+      this->set_tx_fault_();
+      ESP_LOGE(TAG, "UART0 PM wakelock release failed; standby blocked");
+      return;
+    }
+    this->uart_pm_wakelock_held_ = false;
+  } else if (!idle && !this->uart_pm_wakelock_held_) {
+    this->note_uart_activity_();
+  }
+  policy.set_uart_idle(idle && !this->tx_fault_);
+}
+
+#endif  // USE_XR806_LOWPOWER
 
 }  // namespace esphome::uart
 

@@ -71,6 +71,43 @@ def test_logger_rejects_the_mcu_uart(
     assert "UART2" in capsys.readouterr().out
 
 
+def test_uart_uses_the_configured_frame_format(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("uart.yaml"))
+
+    assert {"USE_UART_DEBUGGER", "USE_XR806"} <= defines()
+    assert "uart::XR806UARTComponent" in generated
+    assert "set_baud_rate(9600)" in generated
+    assert "set_data_bits(7)" in generated
+    assert "set_parity(uart::UART_CONFIG_PARITY_EVEN)" in generated
+    assert "set_stop_bits(2)" in generated
+    assert "set_rx_buffer_size(512)" in generated
+
+
+@pytest.mark.parametrize(
+    ("pin_line", "message"),
+    [
+        ("  tx_pin: PB0\n", "XR806 UART0 tx_pin must be PB0"),
+        ("  rx_pin: PB1\n", "XR806 UART0 rx_pin must be PB1"),
+    ],
+)
+def test_uart_rejects_pins_other_than_uart0(
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    pin_line: str,
+    message: str,
+) -> None:
+    config = component_config_path("uart.yaml").read_text()
+    CORE.config_path = tmp_path / "uart.yaml"
+    CORE.config_path.write_text(config.replace(pin_line, pin_line[:-4] + "PA19\n"))
+
+    assert read_config({}) is None
+    assert message in capsys.readouterr().out
+
+
 def test_debug_uses_standard_entities(
     generate_main: Callable[[str | Path], str],
     component_config_path: Callable[[str], Path],
