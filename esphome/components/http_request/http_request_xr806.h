@@ -28,6 +28,11 @@ class HttpContainerXR806 : public HttpContainer {
 /// http_request on XR806 through the XRadio SDK HTTP client, with TLS from mbedTLS.
 /// HTTPS runs without certificate verification; user information in the URL is sent as Basic authentication.
 class HttpRequestXR806 final : public HttpRequestComponent {
+ public:
+  HttpRequestXR806();
+  /// True while a request waits in the queue or a response is still open; standby must wait for it.
+  static bool any_busy();
+
  protected:
   std::shared_ptr<HttpContainer> perform(const char *url, const char *method, const std::string &body,
                                          const std::vector<Header> &request_headers,

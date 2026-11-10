@@ -156,8 +156,8 @@ bool XR806StandbyController::may_quiesce() const {
   if (this->is_any_transport_unowned_())
     return false;
 #ifdef USE_XR806_STANDBY_HTTP_CLIENT
-  // An outgoing request or a response still being read would lose its connection.
-  if (http_request::HttpContainerXR806::any_open())
+  // A queued request, or a response still being read, would lose its connection.
+  if (http_request::HttpRequestXR806::any_busy())
     return false;
 #endif
   const uint32_t required =
@@ -214,7 +214,7 @@ void XR806StandbyController::attempt_standby_() {
   if (this->busy_)
     return;
 #ifdef USE_XR806_STANDBY_HTTP_CLIENT
-  if (http_request::HttpContainerXR806::any_open()) {
+  if (http_request::HttpRequestXR806::any_busy()) {
     this->state_.postpone();
     return;
   }
