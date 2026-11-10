@@ -223,7 +223,9 @@ async def to_code(config: ConfigType) -> None:
         cg.add(controller.set_no_api("api" not in CORE.config))
         cg.add(controller.set_no_ota("ota" not in CORE.config))
         cg.add(controller.set_no_mdns("mdns" not in CORE.config))
-        has_http = any(domain in CORE.config for domain in ("web_server", "captive_portal"))
+        has_http = any(
+            domain in CORE.config for domain in ("web_server", "captive_portal")
+        )
         cg.add(controller.set_no_http(not has_http))
         cg.add(controller.set_external_sync_required(cfg[CONF_REQUIRE_EXTERNAL_SYNC]))
         cg.add(controller.set_require_uart_participant("uart" in CORE.config))
@@ -260,7 +262,9 @@ async def to_code(config: ConfigType) -> None:
             cg.add(
                 ota_guard.set_http_only(
                     bool(ota_configs)
-                    and all(item.get("platform") == "web_server" for item in ota_configs)
+                    and all(
+                        item.get("platform") == "web_server" for item in ota_configs
+                    )
                 )
             )
             await cg.register_component(ota_guard, cfg)
