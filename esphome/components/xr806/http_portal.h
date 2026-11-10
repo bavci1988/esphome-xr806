@@ -35,6 +35,8 @@ class XR806HTTPServer : public Component {
   void handle_client_();
   void prepare_request_();
   void send_response_(int status, const char *content_type, const char *body);
+  void send_static_response_(int status, const char *content_type, const uint8_t *body, size_t size,
+                             const char *encoding);
   void close_client_();
 
   uint16_t port_{80};
@@ -51,6 +53,9 @@ class XR806HTTPServer : public Component {
   size_t request_used_{0};
   size_t response_len_{0};
   size_t response_sent_{0};
+  const uint8_t *static_body_{nullptr};
+  size_t static_body_len_{0};
+  size_t static_body_sent_{0};
   char request_[MAX_REQUEST + 1]{};
   char response_[MAX_RESPONSE]{};
   char pending_ssid_[33]{};
