@@ -33,6 +33,13 @@ jobs:
           enable-cache: false
       - name: Install this ESPHome branch
         run: uv pip install --system -e .
+      - name: Compile and run bounded HTTP parser regression tests
+        run: |
+          g++ -std=gnu++20 -O2 -Wall -Wextra -Werror -I. \
+            tests/unit_tests/xr806_http_request_smoke.cpp \
+            -o /tmp/xr806-http-parser-smoke
+          /tmp/xr806-http-parser-smoke
+
       - name: Validate standard YAML and generate XR806 C++
         run: |
           esphome config tests/fixtures/xr806/captive_portal.yaml
