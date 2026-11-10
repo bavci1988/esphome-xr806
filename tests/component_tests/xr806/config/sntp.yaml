@@ -1,0 +1,20 @@
+esphome:
+  name: xr806-sntp-ci
+xr806:
+  board: wxu
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+logger:
+  level: DEBUG
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Berlin
+    servers:
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+      - 192.168.1.1
+    on_time_sync:
+      then:
+        - logger.log: "Time synchronized"

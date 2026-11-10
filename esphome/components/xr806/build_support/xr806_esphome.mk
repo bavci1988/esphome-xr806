@@ -236,6 +236,15 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/core_log.o
 
 $(eval $(call XR806_COMPILE_CPP,core_log,$(XR806_SRC)/esphome/core/log.cpp))
 
+# Platform-neutral core sources that ESPHome copied for this configuration.
+# time_64.cpp is not needed (USE_NATIVE_64BIT_TIME) and static_task.cpp is ESP32 only.
+XR806_CORE_COMMON := $(foreach name,time alloc_helpers color line_reader util,\
+    $(if $(wildcard $(XR806_SRC)/esphome/core/$(name).cpp),$(name)))
+XR806_CORE_COMMON_OBJECTS := $(addprefix $(XR806_OBJDIR)/core_,$(addsuffix .o,$(XR806_CORE_COMMON)))
+XR806_ESPHOME_OBJECTS += $(XR806_CORE_COMMON_OBJECTS)
+$(XR806_OUTPUT): $(XR806_CORE_COMMON_OBJECTS)
+$(foreach name,$(XR806_CORE_COMMON),$(eval $(call XR806_COMPILE_CPP,core_$(name),$(XR806_SRC)/esphome/core/$(name).cpp)))
+
 # Discover YAML-generated ESPHome component implementations.
 # XR806 platform files are built by their dedicated rules.
 # Core files remain explicitly selected to exclude foreign

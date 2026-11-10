@@ -94,3 +94,24 @@ def test_udp_packet_transport(
     assert {"USE_UDP", "USE_SOCKET_IMPL_LWIP_SOCKETS"} <= defines()
     assert "udp::UDPComponent" in generated
     assert "packet_transport" in generated
+
+
+def test_sntp_with_timezone(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("sntp.yaml"))
+
+    assert {"USE_TIME", "USE_TIME_TIMEZONE"} <= defines()
+    assert "sntp::SNTPComponent" in generated
+    assert '"0.pool.ntp.org"' in generated
+
+
+def test_syslog_over_udp_with_sntp_time(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("syslog.yaml"))
+
+    assert {"USE_UDP", "USE_TIME"} <= defines()
+    assert "syslog::Syslog" in generated
