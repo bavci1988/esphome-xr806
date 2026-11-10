@@ -356,14 +356,16 @@ void XR806HTTPServer::loop() {
   }
   if (this->listen_fd_ < 0 && (this->last_http_attempt_ == 0 || now - this->last_http_attempt_ >= RETRY_MS)) {
     this->last_http_attempt_ = now;
-    if (!this->start_http_())
+    if (!this->start_http_()) {
       ESP_LOGW(TAG, "HTTP bind failed; retrying");
+    }
   }
   if (this->captive_dns_ && ap) {
     if (this->dns_fd_ < 0 && (this->last_dns_attempt_ == 0 || now - this->last_dns_attempt_ >= RETRY_MS)) {
       this->last_dns_attempt_ = now;
-      if (!this->start_dns_())
+      if (!this->start_dns_()) {
         ESP_LOGW(TAG, "Captive DNS bind failed; retrying");
+      }
     }
     if (this->dns_fd_ >= 0)
       this->handle_dns_();
