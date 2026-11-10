@@ -18,6 +18,8 @@ class XR806OTAStandbyGuard final : public Component,
                                    public XR806StandbyParticipant,
                                    public ota::OTAGlobalStateListener {
  public:
+  void set_http_only(bool value) { this->http_only_ = value; }
+
   void setup() override {
     lowpower_policy().set_ota_idle(false);
     ota::get_global_ota_callback()->add_global_state_listener(this);
@@ -41,6 +43,9 @@ class XR806OTAStandbyGuard final : public Component,
           controller->request_standby(false);
         break;
       case ota::OTA_COMPLETED:
+        active_ = false;
+        committed_ = true;  // Staging selection remains locked until reboot.
+        break;
       case ota::OTA_ABORT:
       case ota::OTA_ERROR:
         active_ = false;
@@ -52,9 +57,20 @@ class XR806OTAStandbyGuard final : public Component,
   }
 
   uint32_t owned_services() const override { return XR806LowPowerPolicy::OTA_BUSY; }
-  bool may_quiesce() const override { return false; }
-  bool prepare_for_standby() override { return false; }
-  void standby_cancelled() override {}
+  // The native ESPHome OTA socket has no verified suspend lifecycle yet.
+  // Only HTTP-only OTA may quiesce, and only after its shared HTTP listener
+  // has stopped accepting and all clients/flash writers have drained.
+  bool may_quiesce() const override { return http_only_ && !active_ && !committed_; }
+  void standby_preflight(bool requested) override {
+    bool ready = requested && this->may_quiesce() && !ota::UpdateLock::is_active() &&
+                 !(lowpower_policy().blockers() & XR806LowPowerPolicy::HTTP_BUSY);
+    lowpower_policy().set_ota_idle(ready);
+  }
+  bool prepare_for_standby() override {
+    return this->may_quiesce() && !ota::UpdateLock::is_active() &&
+           !(lowpower_policy().blockers() & XR806LowPowerPolicy::HTTP_BUSY);
+  }
+  void standby_cancelled() override { lowpower_policy().set_ota_idle(false); }
   void standby_resumed(const XR806StandbyResume &event) override {
     (void) event;
     lowpower_policy().set_ota_idle(false);
@@ -63,6 +79,8 @@ class XR806OTAStandbyGuard final : public Component,
 
  private:
   bool active_{false};
+  bool committed_{false};
+  bool http_only_{false};
 };
 
 }  // namespace esphome::xr806
