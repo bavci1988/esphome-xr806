@@ -89,7 +89,10 @@ class AsyncResponseStream : public AsyncWebServerResponseContent {
 class AsyncWebServerRequest {
  public:
   static constexpr size_t URL_BUF_SIZE = 257;
-  ~AsyncWebServerRequest() { if (on_disconnect_) on_disconnect_(); }
+  ~AsyncWebServerRequest() {
+    if (on_disconnect_)
+      on_disconnect_();
+  }
   AsyncWebServerRequest(http_method method, std::string uri, std::string query, std::string body,
                         std::vector<std::pair<std::string, std::string>> headers,
                         std::unique_ptr<socket::Socket> *socket);
@@ -222,8 +225,7 @@ using message_generator_t = void(esphome::web_server::WebServer *, void *, json:
 
 class AsyncEventSource : public AsyncWebHandler {
  public:
-  AsyncEventSource(StringRef path, esphome::web_server::WebServer *web_server)
-      : path_(path), web_server_(web_server) {}
+  AsyncEventSource(StringRef path, esphome::web_server::WebServer *web_server) : path_(path), web_server_(web_server) {}
   bool canHandle(AsyncWebServerRequest *request) const override;
   void handleRequest(AsyncWebServerRequest *request) override;
   void try_send_nodefer(const char *message, size_t len, const char *event = nullptr, uint32_t id = 0,
@@ -256,4 +258,4 @@ class AsyncEventSource : public AsyncWebHandler {
 
 // Keep the WebServerBase/REST handler surface shared with ESPHome's native IDF backend.
 using namespace esphome::web_server_idf;  // NOLINT(google-global-names-in-headers)
-#endif  // USE_XR806
+#endif                                    // USE_XR806
