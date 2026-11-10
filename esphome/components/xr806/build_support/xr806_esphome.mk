@@ -272,7 +272,7 @@ endif
 
 
 
-# Non-persistent preferences manager for early XR806 bring-up.
+# Flash-backed preferences manager (FDCM journal in two reserved sectors).
 
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr806_preferences.o
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr806_preferences.o

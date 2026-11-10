@@ -4,11 +4,15 @@ on:
     paths:
       - 'esphome/components/web_server_xr806/**'
       - 'tests/portable/xr806_multipart_smoke.cpp'
+      - 'esphome/components/xr806/preference_journal.h'
+      - 'tests/portable/xr806_preference_journal_test.cpp'
       - '.github/workflows/xr806-http-smoke.yml'
   push:
     paths:
       - 'esphome/components/web_server_xr806/**'
       - 'tests/portable/xr806_multipart_smoke.cpp'
+      - 'esphome/components/xr806/preference_journal.h'
+      - 'tests/portable/xr806_preference_journal_test.cpp'
       - '.github/workflows/xr806-http-smoke.yml'
 jobs:
   multipart-host:
@@ -19,3 +23,8 @@ jobs:
         run: |
           g++ -std=c++20 -Wall -Wextra -Werror -O2 -I. tests/portable/xr806_multipart_smoke.cpp -o /tmp/xr806-multipart-test
           /tmp/xr806-multipart-test
+      - name: Preference journal with simulated flash and power loss
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -I. \
+            tests/portable/xr806_preference_journal_test.cpp -o /tmp/xr806-preference-journal-test
+          /tmp/xr806-preference-journal-test
