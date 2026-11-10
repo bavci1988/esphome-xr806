@@ -120,8 +120,8 @@ void XR806HTTPStandby::standby_preflight(bool requested) {
 
 bool XR806HTTPStandby::prepare_for_standby() {
   auto *base = web_server_base::global_web_server_base;
-  return parked_ && !lock_held_ && !this->has_captive_dns_() && base != nullptr &&
-         base->get_server() != nullptr && !base->get_server()->has_active_connections();
+  return parked_ && !lock_held_ && !this->has_captive_dns_() && base != nullptr && base->get_server() != nullptr &&
+         !base->get_server()->has_active_connections();
 }
 
 void XR806HTTPStandby::standby_cancelled() { this->restore_(); }
