@@ -422,6 +422,9 @@ void WebServer::setup() {
 
 #if defined(USE_ESP32) || defined(USE_XR806)
   this->base_->add_handler(&this->events_);
+#ifdef USE_XR806
+  this->base_->get_server()->register_event_source(&this->events_);
+#endif
 #endif
   this->base_->add_handler(this);
 #ifdef USE_WEBSERVER_CAPTIVE
