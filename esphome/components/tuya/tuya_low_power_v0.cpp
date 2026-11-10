@@ -27,6 +27,8 @@ static constexpr uint32_t LP_NETWORK_STATUS_INTERVAL_ID = 1;
 
 void Tuya::setup_low_power_() {
   this->init_state_ = TuyaInitState::INIT_PRODUCT;
+  if (this->parent_ != nullptr)
+    this->lp_uart_rx_errors_.reset(this->parent_->get_rx_error_count());
   if (this->mcu_wake_pin_ != nullptr) {
     this->mcu_wake_pin_->setup();
     this->mcu_wake_pin_->digital_write(false);  // Inactive logical level.
@@ -63,7 +65,36 @@ void Tuya::setup_low_power_() {
   this->set_interval(LP_NETWORK_STATUS_INTERVAL_ID, 1000, [this] { this->send_low_power_network_(); });
 }
 
+bool Tuya::check_low_power_uart_rx_errors_() {
+  if (this->parent_ == nullptr)
+    return false;
+  const uint32_t count = this->parent_->get_rx_error_count();
+  if (!this->lp_uart_rx_errors_.observe(count, this->auto_baud_ && this->lp_autobaud_.searching()))
+    return false;
+
+  // An already-validated MCU report or ACK could have disappeared from RX.
+  // Never grant CMD38/standby using a potentially stale 17-DP snapshot.
+  ESP_LOGW(LP_TAG, "UART RX corruption/loss (counter=%u): MCU identity and full status required again",
+           static_cast<unsigned>(count));
+  this->cancel_low_power_preflight_(true);
+  this->cancel_low_power_standby_();
+  this->rx_message_.clear();
+  this->lp_v0_.command_timeout();
+  this->lp_wire_.transport_fault();  // Do not replay an ambiguous CMD09/ACK.
+  this->expected_response_.reset();
+  this->command_queue_.clear();
+  this->lp_network_status_ = 0xFF;
+  this->invalidate_low_power_mode_epoch_();
+  // The direct CMD01 retry is permitted while the wire is quarantined;
+  // a verified product response will unlock it and request full status.
+  this->lp_product_retry_.begin(millis());
+  this->update_low_power_sleep_lock_();
+  return true;
+}
+
 void Tuya::loop_low_power_() {
+  if (this->check_low_power_uart_rx_errors_())
+    this->discard_available();
   this->poll_low_power_sleep_preflight_();
 #ifdef USE_XR806_STANDBY_CONTROLLER
   if (this->lp_standby_.requested()) {
@@ -367,7 +398,9 @@ bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
   const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
   return this->lp_v0_.ready() && this->lp_wire_.idle() && this->lp_sleep_window_.standby_mode_stable() &&
          !this->lp_product_retry_.active() && guard_elapsed && baud_locked && this->parent_ != nullptr &&
-         this->parent_->is_connected() && !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
+         this->parent_->is_connected() &&
+         this->lp_uart_rx_errors_.unchanged(this->parent_->get_rx_error_count()) &&
+         !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
          !this->expected_response_.has_value() && (in_cmd38_handler || this->rx_message_.empty());
 }
 
