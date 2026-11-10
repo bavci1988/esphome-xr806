@@ -20,8 +20,8 @@ class XR806LowPowerPolicy {
     HTTP_BUSY = 1u << 9,
   };
 
-  static constexpr uint32_t ALL_REQUIREMENTS =
-      UART_BUSY | NETWORK_BUSY | OTA_BUSY | MCU_UNSYNCED | WAKE_NOT_READY | SCHEDULER_BUSY | API_BUSY | MDNS_BUSY | HTTP_BUSY;
+  static constexpr uint32_t ALL_REQUIREMENTS = UART_BUSY | NETWORK_BUSY | OTA_BUSY | MCU_UNSYNCED | WAKE_NOT_READY |
+                                               SCHEDULER_BUSY | API_BUSY | MDNS_BUSY | HTTP_BUSY;
 
   // Fail closed: initially all subsystems block standby.
   // This policy never enters standby by itself.
