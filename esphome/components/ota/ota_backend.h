@@ -109,9 +109,6 @@ class UpdateLock {
   bool try_acquire();
   void release();
   bool is_held() const { return this->held_; }
-  // Read-only global OTA gate for platform standby admission; committed
-  // firmware keeps this asserted until the reboot that installs it.
-  static bool is_active();
   /// Keep the lock set until reboot; is_held() becomes false.
   void hold_until_reboot() { this->held_ = false; }
 
