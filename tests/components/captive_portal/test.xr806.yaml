@@ -1,0 +1,8 @@
+# XR806 native lwIP captive portal: no Arduino/ESP-IDF webserver dependency.
+wifi:
+  ap:
+    ssid: XR806-Captive-Test
+    password: xr806-test-123
+
+captive_portal:
+  compression: gzip
