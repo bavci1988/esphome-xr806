@@ -200,6 +200,7 @@ class AsyncEventSource : public AsyncWebHandler {
   void deferrable_send_state(void *source, bool detail_all, message_generator_t *generator);
   bool loop();
   bool empty() const { return sessions_.empty(); }
+  void onServerStop() override { sessions_.clear(); }
 
  protected:
   struct Session {
