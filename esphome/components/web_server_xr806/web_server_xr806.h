@@ -123,8 +123,8 @@ class AsyncWebServerRequest {
   bool has_response() const { return this->response_ != nullptr; }
 
  protected:
-  static std::string decode_(const std::string &s);
-  static bool find_arg_(const std::string &query, const char *name, std::string *result);
+  static std::string decode(const std::string &s);
+  static bool find_arg(const std::string &query, const char *name, std::string *result);
   http_method method_;
   std::string uri_;
   std::string query_;
