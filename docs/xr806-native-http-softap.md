@@ -103,8 +103,10 @@ new credentials.
 
 - **Persistence implemented but not proven**: XR806 now has a
   CRC-verified dual-sector FDCM preferences backend, using SDK sectors
-  2036..2040 KiB and 2040..2044 KiB. The separate sysinfo sector is
-  2044..2048 KiB. Reboot, interrupted-write recovery and OTA integrity
+  1972..1976 KiB and 1976..1980 KiB. The separate sysinfo sector is
+  1980..1984 KiB. All three sectors are blank in the original WXU dump;
+  the original 2004..2048 KiB region contains foreign data and is left untouched.
+  Runtime code refuses writes when a reserved sector holds unrecognized data. Reboot, interrupted-write recovery and OTA integrity
   still need real-board testing.
 - **Standard `captive_portal:` YAML is integrated**, using the native
   XR806 HTTP/DNS transport. The separate `xr806.http_server:` remains a
