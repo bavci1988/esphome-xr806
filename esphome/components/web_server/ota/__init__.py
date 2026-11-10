@@ -33,13 +33,6 @@ def _web_server_ota_final_validate(config: ConfigType) -> None:
     Multiple web_server OTA instances register duplicate HTTP handlers for /update,
     causing undefined behavior. Merge them into a single instance.
     """
-    if CORE.is_configured and CORE.is_xr806:
-        # No validated multipart upload, verified flash writer or interrupted-
-        # update recovery yet. Reject it rather than advertising broken OTA.
-        raise cv.Invalid(
-            "ota: - platform: web_server is not available on XR806: "
-            "the HTTP upload and safe flash writer are not implemented"
-        )
     full_conf = fv.full_config.get()
     ota_confs = full_conf.get(OTA_DOMAIN, [])
 
