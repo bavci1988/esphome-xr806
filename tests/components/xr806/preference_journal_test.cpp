@@ -18,7 +18,7 @@ using Put = Journal::PutResult;
 struct FakeFlash {
   std::array<std::array<uint8_t, SIZE>, 2> slots{};
   std::array<bool, 2> formatted{false, false};
-  long cut_after{-1};
+  int64_t cut_after{-1};
   bool corrupt_readback{false};
   unsigned writes{0};
   unsigned erases{0};
@@ -107,7 +107,7 @@ TEST(XR806PreferenceJournal, CommitsAlternateAndNewestWins) {
 
 TEST(XR806PreferenceJournal, PowerLossDuringWriteKeepsPreviousSnapshot) {
   // Cut right after the erase, inside the header and inside the records.
-  for (long cut : {0L, 4L, 15L, 100L, 119L}) {
+  for (int64_t cut : {0, 4, 15, 100, 119}) {
     FakeFlash flash;
     Journal j;
     j.load(flash);
@@ -140,7 +140,7 @@ TEST(XR806PreferenceJournal, PowerLossAfterRecordsKeepsNewSnapshot) {
   put_wifi(j, make_wifi("old", "oldpassword"));
   ASSERT_TRUE(j.commit(flash));
   put_wifi(j, make_wifi("new", "newpassword"));
-  flash.cut_after = static_cast<long>(Journal::HEADER_SIZE + j.used());
+  flash.cut_after = static_cast<int64_t>(Journal::HEADER_SIZE + j.used());
   ASSERT_TRUE(!j.commit(flash));
   Journal after_reboot;
   ASSERT_TRUE(after_reboot.load(flash));
