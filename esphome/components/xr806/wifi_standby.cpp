@@ -69,9 +69,8 @@ void XR806WiFiStandby::standby_preflight(bool requested) {
   if (!this->network_suspend_ || this->parked_)
     return;  // Without network_suspend NETWORK_BUSY stays asserted.
   auto &policy = lowpower_policy();
-  constexpr uint32_t other_services =
-      XR806LowPowerPolicy::API_BUSY | XR806LowPowerPolicy::OTA_BUSY | XR806LowPowerPolicy::MDNS_BUSY |
-      XR806LowPowerPolicy::HTTP_BUSY;
+  constexpr uint32_t other_services = XR806LowPowerPolicy::API_BUSY | XR806LowPowerPolicy::OTA_BUSY |
+                                      XR806LowPowerPolicy::MDNS_BUSY | XR806LowPowerPolicy::HTTP_BUSY;
   if ((policy.blockers() & other_services) != 0)
     return;  // Never take Wi-Fi down while API, mDNS or OTA still own sockets.
   if (!this->suspending_) {
