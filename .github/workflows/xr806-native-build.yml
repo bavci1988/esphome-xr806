@@ -39,6 +39,10 @@ jobs:
             tests/unit_tests/xr806_http_request_smoke.cpp \
             -o /tmp/xr806-http-parser-smoke
           /tmp/xr806-http-parser-smoke
+          g++ -std=gnu++20 -O2 -Wall -Wextra -Werror -I. \
+            tests/unit_tests/xr806_preference_snapshot_smoke.cpp \
+            -o /tmp/xr806-preferences-smoke
+          /tmp/xr806-preferences-smoke
 
       - name: Validate standard YAML and generate XR806 C++
         run: |
