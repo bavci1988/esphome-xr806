@@ -28,6 +28,7 @@ from esphome.const import (
     PLATFORM_NRF52,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
     PlatformFramework,
 )
 from esphome.core import CORE, ID, CoroPriority, Lambda, coroutine_with_priority
@@ -214,6 +215,9 @@ def uart_selection(value: Any) -> str:
         component = get_libretiny_component()
         if component in uart_selection_libretiny:
             return cv.one_of(*uart_selection_libretiny[component], upper=True)(value)
+    if CORE.is_xr806:
+        # UART0 drives the MCU on Tuya modules; the WXU console is UART2.
+        return cv.one_of(UART2, upper=True)(value)
     if CORE.is_host:
         raise cv.Invalid("Uart selection not valid for host platform")
     if CORE.is_nrf52:
@@ -402,6 +406,7 @@ CONFIG_SCHEMA = cv.All(
                 nrf52_52832=UART0,
                 nrf52_54l15=UART0,
                 nrf52_54lm20=UART0,
+                xr806=UART2,
             ): cv.All(
                 cv.only_on(
                     [
@@ -412,6 +417,7 @@ CONFIG_SCHEMA = cv.All(
                         PLATFORM_LN882X,
                         PLATFORM_RTL87XX,
                         PLATFORM_NRF52,
+                        PLATFORM_XR806,
                     ]
                 ),
                 uart_selection,
@@ -829,6 +835,7 @@ FILTER_SOURCE_FILES = filter_source_files_from_platform(
             PlatformFramework.LN882X_ARDUINO,
         },
         "logger_zephyr.cpp": {PlatformFramework.NRF52_ZEPHYR},
+        "logger_xr806.cpp": {PlatformFramework.XR806_XRADIO},
         "task_log_buffer_esp32.cpp": {
             PlatformFramework.ESP32_ARDUINO,
             PlatformFramework.ESP32_IDF,

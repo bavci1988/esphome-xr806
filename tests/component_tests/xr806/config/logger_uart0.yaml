@@ -1,0 +1,7 @@
+esphome:
+  name: xr806-logger-uart0
+xr806:
+  board: wxu
+logger:
+  level: DEBUG
+  hardware_uart: UART0
