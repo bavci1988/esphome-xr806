@@ -6,9 +6,8 @@
 
 using esphome::web_server_xr806::MultipartStream;
 
-static const std::string kStart =
-    "--xr806-boundary\r\nContent-Disposition: form-data; name=\"update\"; "
-    "filename=\"firmware.ota.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n";
+static const std::string kStart = "--xr806-boundary\r\nContent-Disposition: form-data; name=\"update\"; "
+                                  "filename=\"firmware.ota.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n";
 static const std::string kEnd = "\r\n--xr806-boundary--\r\n";
 
 static void verify_split_upload(size_t chunk_size) {
@@ -18,8 +17,10 @@ static void verify_split_upload(size_t chunk_size) {
   std::string collected;
   unsigned completes = 0;
   auto sink = [&](uint8_t *data, size_t size, bool final) {
-    if (final) ++completes;
-    else collected.append(reinterpret_cast<const char *>(data), size);
+    if (final)
+      ++completes;
+    else
+      collected.append(reinterpret_cast<const char *>(data), size);
     return true;
   };
   for (size_t off = 0; off < payload.size(); off += chunk_size) {
@@ -63,9 +64,8 @@ int main() {
     assert(parser.failed());
   }
   {
-    const std::string wrong_name =
-        "--xr806-boundary\r\nContent-Disposition: form-data; name=\"evil\"; "
-        "filename=\"x.bin\"\r\n\r\nfirmware\r\n--xr806-boundary--\r\n";
+    const std::string wrong_name = "--xr806-boundary\r\nContent-Disposition: form-data; name=\"evil\"; "
+                                   "filename=\"x.bin\"\r\n\r\nfirmware\r\n--xr806-boundary--\r\n";
     MultipartStream parser("xr806-boundary", wrong_name.size());
     assert(!parser.feed(reinterpret_cast<const uint8_t *>(wrong_name.data()), wrong_name.size(), safe_sink));
   }
