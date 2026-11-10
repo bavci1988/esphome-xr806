@@ -1,6 +1,35 @@
 #pragma once
 #include "esphome/core/defines.h"
 #ifdef USE_CAPTIVE_PORTAL
+#ifdef USE_XR806
+#include "esphome/components/xr806/http_portal.h"
+
+namespace esphome::captive_portal {
+
+class CaptivePortal;
+extern CaptivePortal *global_captive_portal;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+// Standard captive_portal YAML, native XR806 HTTP/DNS implementation.
+// The AP itself is managed by the existing WiFiComponent state machine.
+class CaptivePortal final : public xr806::XR806HTTPServer {
+ public:
+  CaptivePortal() {
+    this->set_port(80);
+    this->set_captive_dns(true);
+    this->set_ap_only(true);
+    global_captive_portal = this;
+  }
+  void start() { this->active_ = true; }
+  void end() { this->active_ = false; }
+  bool is_active() const { return this->active_; }
+
+ protected:
+  bool active_{false};
+};
+
+}  // namespace esphome::captive_portal
+
+#else  // !USE_XR806
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
@@ -49,4 +78,5 @@ extern CaptivePortal *global_captive_portal;  // NOLINT(cppcoreguidelines-avoid-
 
 }  // namespace esphome::captive_portal
 
-#endif
+#endif  // USE_XR806
+#endif  // USE_CAPTIVE_PORTAL
