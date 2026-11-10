@@ -1,0 +1,99 @@
+name: XR806 native ARM cross-build
+
+on:
+  pull_request:
+    paths:
+      - "esphome/components/xr806/**"
+      - "esphome/components/captive_portal/**"
+      - "esphome/components/wifi/**"
+      - "esphome/core/preference_backend.h"
+      - "esphome/core/preferences.h"
+      - ".github/workflows/xr806-native-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wxu-captive:
+    name: Native ARM WXU firmware (SoftAP + captive_portal)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout ESPHome
+        uses: actions/checkout@v7.0.1
+
+      # Vendor source may be private; a read-only token must have access.
+      - name: Checkout exact pinned XRadio SDK
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: bavci1988/xr806-sdk
+          ref: 36d5f54c5d524cc9d32ce444c79b2fe2797e5f3c
+          path: xr806-sdk
+          token: ${{ secrets.XR806_SDK_READ_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Toolchain
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi make git
+          arm-none-eabi-g++ --version
+          arm-none-eabi-objcopy --version
+
+      - name: Python 3.12
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.11.15"
+          enable-cache: false
+
+      - name: Install ESPHome from this branch
+        run: uv pip install --system -e .
+
+      - name: Confirm SDK revision and flash geometry
+        shell: bash
+        run: |
+          test "$(git -C xr806-sdk rev-parse HEAD)" = \
+            "36d5f54c5d524cc9d32ce444c79b2fe2797e5f3c"
+          test -f xr806-sdk/.config
+          test -f xr806-sdk/lib/xradio_v3/libwlan.a
+          grep -q 'PRJCONF_ESPHOME_PREFS0_ADDR' \
+            xr806-sdk/project/demo/trv16_port/prj_config.h
+
+      - name: Compile real XR806 firmware from standard ESPHome YAML
+        timeout-minutes: 18
+        env:
+          XR806_SDK_SOURCE_DIR: ${{ github.workspace }}/xr806-sdk
+          XR806_SDK_EXPECTED_COMMIT: 36d5f54c5d524cc9d32ce444c79b2fe2797e5f3c
+        run: |
+          cat > xr806-ci.yaml <<'YAML'
+          esphome:
+            name: xr806-ci
+          xr806:
+            board: wxu
+          wifi:
+            ap:
+              ssid: XR806-CI-Setup
+              password: test-pass-1234
+          captive_portal:
+            compression: gzip
+          YAML
+          esphome compile xr806-ci.yaml
+
+      - name: Preserve native build output for inspection
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: xr806-cross-build-output
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            .esphome/build/**/firmware.bin
+            .esphome/build/**/xr806/firmware/firmware.img
+            .esphome/build/**/xr806/app.elf
