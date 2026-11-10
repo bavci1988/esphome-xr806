@@ -37,6 +37,7 @@ HttpRequestComponent = http_request_ns.class_("HttpRequestComponent", cg.Compone
 HttpRequestArduino = http_request_ns.class_("HttpRequestArduino", HttpRequestComponent)
 HttpRequestIDF = http_request_ns.class_("HttpRequestIDF", HttpRequestComponent)
 HttpRequestHost = http_request_ns.class_("HttpRequestHost", HttpRequestComponent)
+HttpRequestXR806 = http_request_ns.class_("HttpRequestXR806", HttpRequestComponent)
 
 HttpContainer = http_request_ns.class_("HttpContainer")
 RequestHeader = http_request_ns.struct("RequestHeader")
@@ -76,6 +77,9 @@ def validate_ssl_verification(config: ConfigType) -> ConfigType:
 
     if CORE.is_rp2 and config[CONF_VERIFY_SSL]:
         error_message = "ESPHome does not support certificate verification on RP2040"
+
+    if CORE.is_xr806 and config[CONF_VERIFY_SSL]:
+        error_message = "ESPHome does not support certificate verification on XR806"
 
     if (
         CORE.is_esp8266
@@ -127,6 +131,8 @@ def _declare_request_class(value: Any) -> ID:
         return cv.declare_id(HttpRequestIDF)(value)
     if CORE.is_esp8266 or CORE.is_rp2:
         return cv.declare_id(HttpRequestArduino)(value)
+    if CORE.is_xr806:
+        return cv.declare_id(HttpRequestXR806)(value)
     return NotImplementedError
 
 
@@ -179,6 +185,7 @@ CONFIG_SCHEMA = cv.All(
         esp_idf=cv.Version(0, 0, 0),
         rp2_arduino=cv.Version(0, 0, 0),
         host=cv.Version(0, 0, 0),
+        xr806_xradio=cv.Version(0, 0, 0),
     ),
     validate_ssl_verification,
 )
@@ -432,5 +439,6 @@ FILTER_SOURCE_FILES = filter_source_files_from_platform(
             PlatformFramework.ESP32_ARDUINO,
             PlatformFramework.ESP32_IDF,
         },
+        "http_request_xr806.cpp": {PlatformFramework.XR806_XRADIO},
     }
 )

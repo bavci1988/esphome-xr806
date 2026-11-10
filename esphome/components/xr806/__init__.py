@@ -10,6 +10,7 @@ from esphome.const import (
     CONF_BOARD,
     CONF_ID,
     KEY_CORE,
+    KEY_FRAMEWORK_VERSION,
     KEY_TARGET_FRAMEWORK,
     KEY_TARGET_PLATFORM,
     Framework,
@@ -142,6 +143,8 @@ def _update_core_data(config: ConfigType) -> None:
             )
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = DOMAIN
     CORE.data[KEY_CORE][KEY_TARGET_FRAMEWORK] = Framework.XRADIO
+    # Version of the pinned XRadio SDK (include/version.h), for require_framework_version().
+    CORE.data[KEY_CORE][KEY_FRAMEWORK_VERSION] = cv.Version(1, 2, 2)
     return config
 
 
@@ -304,6 +307,8 @@ async def to_code(config: ConfigType) -> None:
     cg.add_define("PROGMEM")
     cg.add_define(ThreadModel.MULTI_ATOMICS)
     cg.add_define("ESPHOME_BOARD", config[CONF_BOARD])
+    # Chip name for the API and for the chipFamily of http_request update manifests.
+    cg.add_define("ESPHOME_VARIANT", "XR806")
 
     if "wifi" in CORE.config:
         wlan = config[CONF_WLAN]
@@ -337,7 +342,7 @@ def run_compile(args: object, config: ConfigType) -> bool:
     import shutil
     import subprocess
 
-    from .build_support.dependencies import DEPENDENCIES, resolve_dependencies
+    from .build_support.dependencies import checkout_revision, resolve_dependencies
     from .build_support.noise_build import prepare_noise_build
 
     # Locate the ESPHome checkout from this platform module.
@@ -362,21 +367,26 @@ def run_compile(args: object, config: ConfigType) -> bool:
     # The vendor Makefiles generate files inside their SDK tree.
     # Never compile directly inside the shared dependency cache.
     sdk_root = xr_build / "sdk-work"
-    sdk_revision = DEPENDENCIES["xr806_sdk"]["commit"]
+    # The checkout actually used: the pinned one, or XR806_SDK_SOURCE_DIR at its own revision.
+    sdk_revision = checkout_revision(sdk_cache)
     revision_file = sdk_root / ".esphome-xr806-sdk-revision"
 
     if sdk_root.exists():
-        if (
-            not sdk_root.is_dir()
-            or not revision_file.is_file()
-            or revision_file.read_text().strip() != sdk_revision
-        ):
+        if not sdk_root.is_dir() or not revision_file.is_file():
             raise EsphomeError(
-                f"XR806 SDK work directory has an unexpected revision: "
+                f"XR806 SDK work directory has unknown contents: "
                 f"{sdk_root}. Inspect it before removing or rebuilding it."
             )
-        print("[XR806] Reusing SDK build workspace", flush=True)
-    else:
+        if revision_file.read_text().strip() != sdk_revision:
+            # A workspace this build created for another SDK revision: create it again.
+            print(
+                "[XR806] SDK revision changed; recreating the SDK build workspace",
+                flush=True,
+            )
+            shutil.rmtree(sdk_root)
+        else:
+            print("[XR806] Reusing SDK build workspace", flush=True)
+    if not sdk_root.exists():
         import tempfile
 
         xr_build.mkdir(parents=True, exist_ok=True)

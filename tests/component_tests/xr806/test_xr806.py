@@ -115,3 +115,26 @@ def test_syslog_over_udp_with_sntp_time(
 
     assert {"USE_UDP", "USE_TIME"} <= defines()
     assert "syslog::Syslog" in generated
+
+
+def test_http_request_with_ota_and_update(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("http_request.yaml"))
+
+    assert {"USE_UPDATE", "USE_OTA"} <= defines()
+    assert "http_request::HttpRequestXR806" in generated
+    assert "http_request::OtaHttpRequestComponent" in generated
+    assert "http_request::HttpRequestUpdate" in generated
+    assert 'ESPHOME_VARIANT="XR806"' in {str(define) for define in CORE.defines}
+
+
+def test_http_request_rejects_certificate_verification(
+    component_config_path: Callable[[str], Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    CORE.config_path = component_config_path("http_request_verify_ssl.yaml")
+
+    assert read_config({}) is None
+    assert "certificate verification on XR806" in capsys.readouterr().out

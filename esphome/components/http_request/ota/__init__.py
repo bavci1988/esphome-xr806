@@ -35,6 +35,7 @@ CONFIG_SCHEMA = cv.All(
         esp32_arduino=cv.Version(0, 0, 0),
         esp_idf=cv.Version(0, 0, 0),
         rp2_arduino=cv.Version(0, 0, 0),
+        xr806_xradio=cv.Version(0, 0, 0),
     ),
 )
 
