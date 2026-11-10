@@ -336,6 +336,8 @@ void XR806HTTPServer::close_client_() {
   }
   this->request_used_ = this->response_len_ = this->response_sent_ = 0;
   this->save_pending_ = false;
+  // The POST request itself contains the Wi-Fi password.
+  memset(this->request_, 0, sizeof(this->request_));
   memset(this->pending_ssid_, 0, sizeof(this->pending_ssid_));
   memset(this->pending_password_, 0, sizeof(this->pending_password_));
 }
