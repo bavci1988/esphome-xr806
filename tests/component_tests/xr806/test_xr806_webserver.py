@@ -68,13 +68,11 @@ def test_http_ota_and_standby_share_the_same_listener(
     assert "set_http_only(true)" in generated
 
 
-def test_native_ota_without_quiesce_cannot_sleep() -> None:
-    from esphome import final_validate as fv
-    from esphome.components.xr806 import _final_validate_uart
-
-    token = fv.full_config.set({"ota": [{"platform": "esphome"}]})
-    try:
-        with pytest.raises(Exception, match="native ota.esphome listeners"):
-            _final_validate_uart({"standby": {}})
-    finally:
-        fv.full_config.reset(token)
+def test_native_ota_fails_closed_without_transport_quiesce(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    # Existing Tuya + native OTA configs must keep compiling; native OTA's
+    # standby participant refuses PM when it cannot prove socket shutdown.
+    generated = generate_main(component_config_path("ota_diagnostic_wifi.yaml"))
+    assert "set_http_only(false)" in generated
