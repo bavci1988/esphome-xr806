@@ -126,7 +126,16 @@ bool XR806HTTPServer::start_http_() {
   struct sockaddr_in addr {};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(this->port_);
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  if (this->ap_only_) {
+    struct netif *nif = wlan_netif_get(WLAN_MODE_HOSTAP);
+    if (nif == nullptr) {
+      lwip_close(fd);
+      return false;
+    }
+    addr.sin_addr.s_addr = ip4_addr_get_u32(netif_ip4_addr(nif));
+  } else {
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  }
 
   if (socket_nonblocking(fd) != 0 || lwip_bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0 ||
       lwip_listen(fd, 2) != 0) {
@@ -349,12 +358,22 @@ void XR806HTTPServer::loop() {
   const bool ap = this->is_ap_active_();
   if (ap != this->ap_active_) {
     this->ap_active_ = ap;
-    if (!ap && this->dns_fd_ >= 0) {
-      lwip_close(this->dns_fd_);
-      this->dns_fd_ = -1;
+    if (!ap) {
+      if (this->dns_fd_ >= 0) {
+        lwip_close(this->dns_fd_);
+        this->dns_fd_ = -1;
+      }
+      if (this->ap_only_) {
+        this->close_client_();
+        if (this->listen_fd_ >= 0) {
+          lwip_close(this->listen_fd_);
+          this->listen_fd_ = -1;
+        }
+      }
     }
   }
-  if (this->listen_fd_ < 0 && (this->last_http_attempt_ == 0 || now - this->last_http_attempt_ >= RETRY_MS)) {
+  if ((!this->ap_only_ || ap) && this->listen_fd_ < 0 &&
+      (this->last_http_attempt_ == 0 || now - this->last_http_attempt_ >= RETRY_MS)) {
     this->last_http_attempt_ = now;
     if (!this->start_http_()) {
       ESP_LOGW(TAG, "HTTP bind failed; retrying");
