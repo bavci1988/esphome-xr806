@@ -203,6 +203,11 @@ def _final_validate_uart(config: ConfigType) -> ConfigType:
 def _final_validate_http(config: ConfigType) -> ConfigType:
     full_config = fv.full_config.get()
     if CONF_HTTP_SERVER in config:
+        if CONF_STANDBY in config:
+            raise cv.Invalid(
+                "xr806.http_server is not yet a standby lifecycle participant; "
+                "disable standby until HTTP sockets can drain and vote idle"
+            )
         wifi_config = full_config.get("wifi")
         if wifi_config is None:
             raise cv.Invalid("xr806.http_server requires wifi")
