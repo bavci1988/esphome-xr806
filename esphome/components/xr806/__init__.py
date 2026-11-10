@@ -162,6 +162,20 @@ XR806_UART0_RX = 33  # PB1, WXU pad 16
 
 def _final_validate_uart(config: ConfigType) -> ConfigType:
     full_config = fv.full_config.get()
+    # The XR806 HTTP listener has no suspend participant or socket-drain
+    # handshake. Keep guarded standby fail-closed until those exist.
+    if CONF_STANDBY in config:
+        http_services = [
+            name for name in ("web_server", "captive_portal")
+            if name in full_config
+        ]
+        if http_services:
+            raise cv.Invalid(
+                "xr806.standby cannot be combined with "
+                + ", ".join(http_services)
+                + " until HTTP listener, active-client and DNS suspend/resume "
+                "are registered as standby participants"
+            )
     for index, uart in enumerate(full_config.get("uart", [])):
         path = ["uart", index]
         for key, expected, name in (
