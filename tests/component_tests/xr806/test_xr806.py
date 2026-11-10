@@ -56,7 +56,8 @@ def test_logger_uses_the_console_uart(
     generated = generate_main(component_config_path("logger.yaml"))
 
     assert "USE_LOGGER" in defines()
-    assert "set_uart_selection(logger::UART_SELECTION_UART2)" in generated
+    # UART2 is the C++ default on XR806, so no setter is generated.
+    assert "set_uart_selection" not in generated
     assert "-DESPHOME_LOG_LEVEL=ESPHOME_LOG_LEVEL_DEBUG" in CORE.build_flags
 
 

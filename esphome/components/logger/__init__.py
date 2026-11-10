@@ -406,7 +406,6 @@ CONFIG_SCHEMA = cv.All(
                 nrf52_52832=UART0,
                 nrf52_54l15=UART0,
                 nrf52_54lm20=UART0,
-                xr806=UART2,
             ): cv.All(
                 cv.only_on(
                     [
@@ -520,9 +519,14 @@ async def to_code(config: ConfigType) -> None:
     # pre_setup() switches on uart_ to decide which hardware to initialize
     # (e.g. UART0 vs USB_SERIAL_JTAG). Without this, uart_ is still the
     # default UART_SELECTION_UART0 and the wrong hardware gets initialized.
-    # uart_ is UART0 in C++ except on LibreTiny where it is DEFAULT; skip the
+    # uart_ is UART0 in C++ except on LibreTiny (DEFAULT) and XR806 (UART2); skip the
     # setter when the config matches it.
-    cpp_default_uart = DEFAULT if CORE.is_libretiny else UART0
+    if CORE.is_libretiny:
+        cpp_default_uart = DEFAULT
+    elif CORE.is_xr806:
+        cpp_default_uart = UART2
+    else:
+        cpp_default_uart = UART0
     if (
         hardware_uart := config.get(CONF_HARDWARE_UART)
     ) is not None and hardware_uart != cpp_default_uart:
