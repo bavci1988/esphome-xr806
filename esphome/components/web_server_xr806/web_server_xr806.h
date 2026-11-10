@@ -205,12 +205,15 @@ class AsyncEventSource : public AsyncWebHandler {
     std::string pending;
     size_t sent{0};
     uint32_t last_progress{0};
+    std::unique_ptr<web_server::ListEntitiesIterator> entities_iterator;
   };
+  void queue_to_session_(Session &session, const char *message, size_t len, const char *event, uint32_t id,
+                         uint32_t reconnect);
   void queue_(const char *message, size_t len, const char *event, uint32_t id, uint32_t reconnect);
   StringRef path_;
   esphome::web_server::WebServer *web_server_;
   std::vector<Session> sessions_;
-  web_server::ListEntitiesIterator entities_iterator_{web_server_, this};
+  Session *listing_session_{nullptr};
 };
 #endif
 
