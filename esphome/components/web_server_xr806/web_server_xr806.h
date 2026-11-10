@@ -31,6 +31,7 @@ enum http_method : uint8_t { HTTP_GET, HTTP_POST, HTTP_OPTIONS, HTTP_PUT, HTTP_D
 class AsyncWebServerRequest;
 class AsyncWebServer;
 class AsyncWebHandler;
+class AsyncEventSource;
 
 class AsyncWebServerResponse {
  public:
@@ -142,6 +143,13 @@ class AsyncWebServer {
   void begin();
   void end();
   void loop();
+  // Close only the accept socket; active HTTP uploads and SSE streams
+  // retain ownership and must drain before the network can suspend.
+  void stop_accepting();
+  bool has_active_connections() const;
+#ifdef USE_WEBSERVER
+  void register_event_source(AsyncEventSource *source);
+#endif
   AsyncWebHandler &addHandler(AsyncWebHandler *handler) {
     handlers_.push_back(handler);
     return *handler;
@@ -169,6 +177,9 @@ class AsyncWebServer {
   std::vector<Client> clients_;
   std::vector<AsyncWebHandler *> handlers_;
   std::function<void(AsyncWebServerRequest *)> not_found_;
+#ifdef USE_WEBSERVER
+  std::vector<AsyncEventSource *> event_sources_;
+#endif
 };
 
 struct HttpHeader {
@@ -200,6 +211,7 @@ class AsyncEventSource : public AsyncWebHandler {
   void deferrable_send_state(void *source, bool detail_all, message_generator_t *generator);
   bool loop();
   bool empty() const { return sessions_.empty(); }
+  void close_all();
   void onServerStop() override { sessions_.clear(); }
 
  protected:
