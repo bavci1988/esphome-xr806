@@ -83,3 +83,14 @@ def test_compiler_build_flags_reach_the_make_adapter() -> None:
         "-Wno-sign-compare",
         "-fno-exceptions",
     ]
+
+
+def test_udp_packet_transport(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("udp.yaml"))
+
+    assert {"USE_UDP", "USE_SOCKET_IMPL_LWIP_SOCKETS"} <= defines()
+    assert "udp::UDPComponent" in generated
+    assert "packet_transport" in generated
