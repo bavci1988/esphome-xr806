@@ -67,13 +67,18 @@ void SNTPComponent::start_lwip_() {
 #endif
 
 #ifdef USE_XR806
+static constexpr uint32_t START_RETRY_ID = 0;
+static constexpr uint32_t START_RETRY_INTERVAL_MS = 1000;
+
 void SNTPComponent::start_lwip_in_tcpip_thread_() {
   // lwIP runs without core locking on XR806, so its raw API may only be used from the TCP/IP thread.
   if (tcpip_callback([](void *self) { static_cast<SNTPComponent *>(self)->start_lwip_(); }, this) == ERR_OK) {
+    this->cancel_interval(START_RETRY_ID);
     this->status_clear_warning();
-  } else {
-    // The next update() tries again.
+  } else if (!this->status_has_warning()) {
+    // The TCP/IP thread's message box is full. Retry on its own, so this works with update_interval: never too.
     this->status_set_warning();
+    this->set_interval(START_RETRY_ID, START_RETRY_INTERVAL_MS, [this]() { this->start_lwip_in_tcpip_thread_(); });
   }
 }
 #endif
