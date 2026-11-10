@@ -165,6 +165,13 @@ XR806_UART0_RX = 33  # PB1, WXU pad 16
 
 def _final_validate_uart(config: ConfigType) -> ConfigType:
     full_config = fv.full_config.get()
+    if CONF_STANDBY in config and any(
+        ota.get("platform") != "web_server" for ota in full_config.get("ota", [])
+    ):
+        raise cv.Invalid(
+            "XR806 guarded standby cannot suspend native ota.esphome listeners yet; "
+            "only HTTP-only OTA has a socket-drain participant"
+        )
     for index, uart in enumerate(full_config.get("uart", [])):
         path = ["uart", index]
         for key, expected, name in (
@@ -247,6 +254,15 @@ async def to_code(config: ConfigType) -> None:
                 )
             )
             ota_guard = cg.new_Pvariable(cfg[CONF_OTA_GUARD_ID])
+            # HTTP uploads share the listener and preflight with HTTP_BUSY.
+            # Native OTA uses an independent TCP listener and remains blocked.
+            ota_configs = CORE.config["ota"]
+            cg.add(
+                ota_guard.set_http_only(
+                    bool(ota_configs)
+                    and all(item.get("platform") == "web_server" for item in ota_configs)
+                )
+            )
             await cg.register_component(ota_guard, cfg)
 
     if CONF_STANDBY_TRIAL in config:
