@@ -1,0 +1,16 @@
+esphome:
+  name: xr806-web-ota
+xr806:
+  board: wxu
+wifi:
+  ssid: TEST-NETWORK-NO-HARDWARE
+  password: TestOnlyPassword123
+web_server:
+  version: 2
+  log: false
+  auth:
+    username: admin
+    password: TestOnlyWebPassword123
+    type: basic
+ota:
+  - platform: web_server
