@@ -14,7 +14,7 @@ CACHE_ROOT = Path.home() / ".cache/esphome-xr806/dependencies"
 DEPENDENCIES = {
     "xr806_sdk": {
         "url": "git@github.com:bavci1988/xr806-sdk.git",
-        "commit": "a7115f501821dcddc9dc3af85889866a67e19b62",
+        "commit": "ccea09449ab5b96e88b2223d3b6eeb8decbc2a9a",
         "required": (
             "gcc.mk",
             ".config",
@@ -60,6 +60,11 @@ def _git(*args: str, cwd: Path | None = None) -> str:
         text=True,
     )
     return result.stdout.strip()
+
+
+def checkout_revision(path: Path) -> str:
+    """Return the Git revision of a verified dependency checkout."""
+    return _git("rev-parse", "HEAD", cwd=path)
 
 
 def _verify(path: Path, name: str, expected_commit: str | None = None) -> None:

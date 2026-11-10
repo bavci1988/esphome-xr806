@@ -1,0 +1,35 @@
+esphome:
+  name: xr806-http-verify
+xr806:
+  board: wxu
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+logger:
+  level: DEBUG
+http_request:
+  verify_ssl: true
+  timeout: 10s
+ota:
+  - platform: http_request
+update:
+  - platform: http_request
+    name: Firmware update
+    source: https://example.com/xr806/manifest.json
+interval:
+  - interval: 1h
+    then:
+      - http_request.get:
+          url: http://example.com/status
+          collect_headers:
+            - content-type
+          capture_response: true
+          on_response:
+            then:
+              - logger.log:
+                  format: "Status %d, %s"
+                  args: [response->status_code, body.c_str()]
+      - http_request.post:
+          url: https://example.com/post
+          json:
+            value: "42"
