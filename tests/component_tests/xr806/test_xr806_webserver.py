@@ -36,29 +36,40 @@ def test_web_server_with_standard_captive_portal(
     assert "USE_WEBSERVER_OTA" not in _defines()
 
 
-def test_webserver_standby_requires_quiesce_owner() -> None:
-    from esphome.components.xr806 import _final_validate_uart
-    from esphome import final_validate as fv
+def test_http_standby_registers_network_owner(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("web_server_standby.yaml"))
+    assert {"USE_XR806_HTTP_STANDBY", "USE_XR806_STANDBY_CONTROLLER"} <= _defines()
+    assert "set_no_http(false)" in generated
 
-    token = fv.full_config.set({"web_server": {}, "wifi": {}})
+
+def test_web_server_ota_standard_platform(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("web_server_ota_enabled.yaml"))
+    assert "USE_WEBSERVER_OTA" in _defines()
+    assert "WebServerOTAComponent" in generated
+
+
+def test_http_ota_and_standby_share_the_same_listener(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("web_server_ota_standby.yaml"))
+    assert {"USE_WEBSERVER_OTA", "USE_XR806_HTTP_STANDBY"} <= _defines()
+    assert "set_http_only(true)" in generated
+
+
+def test_native_ota_without_quiesce_cannot_sleep() -> None:
+    from esphome import final_validate as fv
+    from esphome.components.xr806 import _final_validate_uart
+
+    token = fv.full_config.set({"ota": [{"platform": "esphome"}]})
     try:
-        with pytest.raises(Exception, match="HTTP listener"):
+        with pytest.raises(Exception, match="native ota.esphome listeners"):
             _final_validate_uart({"standby": {}})
     finally:
         fv.full_config.reset(token)
-
-
-def test_webserver_ota_fails_closed() -> None:
-    from esphome.components.web_server.ota import _web_server_ota_final_validate
-    from esphome.const import KEY_CORE, KEY_TARGET_PLATFORM, PLATFORM_XR806
-
-    previous = CORE.data.get(KEY_CORE)
-    CORE.data[KEY_CORE] = {KEY_TARGET_PLATFORM: PLATFORM_XR806}
-    try:
-        with pytest.raises(Exception, match="safe flash writer"):
-            _web_server_ota_final_validate({})
-    finally:
-        if previous is None:
-            CORE.data.pop(KEY_CORE, None)
-        else:
-            CORE.data[KEY_CORE] = previous
