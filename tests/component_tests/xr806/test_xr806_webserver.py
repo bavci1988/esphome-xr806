@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-import pytest
 
 from esphome.core import CORE
 
