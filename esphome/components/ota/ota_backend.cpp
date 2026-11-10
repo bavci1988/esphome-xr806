@@ -73,6 +73,17 @@ static void update_lock_clear() {
 }
 #endif
 
+bool UpdateLock::is_active() {
+#ifdef ESPHOME_THREAD_MULTI_ATOMICS
+  return update_locked.load(std::memory_order_acquire) != 0;
+#else
+#ifdef ESPHOME_THREAD_MULTI_NO_ATOMICS
+  LockGuard guard(update_lock_mutex());
+#endif
+  return update_locked;
+#endif
+}
+
 bool UpdateLock::try_acquire() {
   if (!this->held_)
     this->held_ = update_lock_test_and_set();

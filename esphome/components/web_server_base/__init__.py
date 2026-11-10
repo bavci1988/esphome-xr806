@@ -16,6 +16,8 @@ DOMAIN = "web_server_base"
 
 
 def AUTO_LOAD() -> list[str]:
+    if CORE.is_xr806:
+        return ["web_server_xr806", "socket"]
     if CORE.is_esp32:
         return ["web_server_idf"]
     if CORE.using_arduino:
@@ -24,7 +26,9 @@ def AUTO_LOAD() -> list[str]:
 
 
 web_server_base_ns = cg.esphome_ns.namespace("web_server_base")
-WebServerBase = web_server_base_ns.class_("WebServerBase")
+# XR806 registers its socket-polled WebServerBase in the main application loop.
+# The other platform implementations are not registered as components.
+WebServerBase = web_server_base_ns.class_("WebServerBase", cg.Component)
 
 CONF_WEB_SERVER_BASE_ID = "web_server_base_id"
 
@@ -105,6 +109,9 @@ async def to_code(config: ConfigType) -> None:
     var = cg.new_Pvariable(config[CONF_ID])
     cg.add(cg.RawExpression(f"{web_server_base_ns}::global_web_server_base = {var}"))
 
+    if CORE.is_xr806:
+        await cg.register_component(var, config)
+        return
     if CORE.is_esp32:
         # Count for StaticVector in web_server_idf - matches headers added in init()
         cg.add_define("WEB_SERVER_DEFAULT_HEADERS_COUNT", 1)
@@ -142,6 +149,7 @@ FILTER_SOURCE_FILES = filter_source_files_from_platform(
         "dns_server_esp32_idf.cpp": {
             PlatformFramework.ESP32_ARDUINO,
             PlatformFramework.ESP32_IDF,
+            PlatformFramework.XR806_XRADIO,
         },
     }
 )

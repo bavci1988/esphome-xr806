@@ -1,0 +1,17 @@
+esphome:
+  name: xr806-web-sleep
+xr806:
+  board: wxu
+  lowpower: true
+  wlan:
+    network_suspend: true
+  standby:
+    enabled: true
+    wake_pin: PA20
+    wake_edge: falling
+wifi:
+  ssid: TEST-NETWORK-NO-HARDWARE
+  password: TestOnlyPassword123
+web_server:
+  version: 2
+  log: false

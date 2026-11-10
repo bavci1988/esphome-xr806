@@ -9,7 +9,7 @@
 #include "esphome/components/network/ip_address.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/progmem.h"
-#if defined(USE_ESP32)
+#if defined(USE_ESP32) || defined(USE_XR806)
 #include "dns_server_esp32_idf.h"
 #elif defined(USE_ARDUINO)
 #include <DNSServer.h>
@@ -25,7 +25,7 @@ class CaptiveDNS {
     if (this->dns_server_ != nullptr)
       return true;
     auto server = make_unique<DNSServer>();
-#if defined(USE_ESP32)
+#if defined(USE_ESP32) || defined(USE_XR806)
     const bool started = server->start(ip);
 #elif defined(USE_ARDUINO)
     server->setErrorReplyCode(DNSReplyCode::NoError);
@@ -46,7 +46,7 @@ class CaptiveDNS {
   void loop() {
     if (this->dns_server_ == nullptr)
       return;
-#if defined(USE_ESP32)
+#if defined(USE_ESP32) || defined(USE_XR806)
     this->dns_server_->process_next_request();
 #elif defined(USE_ARDUINO)
     this->dns_server_->processNextRequest();

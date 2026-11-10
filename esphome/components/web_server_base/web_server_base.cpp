@@ -9,7 +9,7 @@ WebServerBase *global_web_server_base = nullptr;  // NOLINT(cppcoreguidelines-av
 // Not inlined, so its header copies leave the stack before the wrapped handler runs
 static bool __attribute__((noinline)) is_request_origin_allowed(AsyncWebServerRequest *request,
                                                                 const char *const *allowed) {
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
   // Stack copies: the IDF server only hands out header values by copy
   char origin[MAX_ORIGIN_LENGTH + 1];
   const size_t origin_len = request->get_header_to("Origin", origin);

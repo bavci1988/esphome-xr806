@@ -735,6 +735,7 @@ esphome/components/waveshare_io_ch32v003/* @latonita
 esphome/components/web_server/ota/* @esphome/core
 esphome/components/web_server_base/* @esphome/core
 esphome/components/web_server_idf/* @dentra
+esphome/components/web_server_xr806/* @bavci1988
 esphome/components/weikai/* @DrCoolZic
 esphome/components/weikai_i2c/* @DrCoolZic
 esphome/components/weikai_spi/* @DrCoolZic
