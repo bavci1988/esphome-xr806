@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           repository: bavci1988/xr806-sdk
-          ref: 36d5f54c5d524cc9d32ce444c79b2fe2797e5f3c
+          ref: 2c0217b7f4d25d25e4645a47ef353142b63f5e36
           path: xr806-sdk
           token: ${{ secrets.XR806_SDK_READ_TOKEN }}
           persist-credentials: false
@@ -123,7 +123,7 @@ jobs:
         shell: bash
         run: |
           test "$(git -C xr806-sdk rev-parse HEAD)" = \
-            "36d5f54c5d524cc9d32ce444c79b2fe2797e5f3c"
+            "2c0217b7f4d25d25e4645a47ef353142b63f5e36"
           test -f xr806-sdk/.config
           test -f xr806-sdk/lib/xradio_v3/libwlan.a
           grep -q 'PRJCONF_ESPHOME_PREFS0_ADDR' \
@@ -133,7 +133,7 @@ jobs:
         timeout-minutes: 18
         env:
           XR806_SDK_SOURCE_DIR: ${{ github.workspace }}/xr806-sdk
-          XR806_SDK_EXPECTED_COMMIT: 36d5f54c5d524cc9d32ce444c79b2fe2797e5f3c
+          XR806_SDK_EXPECTED_COMMIT: 2c0217b7f4d25d25e4645a47ef353142b63f5e36
         run: |
           cat > xr806-ci.yaml <<'YAML'
           esphome:
