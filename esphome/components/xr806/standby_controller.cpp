@@ -46,17 +46,24 @@ ESPHOME_LOG_TAG(TAG, "xr806.standby");
 static XR806StandbyController *active_controller = nullptr;
 
 #ifdef USE_LOGGER
-// The SDK UART suspend does not wait for the TX FIFO, so the last log line would be cut off.
-// 64 bytes at 9600 baud take about 67 ms.
-static constexpr uint32_t LOG_DRAIN_TIMEOUT_MS = 80;
+// The SDK UART suspend does not wait for the transmitter, so the last log line would be cut off.
+// Bytes that can be queued: the TX FIFO (at most 128) plus the shift register.
+static constexpr uint32_t LOG_UART_QUEUED_BYTES_MAX = 129;
 
-static void drain_log_uart() {
+/// Waits until the log UART has sent every byte, including the shift register. False if it is still sending
+/// after the time those bytes need at the configured baud rate.
+static bool drain_log_uart() {
   if (logger::global_logger == nullptr || logger::global_logger->get_baud_rate() == 0)
-    return;
+    return true;
+  const uint32_t baud = logger::global_logger->get_baud_rate();
+  const uint32_t timeout_ms = LOG_UART_QUEUED_BYTES_MAX * 10 * 1000 / baud + 2;
   UART_T *uart = HAL_UART_GetInstance(UART2_ID);
   const uint32_t start = millis();
-  while (!HAL_UART_IsTxEmpty(uart) && millis() - start < LOG_DRAIN_TIMEOUT_MS) {
+  while ((uart->LINE_STATUS & UART_TX_EMPTY_BIT) == 0) {
+    if (millis() - start > timeout_ms)
+      return false;
   }
+  return true;
 }
 #endif
 
@@ -239,6 +246,16 @@ void XR806StandbyController::attempt_standby_() {
     this->busy_ = false;
     return;
   }
+#ifdef USE_LOGGER
+  // Before the wake sources are armed, so a log UART that is still sending postpones the attempt
+  // instead of counting as a failed one.
+  if (!drain_log_uart()) {
+    this->cancel_prepared_(prepared);
+    this->state_.postpone();
+    this->busy_ = false;
+    return;
+  }
+#endif
 
   const int wake_io = this->has_wake_pin_ ? static_cast<int>(this->wake_pin_) - 10 : -1;
   GPIO_InitParam previous_gpio{};
@@ -301,9 +318,6 @@ void XR806StandbyController::attempt_standby_() {
   if (!p.commit_valid(commit_epoch))
     goto abort;
 
-#ifdef USE_LOGGER
-  drain_log_uart();
-#endif
   HAL_Wakeup_SetEvent(0);
   pm_called = true;
   // '500' is the SDK wakelock-touch deadline, NOT an upper bound on the
