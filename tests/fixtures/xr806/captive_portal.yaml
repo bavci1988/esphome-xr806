@@ -1,0 +1,13 @@
+esphome:
+  name: xr806-native-ci
+
+xr806:
+  board: wxu
+
+wifi:
+  ap:
+    ssid: XR806-CI-Setup
+    password: test-pass-1234
+
+captive_portal:
+  compression: gzip
