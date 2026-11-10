@@ -456,10 +456,20 @@ void AsyncEventSource::queue_to_session_(Session &session, const char *message, 
   std::string frame;
   if (event != nullptr)
     frame += std::string("event: ") + event + "\n";
-  if (id != 0)
-    frame += "id: " + std::to_string(id) + "\n";
-  if (reconnect != 0)
-    frame += "retry: " + std::to_string(reconnect) + "\n";
+  if (id != 0) {
+    char decimal[UINT32_MAX_STR_SIZE];
+    uint32_to_str(decimal, id);
+    frame += "id: ";
+    frame += decimal;
+    frame += "\n";
+  }
+  if (reconnect != 0) {
+    char decimal[UINT32_MAX_STR_SIZE];
+    uint32_to_str(decimal, reconnect);
+    frame += "retry: ";
+    frame += decimal;
+    frame += "\n";
+  }
   frame += "data: ";
   frame.append(message, len);
   frame += "\n\n";
