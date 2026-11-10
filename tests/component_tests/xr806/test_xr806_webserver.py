@@ -72,5 +72,5 @@ def test_native_ota_fails_closed_without_transport_quiesce(
 ) -> None:
     # Existing Tuya + native OTA configs must keep compiling; native OTA's
     # standby participant refuses PM when it cannot prove socket shutdown.
-    generated = generate_main(component_config_path("ota_diagnostic_wifi.yaml"))
+    generated = generate_main(component_config_path("native_ota_standby.yaml"))
     assert "set_http_only(false)" in generated
