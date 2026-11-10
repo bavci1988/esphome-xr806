@@ -54,6 +54,7 @@ static std::atomic<bool> s_connect_failed{false};
 static bool s_observer_attached = false;
 static bool s_sta_enabled = false;
 static bool s_ap_mode = false;
+static bool s_ap_enabled = false;
 static bool s_connect_requested = false;
 static bool s_sta_was_connected = false;
 static bool s_power_save_requested = false;
@@ -84,8 +85,9 @@ static bool sta_ready() { return xr806::read_xr806_network_snapshot(sta_netif())
 
 static bool sta_enable() {
   if (s_ap_mode) {
-    if (wlan_ap_disable() != 0)
+    if (s_ap_enabled && wlan_ap_disable() != 0)
       return false;
+    s_ap_enabled = false;
     s_ap_mode = false;
   }
   struct netif *nif = wlan_netif_get(WLAN_MODE_NONE);
@@ -132,8 +134,9 @@ bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
   }
 
   if (ap.has_value() && !ap.value() && s_ap_mode) {
-    if (wlan_ap_disable() != 0)
+    if (s_ap_enabled && wlan_ap_disable() != 0)
       return false;
+    s_ap_enabled = false;
     s_ap_mode = false;
   }
   if (sta.has_value()) {
@@ -205,7 +208,10 @@ bool WiFiComponent::wifi_start_ap_(const WiFiAP &ap) {
     std::memcpy(psk, ap.password_.data(), ap.password_.size());
   if (wlan_ap_set(ssid, static_cast<uint8_t>(ap.ssid_.size()), ap.password_.empty() ? nullptr : psk) != 0)
     return false;
-  return wlan_ap_enable() == 0;
+  if (wlan_ap_enable() != 0)
+    return false;
+  s_ap_enabled = true;
+  return true;
 }
 
 network::IPAddress WiFiComponent::wifi_soft_ap_ip() {
