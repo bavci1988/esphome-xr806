@@ -23,9 +23,6 @@ static constexpr size_t WAKEUP_CAUSE_BUFFER_SIZE = 128;
 
 class DebugComponent final : public PollingComponent {
  public:
-#ifdef USE_XR806
-  DebugComponent();
-#endif
   void loop() override;
   void update() override;
   float get_setup_priority() const override;
@@ -55,9 +52,6 @@ class DebugComponent final : public PollingComponent {
 #endif  // USE_ESP32
  protected:
   uint32_t free_heap_{};
-#ifdef USE_XR806
-  const char *const startup_reason_;
-#endif
 
 #ifdef USE_SENSOR
   uint32_t last_loop_timetag_{0};

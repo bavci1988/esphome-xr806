@@ -13,9 +13,12 @@ namespace esphome::debug {
 
 ESPHOME_LOG_TAG(TAG, "debug");
 
+// SystemInit() stores the startup state before the C++ static initializers run. A later sleep or standby
+// overwrites it, so it is kept from boot.
+static const SystemStartupState BOOT_STARTUP_STATE = SysGetStartupState();
+
 static const char *get_startup_reason() {
-  // SystemInit saves the startup state before clearing the reset registers.
-  switch (SysGetStartupState()) {
+  switch (BOOT_STARTUP_STATE) {
     case SYS_POWERON:
       return "Power-on reset";
     case SYS_WATCHDOG_CHIP_RST:
@@ -39,11 +42,8 @@ static const char *get_startup_reason() {
   }
 }
 
-// Preserve the boot reason before a later sleep or standby changes the SDK state.
-DebugComponent::DebugComponent() : startup_reason_(get_startup_reason()) {}
-
 const char *DebugComponent::get_reset_reason_(std::span<char, RESET_REASON_BUFFER_SIZE> buffer) {
-  return this->startup_reason_;
+  return get_startup_reason();
 }
 
 uint32_t DebugComponent::get_free_heap_() {
@@ -62,10 +62,10 @@ size_t DebugComponent::get_device_info_(std::span<char, DEVICE_INFO_BUFFER_SIZE>
            "XR806 debug info:\n"
            "  Board: %s\n"
            "  Reset Reason: %s",
-           ESPHOME_BOARD, this->startup_reason_);
+           ESPHOME_BOARD, get_startup_reason());
 
   return buf_append_printf(buffer.data(), buffer.size(), pos, "|Chip Name: XR806|Board: %s|Reset Reason: %s",
-                           ESPHOME_BOARD, this->startup_reason_);
+                           ESPHOME_BOARD, get_startup_reason());
 }
 
 void DebugComponent::update_platform_() {}
