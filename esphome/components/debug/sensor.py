@@ -21,6 +21,7 @@ from esphome.const import (
     UNIT_MILLISECOND,
     UNIT_PERCENT,
 )
+from esphome.core import CORE
 from esphome.types import ConfigType
 
 from . import CONF_DEBUG_ID, DebugComponent
@@ -29,6 +30,13 @@ DEPENDENCIES = ["debug"]
 
 CONF_MIN_FREE = "min_free"
 CONF_PSRAM = "psram"
+
+
+def validate_heap_block(config: ConfigType) -> ConfigType:
+    if CORE.is_xr806:
+        raise cv.Invalid("XR806 does not report the largest free heap block")
+    return config
+
 
 CONFIG_SCHEMA = {
     cv.GenerateID(CONF_DEBUG_ID): cv.use_id(DebugComponent),
@@ -39,12 +47,15 @@ CONFIG_SCHEMA = {
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         state_class=STATE_CLASS_MEASUREMENT,
     ),
-    cv.Optional(CONF_BLOCK): sensor.sensor_schema(
-        unit_of_measurement=UNIT_BYTES,
-        icon=ICON_COUNTER,
-        accuracy_decimals=0,
-        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
-        state_class=STATE_CLASS_MEASUREMENT,
+    cv.Optional(CONF_BLOCK): cv.All(
+        validate_heap_block,
+        sensor.sensor_schema(
+            unit_of_measurement=UNIT_BYTES,
+            icon=ICON_COUNTER,
+            accuracy_decimals=0,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
     ),
     cv.Optional(CONF_FRAGMENTATION): cv.All(
         cv.Any(

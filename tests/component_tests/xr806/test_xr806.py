@@ -71,6 +71,37 @@ def test_logger_rejects_the_mcu_uart(
     assert "UART2" in capsys.readouterr().out
 
 
+def test_debug_uses_standard_entities(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("debug.yaml"))
+
+    assert {"USE_DEBUG", "USE_LOGGER", "USE_SENSOR", "USE_TEXT_SENSOR"} <= defines()
+    assert "debug::DebugComponent" in generated
+    assert "set_update_interval(5000)" in generated
+    assert "set_free_sensor(" in generated
+    assert "set_loop_time_sensor(" in generated
+    assert "set_cpu_frequency_sensor(" in generated
+    assert "set_device_info_text_sensor(" in generated
+    assert "set_reset_reason_text_sensor(" in generated
+
+
+def test_debug_rejects_unsupported_heap_block(
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = component_config_path("debug.yaml").read_text()
+    CORE.config_path = tmp_path / "debug.yaml"
+    CORE.config_path.write_text(config.replace("    free:", "    block:"))
+
+    assert read_config({}) is None
+    assert (
+        "XR806 does not report the largest free heap block" in capsys.readouterr().out
+    )
+
+
 def test_compiler_build_flags_reach_the_make_adapter() -> None:
     flags = {
         "-DESPHOME_LOG_LEVEL=ESPHOME_LOG_LEVEL_DEBUG",
