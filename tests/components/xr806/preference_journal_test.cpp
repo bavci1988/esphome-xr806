@@ -140,7 +140,7 @@ TEST(XR806PreferenceJournal, PowerLossAfterRecordsKeepsNewSnapshot) {
   put_wifi(j, make_wifi("old", "oldpassword"));
   ASSERT_TRUE(j.commit(flash));
   put_wifi(j, make_wifi("new", "newpassword"));
-  flash.cut_after = static_cast<int64_t>(Journal::HEADER_SIZE + j.used());
+  flash.cut_after = static_cast<int64_t>(Journal::HEADER_SIZE) + static_cast<int64_t>(j.used());
   ASSERT_TRUE(!j.commit(flash));
   Journal after_reboot;
   ASSERT_TRUE(after_reboot.load(flash));
