@@ -416,67 +416,115 @@ bool AsyncEventSource::canHandle(AsyncWebServerRequest *req) const {
   return req->url_to(url) == path_;
 }
 void AsyncEventSource::handleRequest(AsyncWebServerRequest *req) {
-  auto sock = req->take_socket();
-  if (sock == nullptr) return;
+  // Keep one enumeration cursor per browser. The previous shared cursor
+  // restarted for all users on every new connection.
   if (sessions_.size() >= 2) {
-    sock->close();
+    req->send(503, "text/plain", "Too many event clients");
     return;
   }
+  auto sock = req->take_socket();
+  if (sock == nullptr)
+    return;
   Session session{};
   session.socket = std::move(sock);
   session.last_progress = millis();
   session.pending = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n"
                     "Connection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n";
+  session.entities_iterator = std::make_unique<web_server::ListEntitiesIterator>(web_server_, this);
+  session.entities_iterator->begin(web_server_->get_include_internal());
   sessions_.push_back(std::move(session));
-  entities_iterator_.begin(false);
+
+  // The standard web frontend expects a config-bearing ping immediately,
+  // not only the periodic uptime pings.
+  auto config = web_server_->get_config_json();
+  this->queue_to_session_(sessions_.back(), config.c_str(), config.size(), "ping", millis(), 30000);
 }
-void AsyncEventSource::queue_(const char *message, size_t len, const char *event, uint32_t id, uint32_t reconnect) {
-  if (sessions_.empty()) return;
+void AsyncEventSource::queue_to_session_(Session &session, const char *message, size_t len, const char *event,
+                                         uint32_t id, uint32_t reconnect) {
+  if (session.socket == nullptr)
+    return;
   std::string frame;
-  if (event != nullptr) frame += std::string("event: ") + event + "\n";
-  if (id != 0) frame += "id: " + std::to_string(id) + "\n";
-  if (reconnect != 0) frame += "retry: " + std::to_string(reconnect) + "\n";
+  if (event != nullptr)
+    frame += std::string("event: ") + event + "\n";
+  if (id != 0)
+    frame += "id: " + std::to_string(id) + "\n";
+  if (reconnect != 0)
+    frame += "retry: " + std::to_string(reconnect) + "\n";
   frame += "data: ";
   frame.append(message, len);
   frame += "\n\n";
   char prefix[24];
   std::snprintf(prefix, sizeof(prefix), "%zx\r\n", frame.size());
-  for (auto &session : sessions_) {
-    if (session.pending.size() + frame.size() + 64 > 8192) {
-      session.socket.reset();
-      continue;
-    }
-    session.pending += prefix;
-    session.pending += frame;
-    session.pending += "\r\n";
+  const size_t extra = std::strlen(prefix) + frame.size() + 2;
+  // Bounded queue: slow browsers are disconnected instead of consuming
+  // unbounded SRAM or stalling the MCU UART and main application loop.
+  if (extra > 8192 || session.pending.size() > 8192 - extra) {
+    session.socket.reset();
+    return;
   }
+  session.pending += prefix;
+  session.pending += frame;
+  session.pending += "\r\n";
+}
+void AsyncEventSource::queue_(const char *message, size_t len, const char *event, uint32_t id, uint32_t reconnect) {
+  for (auto &session : sessions_)
+    this->queue_to_session_(session, message, len, event, id, reconnect);
 }
 void AsyncEventSource::try_send_nodefer(const char *message, size_t len, const char *event,
                                        uint32_t id, uint32_t reconnect) {
-  queue_(message, len, event, id, reconnect);
+  this->queue_(message, len, event, id, reconnect);
 }
 void AsyncEventSource::deferrable_send_state(void *source, bool detail_all, message_generator_t *generator) {
-  if (sessions_.empty() || (!detail_all && !entities_iterator_.completed())) return;
+  if (sessions_.empty())
+    return;
+  if (detail_all) {
+    if (listing_session_ == nullptr || listing_session_->socket == nullptr)
+      return;
+  } else {
+    bool has_ready_client = false;
+    for (const auto &session : sessions_)
+      has_ready_client |= session.socket != nullptr && session.entities_iterator->completed();
+    if (!has_ready_client)
+      return;
+  }
   json::JsonBuilder builder;
   generator(web_server_, source, builder);
   auto message = builder.serialize();
-  queue_(message.c_str(), message.size(), "state", 0, 0);
+  if (detail_all) {
+    this->queue_to_session_(*listing_session_, message.c_str(), message.size(), "state", 0, 0);
+  } else {
+    for (auto &session : sessions_) {
+      if (session.socket != nullptr && session.entities_iterator->completed())
+        this->queue_to_session_(session, message.c_str(), message.size(), "state", 0, 0);
+    }
+  }
 }
 bool AsyncEventSource::loop() {
-  if (sessions_.empty()) return false;
-  if (!entities_iterator_.completed())
-    entities_iterator_.try_advance(1);
+  if (sessions_.empty())
+    return false;
   const uint32_t now = millis();
   for (auto &session : sessions_) {
-    if (session.socket == nullptr) continue;
-    // A peer closing its receive half or a stalled sender is removed on the next failed write.
-    if (now - session.last_progress > 20000) { session.socket.reset(); continue; }
+    if (session.socket == nullptr)
+      continue;
+    if (!session.entities_iterator->completed()) {
+      this->listing_session_ = &session;
+      session.entities_iterator->try_advance(1);
+      this->listing_session_ = nullptr;
+      if (session.socket == nullptr)
+        continue;
+    }
+    if (now - session.last_progress > 20000) {
+      session.socket.reset();
+      continue;
+    }
     const size_t pending = session.pending.size() - session.sent;
-    if (pending == 0) continue;
+    if (pending == 0)
+      continue;
     const ssize_t n = session.socket->send(session.pending.data() + session.sent,
                                           std::min<size_t>(1024, pending), MSG_DONTWAIT);
     if (n < 0) {
-      if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) session.socket.reset();
+      if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+        session.socket.reset();
       continue;
     }
     if (n > 0) {
@@ -489,7 +537,7 @@ bool AsyncEventSource::loop() {
     }
   }
   sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(),
-                                [](const Session &s) { return s.socket == nullptr; }), sessions_.end());
+                                 [](const Session &s) { return s.socket == nullptr; }), sessions_.end());
   return !sessions_.empty();
 }
 #endif
