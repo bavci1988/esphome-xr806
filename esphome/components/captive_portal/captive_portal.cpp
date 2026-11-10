@@ -1,5 +1,9 @@
 #include "captive_portal.h"
-#ifdef USE_CAPTIVE_PORTAL
+#if defined(USE_CAPTIVE_PORTAL) && defined(USE_XR806)
+namespace esphome::captive_portal {
+CaptivePortal *global_captive_portal = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+}  // namespace esphome::captive_portal
+#elif defined(USE_CAPTIVE_PORTAL)
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include "esphome/core/helpers.h"
