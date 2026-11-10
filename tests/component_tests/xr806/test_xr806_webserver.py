@@ -75,3 +75,14 @@ def test_native_ota_fails_closed_without_transport_quiesce(
     # standby participant refuses PM when it cannot prove socket shutdown.
     generated = generate_main(component_config_path("native_ota_standby.yaml"))
     assert "set_http_only(false)" in generated
+
+
+def test_captive_portal_credentials_are_persisted(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    # Credentials saved through the portal must reach flash: the preferences syncer
+    # commits them, and the flash journal is a key-lookup backend.
+    generated = generate_main(component_config_path("web_server_captive.yaml"))
+    assert "USE_PREFERENCE_KEY_LOOKUP" in _defines()
+    assert "preferences::IntervalSyncer" in generated

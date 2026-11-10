@@ -19,6 +19,8 @@ from esphome.core import CORE, EsphomeError
 from esphome.types import ConfigType
 
 CODEOWNERS = ["@bavci1988"]
+# The preferences syncer writes pending preferences every 60 s and at shutdown.
+AUTO_LOAD = ["preferences"]
 DOMAIN = "xr806"
 IS_TARGET_PLATFORM = True
 
@@ -187,6 +189,8 @@ FINAL_VALIDATE_SCHEMA = _final_validate_uart
 
 
 async def to_code(config: ConfigType) -> None:
+    # The FDCM journal finds stored preferences by key.
+    cg.add_define("USE_PREFERENCE_KEY_LOOKUP")
     if config[CONF_OTA_DIAGNOSTIC_READONLY]:
         # ROM/FDCM read-only snapshot: does not enable ESPHome OTA.
         cg.add_define("USE_XR806_OTA_RUNTIME_PROBE")
