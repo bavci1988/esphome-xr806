@@ -1555,6 +1555,9 @@ jobs:
             exit 1
           }
           . .\venv\Scripts\Activate.ps1
+          # A short build folder: under the checkout, the nRF52 build's object paths pass the 260-character
+          # Windows limit when the repository name is longer than "esphome"
+          $env:ESPHOME_BUILD_PATH = Join-Path $env:RUNNER_TEMP "b"
           if ("${{ matrix.idf_target }}") {
             # Only the chip this leg builds; CI otherwise installs every toolchain
             $env:ESPHOME_IDF_DEFAULT_TARGETS = "${{ matrix.idf_target }}"
