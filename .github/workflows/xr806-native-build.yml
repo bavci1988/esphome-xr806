@@ -15,6 +15,31 @@ permissions:
   contents: read
 
 jobs:
+  wxu-codegen:
+    name: Standard captive_portal YAML and C++ code generation
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout ESPHome
+        uses: actions/checkout@v7.0.1
+      - name: Python 3.12
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.11.15"
+          enable-cache: false
+      - name: Install this ESPHome branch
+        run: uv pip install --system -e .
+      - name: Validate standard YAML and generate XR806 C++
+        run: |
+          esphome config tests/fixtures/xr806/captive_portal.yaml
+          esphome compile --only-generate tests/fixtures/xr806/captive_portal.yaml
+          grep -R -q '^#define USE_XR806_HTTP_PORTAL' .esphome/build
+          grep -R -q '^#define USE_CAPTIVE_PORTAL' .esphome/build
+
   sdk-access:
     name: Check private SDK CI access
     runs-on: ubuntu-latest
