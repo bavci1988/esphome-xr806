@@ -13,6 +13,8 @@
 #include "esphome/components/rp2/preferences.h"
 #elif defined(USE_LIBRETINY)
 #include "esphome/components/libretiny/preferences.h"
+#elif defined(USE_XR806)
+#include "esphome/components/xr806/preferences.h"
 #elif defined(USE_HOST)
 #include "esphome/components/host/preferences.h"
 #elif defined(USE_ZEPHYR) && defined(CONFIG_SETTINGS)
