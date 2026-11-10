@@ -8,4 +8,6 @@ def override_manifest(manifest: ComponentManifestOverride) -> None:
     manifest.enable_codegen()
     # The portable XR806 FDCM journal is tested on the host; do not pull in
     # the vendor-specific XR806 C++ sources, only its standalone header.
-    manifest.add_resources(FileResource("esphome.components.xr806", "preference_journal.h"))
+    manifest.add_resources(
+        FileResource("esphome.components.xr806", "preference_journal.h")
+    )
