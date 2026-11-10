@@ -374,14 +374,16 @@ void XR806HTTPServer::handle_client_() {
   if (this->client_fd_ < 0 || this->response_len_ == 0)
     return;
 
-  const int sent = lwip_send(this->client_fd_, this->response_ + this->response_sent_,
-                             this->response_len_ - this->response_sent_, MSG_DONTWAIT);
-  if (sent < 0 && !transient_error()) {
-    this->close_client_();
-    return;
+  if (this->response_sent_ < this->response_len_) {
+    const int sent = lwip_send(this->client_fd_, this->response_ + this->response_sent_,
+                               this->response_len_ - this->response_sent_, MSG_DONTWAIT);
+    if (sent < 0 && !transient_error()) {
+      this->close_client_();
+      return;
+    }
+    if (sent > 0)
+      this->response_sent_ += static_cast<size_t>(sent);
   }
-  if (sent > 0)
-    this->response_sent_ += static_cast<size_t>(sent);
   if (this->response_sent_ == this->response_len_ && this->static_body_ != nullptr &&
       this->static_body_sent_ < this->static_body_len_) {
     const size_t available = std::min<size_t>(1024, this->static_body_len_ - this->static_body_sent_);
