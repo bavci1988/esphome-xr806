@@ -16,6 +16,9 @@ namespace esphome::xr806 {
 
 ESPHOME_LOG_TAG(TAG, "xr806.http_standby");
 
+static constexpr uint32_t RESTORE_RETRY_ID = 0;
+static constexpr uint32_t RESTORE_RETRY_MS = 1000;
+
 bool XR806HTTPStandby::claim_lock_() {
   if (lock_held_)
     return true;
@@ -70,24 +73,35 @@ bool XR806HTTPStandby::may_quiesce() const {
 }
 
 void XR806HTTPStandby::restore_() {
-  if (!parked_)
-    return;
-  auto &policy = lowpower_policy();
-  // Claim the policy blocker before touching sockets or the PM wakelock.
-  policy.set_http_idle(false);
-  if (!this->claim_lock_()) {
-    ESP_LOGE(TAG, "HTTP PM wakelock re-acquire failed; refuse resume");
-    this->mark_failed();
+  if (!this->parked_) {
+    this->cancel_restore_retry_();
     return;
   }
+  // Claim the policy blocker before touching sockets or the PM wakelock, so a failed
+  // restore can never let the device sleep.
+  lowpower_policy().set_http_idle(false);
   auto *base = web_server_base::global_web_server_base;
-  if (base == nullptr || base->get_server() == nullptr) {
-    ESP_LOGE(TAG, "Cannot restore native HTTP listener");
-    this->mark_failed();
+  auto *server = base != nullptr ? base->get_server() : nullptr;
+  if (!this->claim_lock_() || server == nullptr || !server->begin()) {
+    // Stay parked and try again; the listener must come back for the device to stay reachable.
+    ESP_LOGW(TAG, "Cannot reopen the HTTP listener; retrying");
+    this->status_set_warning();
+    if (!this->restore_retry_armed_) {
+      this->restore_retry_armed_ = true;
+      this->set_interval(RESTORE_RETRY_ID, RESTORE_RETRY_MS, [this]() { this->restore_(); });
+    }
     return;
   }
-  base->get_server()->begin();
-  parked_ = false;
+  this->parked_ = false;
+  this->cancel_restore_retry_();
+  this->status_clear_warning();
+}
+
+void XR806HTTPStandby::cancel_restore_retry_() {
+  if (this->restore_retry_armed_) {
+    this->cancel_interval(RESTORE_RETRY_ID);
+    this->restore_retry_armed_ = false;
+  }
 }
 
 void XR806HTTPStandby::standby_preflight(bool requested) {
@@ -97,6 +111,8 @@ void XR806HTTPStandby::standby_preflight(bool requested) {
   }
   if (!this->may_quiesce())
     return;
+  // A new standby attempt parks the listener on purpose; stop reopening it.
+  this->cancel_restore_retry_();
   auto *base = web_server_base::global_web_server_base;
   if (base == nullptr || base->get_server() == nullptr)
     return;  // Fail closed until the shared server actually exists.

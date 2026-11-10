@@ -33,11 +33,13 @@ class XR806HTTPStandby final : public Component, public XR806StandbyParticipant 
   bool claim_lock_();
   bool has_captive_dns_() const;
   void restore_();
+  void cancel_restore_retry_();
 
   struct wakelock lock_{};
   bool lock_held_{false};
   bool parked_{false};
   bool shutting_down_{false};
+  bool restore_retry_armed_{false};
 };
 
 }  // namespace esphome::xr806

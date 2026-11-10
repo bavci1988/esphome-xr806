@@ -151,8 +151,10 @@ class AsyncWebServer {
  public:
   explicit AsyncWebServer(uint16_t port) : port_(port) {}
   ~AsyncWebServer() { this->end(); }
-  void begin();
+  /// Opens the listener; true when it is listening afterwards.
+  bool begin();
   void end();
+  bool is_listening() const { return this->listener_ != nullptr; }
   void loop();
   // Close only the accept socket; active HTTP uploads and SSE streams
   // retain ownership and must drain before the network can suspend.
