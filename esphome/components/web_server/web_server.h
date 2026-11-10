@@ -244,6 +244,10 @@ class WebServer final : public Component, public AsyncWebHandler {
    * @param include_internal Whether internal components should be displayed.
    */
   void set_include_internal(bool include_internal) { include_internal_ = include_internal; }
+#ifdef USE_XR806
+  // XR806's per-session SSE entity iterators need the normal web_server flag.
+  bool get_include_internal() const { return include_internal_; }
+#endif
   /** Set whether or not the webserver should expose the Log.
    *
    * @param expose_log.
