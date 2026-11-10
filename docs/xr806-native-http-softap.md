@@ -53,7 +53,7 @@ new credentials.
 
 1. Build from the `feature/xr806-native-http-softap-dns` ESPHome branch.
    The dependency is pinned to XRadio SDK revision
-   `495ac30bbb4e8df7699051318e3fb451969a1c61` in the matching SDK fork.
+   `4598ef1cf42fbf92edab0847cc05bbc6dd4191fb` in the matching SDK fork.
    If an earlier `xr806/sdk-work` directory already exists, check its revision
    before replacing it with the fresh pinned dependency.
 2. Confirm on an isolated XR806/WXU test device that the AP is visible and
