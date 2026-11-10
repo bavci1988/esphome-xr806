@@ -1,5 +1,5 @@
 #include "dns_server_esp32_idf.h"
-#if defined(USE_ESP32) && (defined(USE_CAPTIVE_PORTAL) || defined(USE_WEBSERVER_CAPTIVE))
+#if (defined(USE_ESP32) || defined(USE_XR806)) && (defined(USE_CAPTIVE_PORTAL) || defined(USE_WEBSERVER_CAPTIVE))
 
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
@@ -206,4 +206,4 @@ void DNSServer::process_next_request() {
 
 }  // namespace esphome::web_server_base
 
-#endif  // USE_ESP32 && (USE_CAPTIVE_PORTAL || USE_WEBSERVER_CAPTIVE)
+#endif  // (USE_ESP32 || USE_XR806) && (USE_CAPTIVE_PORTAL || USE_WEBSERVER_CAPTIVE)

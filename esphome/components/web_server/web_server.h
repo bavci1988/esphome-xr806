@@ -244,6 +244,13 @@ class WebServer final : public Component, public AsyncWebHandler {
    * @param include_internal Whether internal components should be displayed.
    */
   void set_include_internal(bool include_internal) { include_internal_ = include_internal; }
+#ifdef USE_XR806
+  // XR806's per-session SSE entity iterators need the normal web_server flag.
+  bool get_include_internal() const { return include_internal_; }
+#ifdef USE_WEBSERVER_SORTING
+  const std::map<uint64_t, SortingGroup> &get_sorting_groups() const { return sorting_groups_; }
+#endif
+#endif
   /** Set whether or not the webserver should expose the Log.
    *
    * @param expose_log.
@@ -607,7 +614,7 @@ class WebServer final : public Component, public AsyncWebHandler {
   }
 
   web_server_base::WebServerBase *base_;
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
   AsyncEventSource events_{StringRef::from_lit("/events"), this};
 #elif USE_ARDUINO
   DeferredUpdateEventSourceList events_;

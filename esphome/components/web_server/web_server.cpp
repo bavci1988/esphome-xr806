@@ -420,8 +420,11 @@ void WebServer::setup() {
   }
 #endif
 
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
   this->base_->add_handler(&this->events_);
+#ifdef USE_XR806
+  this->base_->get_server()->register_event_source(&this->events_);
+#endif
 #endif
   this->base_->add_handler(this);
 #ifdef USE_WEBSERVER_CAPTIVE
@@ -455,8 +458,12 @@ void WebServer::loop() {
   // - deferrable_send_state early-outs when no clients are connected
   // - try_send_nodefer (log, ping) iterates sessions which are empty
   // - REST API handlers use defer() which runs via the Scheduler
+#ifndef USE_XR806
   if (!keep_looping)
     this->disable_loop();
+#else
+  (void) keep_looping;  // XR806 HTTP runs in the main loop; keep polling client streams.
+#endif
 }
 
 #ifdef USE_WEBSERVER_CAPTIVE
@@ -532,7 +539,7 @@ void WebServer::handle_index_request(AsyncWebServerRequest *request) {
 #ifdef USE_WEBSERVER_PRIVATE_NETWORK_ACCESS
 void WebServer::handle_pna_cors_request(AsyncWebServerRequest *request) {
   // WebServerBase's middleware already rejected an origin that is not allowed.
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
   char origin_buf[web_server_base::MAX_ORIGIN_LENGTH + 1];
   const size_t origin_len = request->get_header_to("Origin", origin_buf);
   // Only an allow-any-origin build lets through an Origin too long for the buffer; it gets "*" instead
@@ -2232,7 +2239,7 @@ void WebServer::update_json_(update::UpdateEntity *obj, JsonDetail start_config,
 #endif
 
 bool WebServer::canHandle(AsyncWebServerRequest *request) const {
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
   StringRef url = request->url_to(url_buf);
 #else
@@ -2377,7 +2384,7 @@ bool WebServer::canHandle(AsyncWebServerRequest *request) const {
   return false;
 }
 void WebServer::handleRequest(AsyncWebServerRequest *request) {
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
   StringRef url = request->url_to(url_buf);
 #else

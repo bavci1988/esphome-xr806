@@ -15,6 +15,7 @@ from esphome.const import (
     PLATFORM_LN882X,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import CORE, coroutine_with_priority
 from esphome.coroutine import CoroPriority
@@ -25,7 +26,12 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def AUTO_LOAD() -> list[str]:
-    auto_load = ["web_server_base", "ota.web_server"]
+    # XR806 already has authenticated Native OTA. Its XZ flash writer cannot
+    # safely accept a multipart web upload until a complete streaming adapter
+    # and disconnect-abort contract have been tested on hardware.
+    auto_load = ["web_server_base"]
+    if not CORE.is_xr806:
+        auto_load.append("ota.web_server")
     if CORE.is_esp32:
         auto_load.append("socket")
     return auto_load
@@ -56,6 +62,7 @@ CONFIG_SCHEMA = cv.All(
             PLATFORM_LN882X,
             PLATFORM_RP2,
             PLATFORM_RTL87XX,
+            PLATFORM_XR806,
         ]
     ),
 )

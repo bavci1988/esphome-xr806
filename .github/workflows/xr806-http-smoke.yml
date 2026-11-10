@@ -1,0 +1,21 @@
+name: XR806 HTTP streaming smoke
+on:
+  pull_request:
+    paths:
+      - 'esphome/components/web_server_xr806/**'
+      - 'tests/portable/xr806_multipart_smoke.cpp'
+      - '.github/workflows/xr806-http-smoke.yml'
+  push:
+    paths:
+      - 'esphome/components/web_server_xr806/**'
+      - 'tests/portable/xr806_multipart_smoke.cpp'
+      - '.github/workflows/xr806-http-smoke.yml'
+jobs:
+  multipart-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build bounded OTA parser smoke
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -O2 -I. tests/portable/xr806_multipart_smoke.cpp -o /tmp/xr806-multipart-test
+          /tmp/xr806-multipart-test

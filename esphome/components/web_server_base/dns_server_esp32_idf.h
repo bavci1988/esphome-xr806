@@ -1,7 +1,7 @@
 #pragma once
 #include "esphome/core/defines.h"
 // ESP32 backend for CaptiveDNS: answers every A query with the access point address.
-#if defined(USE_ESP32) && (defined(USE_CAPTIVE_PORTAL) || defined(USE_WEBSERVER_CAPTIVE))
+#if (defined(USE_ESP32) || defined(USE_XR806)) && (defined(USE_CAPTIVE_PORTAL) || defined(USE_WEBSERVER_CAPTIVE))
 
 #include "esphome/core/helpers.h"
 #include "esphome/components/network/ip_address.h"
@@ -32,4 +32,4 @@ class DNSServer {
 
 }  // namespace esphome::web_server_base
 
-#endif  // USE_ESP32 && (USE_CAPTIVE_PORTAL || USE_WEBSERVER_CAPTIVE)
+#endif  // (USE_ESP32 || USE_XR806) && (USE_CAPTIVE_PORTAL || USE_WEBSERVER_CAPTIVE)
