@@ -21,7 +21,12 @@ env:
 jobs:
   label:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.state == 'open' && (github.event.action != 'labeled' || github.event.sender.type != 'Bot')
+    # Forks without an ESPHome GitHub App cannot mint a bot token. Labeling is
+    # optional metadata; skip this job rather than failing unrelated PR CI.
+    if: >-
+      github.event.pull_request.state == 'open' &&
+      (github.event.action != 'labeled' || github.event.sender.type != 'Bot') &&
+      vars.ESPHOME_GITHUB_APP_CLIENT_ID != ''
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
