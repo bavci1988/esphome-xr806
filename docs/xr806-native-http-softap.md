@@ -26,9 +26,10 @@ captive_portal:
 
 This is not complete ESPHome parity: native XR806 SoftAP operates exclusively
 against STA, therefore `/config.json` currently reports no scan entries.
-The UI supports manually entering an SSID. No flash-backed ESPHome preferences
-manager is available, so saving Wi-Fi settings only applies them for the
-current runtime (the firmware must not falsely claim otherwise).
+The UI supports manually entering an SSID. An experimental flash-backed ESPHome preferences manager now uses two separate
+FDCM sectors and verified CRC snapshots. Hardware reboot, power-interruption,
+OTA partition and flash-wear behavior are still unverified; do not claim
+persistent provisioning is proven.
 **Native standard `web_server:` support is still blocked** by the missing
 AsyncWebServer-compatible XR806 HTTP/SSE/REST backend, and remains a separate
 upstream integration task. The normal portal and native experimental
@@ -83,7 +84,7 @@ new credentials.
 
 1. Build from the `feature/xr806-native-http-softap-dns` ESPHome branch.
    The dependency is pinned to XRadio SDK revision
-   `9d744113570f6fee27197e02523c73eb0b6983a3` in the matching SDK fork.
+   `36d5f54c5d524cc9d32ce444c79b2fe2797e5f3c` in the matching SDK fork.
    If an earlier `xr806/sdk-work` directory already exists, check its revision
    before replacing it with the fresh pinned dependency.
 2. Confirm on an isolated XR806/WXU test device that the AP is visible and
