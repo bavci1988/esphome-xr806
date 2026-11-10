@@ -36,7 +36,7 @@ inline size_t make_captive_dns_reply(const uint8_t *query, size_t size, const ui
 
   memcpy(reply, query, question_size);
   reply[2] = static_cast<uint8_t>(0x84 | (query[2] & 1));  // QR, AA, preserve RD; no recursion available
-  reply[3] = 0;  // NOERROR, RA=0
+  reply[3] = 0;                                            // NOERROR, RA=0
   reply[4] = 0;
   reply[5] = 1;
   reply[6] = 0;
@@ -45,11 +45,11 @@ inline size_t make_captive_dns_reply(const uint8_t *query, size_t size, const ui
 
   if (answer_a) {
     static constexpr uint8_t ANSWER[] = {
-        0xc0, 0x0c,  // owner: pointer to the query name
-        0x00, 0x01,  // A
-        0x00, 0x01,  // IN
+        0xc0, 0x0c,              // owner: pointer to the query name
+        0x00, 0x01,              // A
+        0x00, 0x01,              // IN
         0x00, 0x00, 0x00, 0x00,  // TTL=0 (avoid stale redirects)
-        0x00, 0x04,  // four bytes
+        0x00, 0x04,              // four bytes
     };
     memcpy(reply + question_size, ANSWER, sizeof(ANSWER));
     memcpy(reply + question_size + sizeof(ANSWER), ip, 4);
