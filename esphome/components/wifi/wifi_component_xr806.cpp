@@ -179,7 +179,7 @@ bool WiFiComponent::wifi_sta_ip_config_(const optional<ManualIP> &manual_ip) {
 
 #ifdef USE_WIFI_AP
 bool WiFiComponent::wifi_ap_ip_config_(const optional<ManualIP> &manual_ip) {
-  // net_ctrl.c applies the AP address from sysinfo (currently 192.168.176.1/24)
+  // net_ctrl.c applies the AP address from sysinfo (default 192.168.4.1/24)
   // and starts udhcpd when the AP netif reports NETWORK_UP.
   return !manual_ip.has_value();
 }
