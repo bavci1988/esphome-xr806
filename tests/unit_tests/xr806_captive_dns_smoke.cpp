@@ -9,9 +9,8 @@
 
 int main() {
   constexpr uint8_t query[] = {
-      0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 0x03, 'c', 'o', 'm', 0x00,
-      0x00, 0x01, 0x00, 0x01,
+      0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 'e',  'x',
+      'a',  'm',  'p',  'l',  'e',  0x03, 'c',  'o',  'm',  0x00, 0x00, 0x01, 0x00, 0x01,
   };
   constexpr uint8_t ip[] = {192, 168, 4, 1};
   std::array<uint8_t, 272> answer{};
@@ -34,12 +33,12 @@ int main() {
   for (size_t i = 0; i < sizeof(query); i++)
     malformed[i] = query[i];
   malformed[12] = 0xc0;  // compressed pointer in question rejected
-  assert(esphome::xr806::make_captive_dns_reply(malformed.data(), malformed.size(), ip, answer.data(),
-                                                answer.size()) == 0);
+  assert(esphome::xr806::make_captive_dns_reply(malformed.data(), malformed.size(), ip, answer.data(), answer.size()) ==
+         0);
   malformed[12] = query[12];
   malformed[5] = 2;  // multiple questions rejected
-  assert(esphome::xr806::make_captive_dns_reply(malformed.data(), malformed.size(), ip, answer.data(),
-                                                answer.size()) == 0);
+  assert(esphome::xr806::make_captive_dns_reply(malformed.data(), malformed.size(), ip, answer.data(), answer.size()) ==
+         0);
 
   assert(esphome::xr806::make_captive_dns_reply(query, sizeof(query), ip, answer.data(), 20) == 0);
 }
