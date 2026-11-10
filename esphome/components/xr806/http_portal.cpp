@@ -11,6 +11,10 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "captive_dns_packet.h"
+#ifdef USE_CAPTIVE_PORTAL
+#include "esphome/components/captive_portal/captive_index.h"
+#include "esphome/core/application.h"
+#endif
 
 extern "C" {
 #include "xr_config.h"
@@ -200,6 +204,8 @@ void XR806HTTPServer::accept_client_() {
   this->client_fd_ = fd;
   this->client_started_ = millis();
   this->request_used_ = this->response_len_ = this->response_sent_ = 0;
+  this->static_body_ = nullptr;
+  this->static_body_len_ = this->static_body_sent_ = 0;
   this->save_pending_ = false;
   this->request_[0] = '\0';
 }
@@ -223,6 +229,23 @@ void XR806HTTPServer::send_response_(int status, const char *content_type, const
   this->response_len_ = static_cast<size_t>(header_len) + body_len;
 }
 
+void XR806HTTPServer::send_static_response_(int status, const char *content_type, const uint8_t *body,
+                                            size_t size, const char *encoding) {
+  this->static_body_ = body;
+  this->static_body_len_ = size;
+  this->static_body_sent_ = 0;
+  const int header_len = snprintf(this->response_, sizeof(this->response_),
+                                  "HTTP/1.1 %d OK\r\nContent-Type: %s\r\n"
+                                  "Content-Encoding: %s\r\nCache-Control: no-store\r\n"
+                                  "Connection: close\r\nContent-Length: %u\r\n\r\n",
+                                  status, content_type, encoding, static_cast<unsigned>(size));
+  if (header_len < 0 || static_cast<size_t>(header_len) >= sizeof(this->response_)) {
+    this->close_client_();
+    return;
+  }
+  this->response_len_ = static_cast<size_t>(header_len);
+}
+
 void XR806HTTPServer::prepare_request_() {
   const char *header_end = strstr(this->request_, "\r\n\r\n");
   if (header_end == nullptr)
@@ -236,17 +259,52 @@ void XR806HTTPServer::prepare_request_() {
   }
   const char *path = this->request_ + (is_get ? 4 : 5);
   const char *path_end = strchr(path, ' ');
-  if (path_end == nullptr || path_end >= header_end || path_end - path > 64) {
+  if (path_end == nullptr || path_end >= header_end || path_end - path > 512) {
     this->send_response_(400, "text/plain", "Malformed request");
     return;
   }
   const size_t path_len = static_cast<size_t>(path_end - path);
+  const char *question = static_cast<const char *>(memchr(path, '?', path_len));
+  const size_t route_len = question == nullptr ? path_len : static_cast<size_t>(question - path);
   if (is_get) {
-    if (path_len == 7 && memcmp(path, "/health", 7) == 0) {
+    if (route_len == 7 && memcmp(path, "/health", 7) == 0) {
       this->send_response_(200, "application/json", "{\"ok\":true,\"platform\":\"xr806\"}");
+#ifdef USE_CAPTIVE_PORTAL
+    } else if (this->ap_active_ && route_len == 12 && memcmp(path, "/config.json", 12) == 0) {
+      // No concurrent scanning on XR806's exclusive AP radio. The user can
+      // manually enter an SSID on the standard portal page.
+      char json[256];
+      const int bytes = snprintf(json, sizeof(json), "{\"name\":\"%s\",\"aps\":[]}", App.get_name().c_str());
+      if (bytes <= 0 || static_cast<size_t>(bytes) >= sizeof(json)) {
+        this->send_response_(400, "text/plain", "Invalid device name");
+      } else {
+        this->send_response_(200, "application/json", json);
+      }
+    } else if (this->ap_active_ && route_len == 9 && memcmp(path, "/wifisave", 9) == 0 &&
+               question != nullptr) {
+      this->pending_ssid_[0] = '\0';
+      this->pending_password_[0] = '\0';
+      if (!parse_wifi_form(question + 1, static_cast<size_t>(path_end - question - 1),
+                           this->pending_ssid_, this->pending_password_)) {
+        this->send_response_(400, "text/plain", "Invalid SSID or password");
+      } else {
+        this->send_response_(200, "text/plain", "Saved. Connecting...");
+        this->save_pending_ = true;
+      }
+#endif
     } else if (this->ap_active_) {
+#ifdef USE_CAPTIVE_PORTAL
+#ifdef USE_CAPTIVE_PORTAL_GZIP
+      this->send_static_response_(200, "text/html", captive_portal::INDEX_GZ,
+                                  sizeof(captive_portal::INDEX_GZ), "gzip");
+#else
+      this->send_static_response_(200, "text/html", captive_portal::INDEX_GZ,
+                                  sizeof(captive_portal::INDEX_GZ), "br");
+#endif
+#else
       // Returning HTTP 200 HTML for OS probe URLs triggers the captive portal UI.
       this->send_response_(200, "text/html; charset=utf-8", PAGE);
+#endif
     } else {
       this->send_response_(404, "text/plain", "XR806 HTTP service; /health is available");
     }
@@ -323,7 +381,19 @@ void XR806HTTPServer::handle_client_() {
   }
   if (sent > 0)
     this->response_sent_ += static_cast<size_t>(sent);
-  if (this->response_sent_ == this->response_len_) {
+  if (this->response_sent_ == this->response_len_ && this->static_body_ != nullptr &&
+      this->static_body_sent_ < this->static_body_len_) {
+    const size_t available = std::min<size_t>(1024, this->static_body_len_ - this->static_body_sent_);
+    const int body_sent = lwip_send(this->client_fd_, this->static_body_ + this->static_body_sent_,
+                                   available, MSG_DONTWAIT);
+    if (body_sent < 0 && !transient_error()) {
+      this->close_client_();
+      return;
+    }
+    if (body_sent > 0)
+      this->static_body_sent_ += static_cast<size_t>(body_sent);
+  }
+  if (this->response_sent_ == this->response_len_ && this->static_body_sent_ == this->static_body_len_) {
     // Close the HTTP response before changing the radio mode.
     const bool should_save = this->save_pending_;
     this->save_pending_ = false;
@@ -344,6 +414,8 @@ void XR806HTTPServer::close_client_() {
     this->client_fd_ = -1;
   }
   this->request_used_ = this->response_len_ = this->response_sent_ = 0;
+  this->static_body_ = nullptr;
+  this->static_body_len_ = this->static_body_sent_ = 0;
   this->save_pending_ = false;
   // The POST request itself contains the Wi-Fi password.
   memset(this->request_, 0, sizeof(this->request_));
