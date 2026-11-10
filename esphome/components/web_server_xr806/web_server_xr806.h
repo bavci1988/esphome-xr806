@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <cstddef>
 #include <functional>
+#include <list>
 #include <memory>
+#include "multipart_stream.h"
 #include <span>
 #include <string>
 #include <utility>
@@ -87,10 +89,14 @@ class AsyncResponseStream : public AsyncWebServerResponseContent {
 class AsyncWebServerRequest {
  public:
   static constexpr size_t URL_BUF_SIZE = 257;
+  ~AsyncWebServerRequest() { if (on_disconnect_) on_disconnect_(); }
   AsyncWebServerRequest(http_method method, std::string uri, std::string query, std::string body,
                         std::vector<std::pair<std::string, std::string>> headers,
                         std::unique_ptr<socket::Socket> *socket);
   http_method method() const { return method_; }
+  size_t contentLength() const { return content_length_; }
+  void set_content_length(size_t value) { content_length_ = value; }
+  void onDisconnect(std::function<void()> callback) { on_disconnect_ = std::move(callback); }
   StringRef url_to(std::span<char, URL_BUF_SIZE> buf) const;
   bool hasHeader(const char *name) const;
   size_t get_header_to(const char *name, std::span<char> buf) const;
@@ -121,6 +127,8 @@ class AsyncWebServerRequest {
   std::vector<std::pair<std::string, std::string>> headers_;
   std::unique_ptr<socket::Socket> *socket_;
   std::unique_ptr<AsyncWebServerResponse> response_;
+  std::function<void()> on_disconnect_;
+  size_t content_length_{0};
 };
 
 class AsyncWebHandler {
@@ -165,16 +173,28 @@ class AsyncWebServer {
     size_t header_end{0}, expected_body{0}, output_sent{0}, body_sent{0};
     uint32_t started{0};
     bool dispatched{false};
+#ifdef USE_WEBSERVER_OTA
+    std::unique_ptr<AsyncWebServerRequest> upload_request;
+    std::unique_ptr<web_server_xr806::MultipartStream> multipart;
+    AsyncWebHandler *upload_handler{nullptr};
+    size_t upload_received{0}, upload_expected{0}, upload_file_index{0};
+    bool is_upload{false}, upload_done{false};
+#endif
   };
   static constexpr size_t MAX_CLIENTS = 3;
   static constexpr size_t MAX_HEADER_BYTES = 2048;
   static constexpr size_t MAX_BODY_BYTES = 4096;
+#ifdef USE_WEBSERVER_OTA
+  static constexpr size_t MAX_UPLOAD_BYTES = 1024 * 1024;
+  void process_upload_(Client &client);
+#endif
   static constexpr uint32_t CLIENT_TIMEOUT_MS = 5000;
   void dispatch_(Client &client);
   void process_(Client &client);
   uint16_t port_;
   std::unique_ptr<socket::ListenSocket> listener_;
-  std::vector<Client> clients_;
+  // Stable addresses: asynchronous uploads keep a pointer to each Client::socket.
+  std::list<Client> clients_;
   std::vector<AsyncWebHandler *> handlers_;
   std::function<void(AsyncWebServerRequest *)> not_found_;
 #ifdef USE_WEBSERVER
