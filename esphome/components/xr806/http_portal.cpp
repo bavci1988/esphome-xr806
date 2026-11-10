@@ -112,14 +112,13 @@ static bool parse_wifi_form(const char *data, size_t length, char ssid[33], char
     index++;
   }
   const size_t password_size = strlen(password);
-  return got_ssid && ssid[0] != '\0' &&
-         (password_size == 0 || (password_size >= 8 && password_size <= 63));
+  return got_ssid && ssid[0] != '\0' && (password_size == 0 || (password_size >= 8 && password_size <= 63));
 }
 
 bool XR806HTTPServer::is_ap_active_() const {
   struct netif *nif = wlan_netif_get(WLAN_MODE_HOSTAP);
-  return nif != nullptr && wlan_netif_get_mode(nif) == WLAN_MODE_HOSTAP && netif_is_up(nif) &&
-         netif_is_link_up(nif) && !ip4_addr_isany_val(*netif_ip4_addr(nif));
+  return nif != nullptr && wlan_netif_get_mode(nif) == WLAN_MODE_HOSTAP && netif_is_up(nif) && netif_is_link_up(nif) &&
+         !ip4_addr_isany_val(*netif_ip4_addr(nif));
 }
 
 bool XR806HTTPServer::start_http_() {
@@ -129,7 +128,7 @@ bool XR806HTTPServer::start_http_() {
   const int reuse = 1;
   lwip_setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
-  struct sockaddr_in addr {};
+  struct sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(this->port_);
   if (this->ap_only_) {
@@ -161,7 +160,7 @@ bool XR806HTTPServer::start_dns_() {
   if (fd < 0)
     return false;
 
-  struct sockaddr_in addr {};
+  struct sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(53);
   addr.sin_addr.s_addr = ip4_addr_get_u32(netif_ip4_addr(nif));
@@ -177,7 +176,7 @@ bool XR806HTTPServer::start_dns_() {
 void XR806HTTPServer::handle_dns_() {
   uint8_t query[256];
   uint8_t response[272];
-  struct sockaddr_in remote {};
+  struct sockaddr_in remote{};
   socklen_t remote_size = sizeof(remote);
   const int received = lwip_recvfrom(this->dns_fd_, query, sizeof(query), MSG_DONTWAIT,
                                      reinterpret_cast<sockaddr *>(&remote), &remote_size);
@@ -194,7 +193,7 @@ void XR806HTTPServer::handle_dns_() {
 }
 
 void XR806HTTPServer::accept_client_() {
-  struct sockaddr_in addr {};
+  struct sockaddr_in addr{};
   socklen_t size = sizeof(addr);
   int fd = lwip_accept(this->listen_fd_, reinterpret_cast<sockaddr *>(&addr), &size);
   if (fd < 0)
@@ -214,9 +213,12 @@ void XR806HTTPServer::accept_client_() {
 
 void XR806HTTPServer::send_response_(int status, const char *content_type, const char *body) {
   const size_t body_len = strlen(body);
-  const char *reason = status == 200 ? "OK" : status == 400 ? "Bad Request" :
-                       status == 403 ? "Forbidden" : status == 405 ? "Method Not Allowed" :
-                       status == 413 ? "Content Too Large" : "Not Found";
+  const char *reason = status == 200   ? "OK"
+                       : status == 400 ? "Bad Request"
+                       : status == 403 ? "Forbidden"
+                       : status == 405 ? "Method Not Allowed"
+                       : status == 413 ? "Content Too Large"
+                                       : "Not Found";
   const int header_len = snprintf(this->response_, sizeof(this->response_),
                                   "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n"
                                   "Cache-Control: no-store\r\nConnection: close\r\n"
@@ -231,8 +233,8 @@ void XR806HTTPServer::send_response_(int status, const char *content_type, const
   this->response_len_ = static_cast<size_t>(header_len) + body_len;
 }
 
-void XR806HTTPServer::send_static_response_(int status, const char *content_type, const uint8_t *body,
-                                            size_t size, const char *encoding) {
+void XR806HTTPServer::send_static_response_(int status, const char *content_type, const uint8_t *body, size_t size,
+                                            const char *encoding) {
   this->static_body_ = body;
   this->static_body_len_ = size;
   this->static_body_sent_ = 0;
@@ -278,19 +280,18 @@ void XR806HTTPServer::prepare_request_() {
       char json[256];
       char mac[MAC_ADDRESS_PRETTY_BUFFER_SIZE];
       const char *address = get_mac_address_pretty_into_buffer(mac);
-      const int bytes = snprintf(json, sizeof(json), "{\"mac\":\"%s\",\"name\":\"%s\",\"aps\":[{}]}",
-                                 address, App.get_name().c_str());
+      const int bytes = snprintf(json, sizeof(json), "{\"mac\":\"%s\",\"name\":\"%s\",\"aps\":[{}]}", address,
+                                 App.get_name().c_str());
       if (bytes <= 0 || static_cast<size_t>(bytes) >= sizeof(json)) {
         this->send_response_(400, "text/plain", "Invalid device name");
       } else {
         this->send_response_(200, "application/json", json);
       }
-    } else if (this->ap_active_ && route_len == 9 && memcmp(path, "/wifisave", 9) == 0 &&
-               question != nullptr) {
+    } else if (this->ap_active_ && route_len == 9 && memcmp(path, "/wifisave", 9) == 0 && question != nullptr) {
       this->pending_ssid_[0] = '\0';
       this->pending_password_[0] = '\0';
-      if (!parse_wifi_form(question + 1, static_cast<size_t>(path_end - question - 1),
-                           this->pending_ssid_, this->pending_password_)) {
+      if (!parse_wifi_form(question + 1, static_cast<size_t>(path_end - question - 1), this->pending_ssid_,
+                           this->pending_password_)) {
         this->send_response_(400, "text/plain", "Invalid SSID or password");
       } else {
         this->send_response_(200, "text/plain", "Saved. Connecting...");
@@ -300,11 +301,9 @@ void XR806HTTPServer::prepare_request_() {
     } else if (this->ap_active_) {
 #ifdef USE_CAPTIVE_PORTAL
 #ifdef USE_CAPTIVE_PORTAL_GZIP
-      this->send_static_response_(200, "text/html", captive_portal::INDEX_GZ,
-                                  sizeof(captive_portal::INDEX_GZ), "gzip");
+      this->send_static_response_(200, "text/html", captive_portal::INDEX_GZ, sizeof(captive_portal::INDEX_GZ), "gzip");
 #else
-      this->send_static_response_(200, "text/html", captive_portal::INDEX_GZ,
-                                  sizeof(captive_portal::INDEX_GZ), "br");
+      this->send_static_response_(200, "text/html", captive_portal::INDEX_GZ, sizeof(captive_portal::INDEX_GZ), "br");
 #endif
 #else
       // Returning HTTP 200 HTML for OS probe URLs triggers the captive portal UI.
@@ -394,8 +393,8 @@ void XR806HTTPServer::handle_client_() {
   if (this->response_sent_ == this->response_len_ && this->static_body_ != nullptr &&
       this->static_body_sent_ < this->static_body_len_) {
     const size_t available = std::min<size_t>(1024, this->static_body_len_ - this->static_body_sent_);
-    const int body_sent = lwip_send(this->client_fd_, this->static_body_ + this->static_body_sent_,
-                                   available, MSG_DONTWAIT);
+    const int body_sent =
+        lwip_send(this->client_fd_, this->static_body_ + this->static_body_sent_, available, MSG_DONTWAIT);
     if (body_sent < 0 && !transient_error()) {
       this->close_client_();
       return;
