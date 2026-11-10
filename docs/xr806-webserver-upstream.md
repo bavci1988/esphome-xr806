@@ -61,7 +61,7 @@ unmodified. The XR806-specific implementation belongs entirely in
 | HTTP | GET/POST/OPTIONS, request parsing, large binary response, multiple probes and backpressure |
 | API | REST entity read/control, SSE initial entity list, state changes and reconnections |
 | SoftAP | AP association, DHCP offer/ack/router/DNS, iOS/Android captive detection |
-| Credentials | Flash-backed preferences with reset/power-loss/corruption recovery |
+| Credentials | Experimental two-sector flash backend; prove reset/power-loss/corruption recovery on real WXU |
 | PM | AP, web sockets, OTA and network votes prevent standby until quiesced |
 | Security | Auth/origin checks, fuzzed DNS/HTTP inputs, no secrets in logs |
 | Upstream CI | clang-format, ruff, pylint, platform compile tests, portable unit tests |
@@ -73,6 +73,6 @@ The standard `captive_portal:` YAML is wired to a native XR806 HTTP/DNS
 implementation, serves the upstream compressed captive portal index, responds
 to `/config.json` and accepts `/wifisave`. XR806 SoftAP is exclusive
 with STA, so scan-result listing currently returns no AP entries; users must
-enter SSIDs manually. WLAN credentials are **not yet persistent**. The normal
+enter SSIDs manually. WLAN credentials now have an **experimental** two-sector FDCM preferences backend, but durability has not yet been verified on hardware. The normal
 `web_server:` component remains disabled on XR806 until the shared backend
 and SSE/REST contract above are implemented and verified.
