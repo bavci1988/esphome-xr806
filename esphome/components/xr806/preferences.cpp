@@ -31,37 +31,11 @@ static_assert(PRJCONF_ESPHOME_PREFS0_ADDR >= 1920 * 1024);
 // Two FDCM sectors are alternated; the previously committed one is never
 // modified until after a complete, validated write to the other sector.
 uint32_t XR806Preferences::checksum_(const uint8_t *data, size_t used) const {
-  uint32_t crc = 0xFFFFFFFF;
-  auto update = [&crc](const uint8_t *bytes, size_t n) {
-    for (size_t j = 0; j < n; j++) {
-      crc ^= bytes[j];
-      for (unsigned bit = 0; bit < 8; bit++)
-        crc = (crc >> 1) ^ (0xEDB88320U & (0U - (crc & 1U)));
-    }
-  };
-  update(data, 12);  // Excludes checksum at byte offset 12.
-  update(data + sizeof(SnapshotHeader), used);
-  return ~crc;
+  return preference_snapshot_checksum(data, used);
 }
 
 bool XR806Preferences::valid_snapshot_(const uint8_t *data, SnapshotHeader *header) const {
-  memcpy(header, data, sizeof(*header));
-  if (header->magic != MAGIC || header->version != VERSION ||
-      header->used > SNAPSHOT_SIZE - sizeof(SnapshotHeader))
-    return false;
-
-  size_t cursor = sizeof(SnapshotHeader);
-  const size_t end = cursor + header->used;
-  while (cursor < end) {
-    if (end - cursor < 6)
-      return false;
-    uint16_t len;
-    memcpy(&len, data + cursor + 4, sizeof(len));
-    if (len == 0 || len > end - cursor - 6)
-      return false;
-    cursor += 6 + len;
-  }
-  return cursor == end && this->checksum_(data, header->used) == header->checksum;
+  return preference_snapshot_valid(data, SNAPSHOT_SIZE, MAGIC, VERSION, header);
 }
 
 bool XR806Preferences::read_slot_(uint8_t slot, SnapshotHeader *header) {
@@ -95,7 +69,7 @@ bool XR806Preferences::open_() {
     this->used_ = h0.used;
   }
   const bool valid1 = this->read_slot_(1, &h1);
-  if (valid1 && (!valid0 || static_cast<int32_t>(h1.generation - this->generation_) > 0)) {
+  if (valid1 && (!valid0 || preference_generation_newer(h1.generation, this->generation_))) {
     memcpy(this->data_, this->scratch_, SNAPSHOT_SIZE);
     this->active_slot_ = 1;
     this->generation_ = h1.generation;
