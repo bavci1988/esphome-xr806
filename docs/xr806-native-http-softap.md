@@ -101,15 +101,16 @@ new credentials.
 
 ## Known limits / NOT production-ready
 
-- **No persistent Wi-Fi provisioning**: XR806 `preferences.cpp` is currently
-  the non-persistent placeholder; credentials are applied for the current
-  runtime but not retained over reset. Do not describe this as a complete
-  provisioning solution until flash-backed preferences are implemented and
-  validated with power interruption tests.
-- **No ESPHome standard `web_server:`** and **no standard
-  `captive_portal:`** API: the component is configured as
-  `xr806.http_server:`. It does not expose ESPHome entities, websockets,
-  streaming events, authentication or web OTA.
+- **Persistence implemented but not proven**: XR806 now has a
+  CRC-verified dual-sector FDCM preferences backend, using SDK sectors
+  2036..2040 KiB and 2040..2044 KiB. The separate sysinfo sector is
+  2044..2048 KiB. Reboot, interrupted-write recovery and OTA integrity
+  still need real-board testing.
+- **Standard `captive_portal:` YAML is integrated**, using the native
+  XR806 HTTP/DNS transport. The separate `xr806.http_server:` remains a
+  transitional bring-up option and must not be enabled together with it.
+  **Standard `web_server:` is not yet available** (shared handlers,
+  authenticated entity REST and SSE are still missing). No web OTA yet.
 - AP-only/exclusive network behavior; scanning while the AP is running is
   not supported. The form takes an SSID manually.
 - Only IPv4 A captive responses and HTTP (no HTTPS, IPv6, EDNS0 or
