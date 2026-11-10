@@ -7,9 +7,10 @@
 
 namespace esphome::web_server_xr806::testing {
 
-static const std::string START_PART = "--xr806-boundary\r\nContent-Disposition: form-data; name=\"update\"; "
-                                      "filename=\"firmware.ota.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n";
-static const std::string END_PART = "\r\n--xr806-boundary--\r\n";
+static constexpr const char *START_PART =
+    "--xr806-boundary\r\nContent-Disposition: form-data; name=\"update\"; "
+    "filename=\"firmware.ota.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n";
+static constexpr const char *END_PART = "\r\n--xr806-boundary--\r\n";
 
 static void verify_split_upload(size_t chunk_size) {
   const std::string firmware = std::string("AWIH\0XZ1\0A\0B", 11) + "\r\n--xr806-bounda";
@@ -18,10 +19,11 @@ static void verify_split_upload(size_t chunk_size) {
   std::string collected;
   unsigned completes = 0;
   auto sink = [&](uint8_t *data, size_t size, bool final) {
-    if (final)
+    if (final) {
       ++completes;
-    else
+    } else {
       collected.append(reinterpret_cast<const char *>(data), size);
+    }
     return true;
   };
   for (size_t off = 0; off < payload.size(); off += chunk_size) {
@@ -40,11 +42,11 @@ TEST(XR806MultipartStream, ParsesAndRejects) {
               "xr806-boundary");
   ASSERT_TRUE(MultipartStream::boundary_from_content_type("multipart/form-data; boundary=\"xr806-boundary\"") ==
               "xr806-boundary");
-  ASSERT_TRUE(MultipartStream::boundary_from_content_type("multipart/form-data; boundary=bad\r\nEvil") == "");
+  ASSERT_TRUE(MultipartStream::boundary_from_content_type("multipart/form-data; boundary=bad\r\nEvil").empty());
   for (size_t step : {1u, 2u, 3u, 7u, 17u, 511u})
     verify_split_upload(step);
 
-  const std::string valid = START_PART + "firmware" + END_PART;
+  const std::string valid = std::string(START_PART) + "firmware" + END_PART;
   const auto safe_sink = [](uint8_t *, size_t, bool) { return true; };
   {
     MultipartStream parser("xr806-boundary", valid.size());
@@ -59,7 +61,7 @@ TEST(XR806MultipartStream, ParsesAndRejects) {
     ASSERT_TRUE(!parser.complete());
   }
   {
-    const auto malformed = START_PART + "firmware" + "\r\n--wrong--\r\n";
+    const auto malformed = std::string(START_PART) + "firmware" + "\r\n--wrong--\r\n";
     MultipartStream parser("xr806-boundary", malformed.size());
     ASSERT_TRUE(!parser.feed(reinterpret_cast<const uint8_t *>(malformed.data()), malformed.size(), safe_sink));
     ASSERT_TRUE(parser.failed());
@@ -72,9 +74,9 @@ TEST(XR806MultipartStream, ParsesAndRejects) {
   }
   // Browser-renamed downloads and other part types are accepted.
   {
-    const std::string renamed = "--xr806-boundary\r\nContent-Disposition: form-data; name=\"update\"; "
-                                "filename=\"firmware (1).ota\"\r\nContent-Type: application/x-ota\r\n\r\n"
-                                "firmware" +
+    const std::string renamed = std::string("--xr806-boundary\r\nContent-Disposition: form-data; name=\"update\"; "
+                                            "filename=\"firmware (1).ota\"\r\nContent-Type: application/x-ota\r\n\r\n"
+                                            "firmware") +
                                 END_PART;
     MultipartStream parser("xr806-boundary", renamed.size());
     ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t *>(renamed.data()), renamed.size(), safe_sink));
