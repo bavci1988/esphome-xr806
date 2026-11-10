@@ -34,6 +34,12 @@ class SNTPComponent final : public time::RealTimeClock {
   // Other platforms: strings in flash
   std::array<const char *, SNTP_SERVER_COUNT> servers_;
   bool has_time_{false};
+#ifndef USE_ESP32
+  void start_lwip_();
+#endif
+#ifdef USE_XR806
+  void start_lwip_in_tcpip_thread_();
+#endif
 
 #if defined(USE_ESP32)
  private:

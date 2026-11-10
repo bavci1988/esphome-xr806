@@ -8,6 +8,9 @@
 #else
 #include "lwip/apps/sntp.h"
 #endif
+#ifdef USE_XR806
+#include "lwip/tcpip.h"
+#endif
 
 namespace esphome::sntp {
 
@@ -35,7 +38,15 @@ void SNTPComponent::setup() {
     }
   });
   esp_sntp_init();
+#elif defined(USE_XR806)
+  this->start_lwip_in_tcpip_thread_();
 #else
+  this->start_lwip_();
+#endif
+}
+
+#ifndef USE_ESP32
+void SNTPComponent::start_lwip_() {
   sntp_stop();
   sntp_setoperatingmode(SNTP_OPMODE_POLL);
 
@@ -52,8 +63,20 @@ void SNTPComponent::setup() {
 #endif
 
   sntp_init();
-#endif
 }
+#endif
+
+#ifdef USE_XR806
+void SNTPComponent::start_lwip_in_tcpip_thread_() {
+  // lwIP runs without core locking on XR806, so its raw API may only be used from the TCP/IP thread.
+  if (tcpip_callback([](void *self) { static_cast<SNTPComponent *>(self)->start_lwip_(); }, this) == ERR_OK) {
+    this->status_clear_warning();
+  } else {
+    // The next update() tries again.
+    this->status_set_warning();
+  }
+}
+#endif
 void SNTPComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "SNTP Time:");
   size_t i = 0;
@@ -63,7 +86,11 @@ void SNTPComponent::dump_config() {
   RealTimeClock::dump_config();
 }
 void SNTPComponent::update() {
-#if !defined(USE_ESP32)
+#if defined(USE_XR806)
+  // start_lwip_() stops a running client first, so this also restarts after a failed setup().
+  this->has_time_ = false;
+  this->start_lwip_in_tcpip_thread_();
+#elif !defined(USE_ESP32)
   // Some platforms currently cannot set the sync interval at runtime so we need
   // to do the re-sync by hand for now.
   if (sntp_enabled()) {

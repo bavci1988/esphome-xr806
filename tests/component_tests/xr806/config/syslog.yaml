@@ -1,0 +1,16 @@
+esphome:
+  name: xr806-syslog-ci
+xr806:
+  board: wxu
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+logger:
+  level: DEBUG
+time:
+  - platform: sntp
+    id: sntp_time
+udp:
+  addresses: 192.168.1.10
+syslog:
+  port: 514
