@@ -32,7 +32,12 @@ def test_web_server_with_standard_captive_portal(
     component_config_path: Callable[[str], Path],
 ) -> None:
     generate_main(component_config_path("web_server_captive.yaml"))
-    assert {"USE_XR806", "USE_WEBSERVER", "USE_CAPTIVE_PORTAL", "USE_WEBSERVER_LOCAL"} <= _defines()
+    assert {
+        "USE_XR806",
+        "USE_WEBSERVER",
+        "USE_CAPTIVE_PORTAL",
+        "USE_WEBSERVER_LOCAL",
+    } <= _defines()
     assert "USE_WEBSERVER_OTA" not in _defines()
 
 
