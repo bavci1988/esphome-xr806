@@ -121,10 +121,13 @@ STANDBY_SCHEMA = cv.Schema(
 
 
 def _update_core_data(config: ConfigType) -> None:
-    if CONF_HTTP_SERVER in config and config[CONF_HTTP_SERVER][CONF_CAPTIVE_DNS]:
-        # Full-config checks for wifi.ap are deferred until final validation.
-        if config[CONF_HTTP_SERVER][CONF_PORT] != 80:
-            raise cv.Invalid("XR806 captive portal requires HTTP port 80")
+    # Full-config checks for wifi.ap are deferred until final validation.
+    if (
+        CONF_HTTP_SERVER in config
+        and config[CONF_HTTP_SERVER][CONF_CAPTIVE_DNS]
+        and config[CONF_HTTP_SERVER][CONF_PORT] != 80
+    ):
+        raise cv.Invalid("XR806 captive portal requires HTTP port 80")
     if config[CONF_WLAN][CONF_NETWORK_SUSPEND] and CONF_STANDBY not in config:
         raise cv.Invalid(
             "xr806.wlan.network_suspend requires xr806.standby and full PM gating"
