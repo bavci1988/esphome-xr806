@@ -30,22 +30,38 @@ static bool equals_ci(const std::string &lhs, const char *rhs) {
 
 static const char *reason_phrase(int status) {
   switch (status) {
-    case 200: return "OK";
-    case 202: return "Accepted";
-    case 204: return "No Content";
-    case 302: return "Found";
-    case 400: return "Bad Request";
-    case 401: return "Unauthorized";
-    case 403: return "Forbidden";
-    case 404: return "Not Found";
-    case 405: return "Method Not Allowed";
-    case 408: return "Request Timeout";
-    case 411: return "Length Required";
-    case 413: return "Content Too Large";
-    case 415: return "Unsupported Media Type";
-    case 431: return "Request Header Fields Too Large";
-    case 503: return "Service Unavailable";
-    default: return "Response";
+    case 200:
+      return "OK";
+    case 202:
+      return "Accepted";
+    case 204:
+      return "No Content";
+    case 302:
+      return "Found";
+    case 400:
+      return "Bad Request";
+    case 401:
+      return "Unauthorized";
+    case 403:
+      return "Forbidden";
+    case 404:
+      return "Not Found";
+    case 405:
+      return "Method Not Allowed";
+    case 408:
+      return "Request Timeout";
+    case 411:
+      return "Length Required";
+    case 413:
+      return "Content Too Large";
+    case 415:
+      return "Unsupported Media Type";
+    case 431:
+      return "Request Header Fields Too Large";
+    case 503:
+      return "Service Unavailable";
+    default:
+      return "Response";
   }
 }
 
@@ -80,24 +96,30 @@ void AsyncResponseStream::printf(const char *format, ...) {
   va_end(args);
 }
 
-AsyncWebServerRequest::AsyncWebServerRequest(http_method method, std::string uri, std::string query,
-                                             std::string body,
+AsyncWebServerRequest::AsyncWebServerRequest(http_method method, std::string uri, std::string query, std::string body,
                                              std::vector<std::pair<std::string, std::string>> headers,
                                              std::unique_ptr<socket::Socket> *socket)
-    : method_(method), uri_(std::move(uri)), query_(std::move(query)), body_(std::move(body)),
-      headers_(std::move(headers)), socket_(socket) {}
+    : method_(method),
+      uri_(std::move(uri)),
+      query_(std::move(query)),
+      body_(std::move(body)),
+      headers_(std::move(headers)),
+      socket_(socket) {}
 
 std::string AsyncWebServerRequest::decode_(const std::string &s) {
   std::string out;
   out.reserve(s.size());
   auto digit = [](char c) -> int {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= '0' && c <= '9')
+      return c - '0';
+    if (c >= 'A' && c <= 'F')
+      return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f')
+      return c - 'a' + 10;
     return -1;
   };
   for (size_t i = 0; i < s.size(); ++i) {
-    if (s[i] == '+' ) {
+    if (s[i] == '+') {
       out.push_back(' ');
     } else if (s[i] == '%' && i + 2 < s.size() && digit(s[i + 1]) >= 0 && digit(s[i + 2]) >= 0) {
       const uint8_t decoded = static_cast<uint8_t>((digit(s[i + 1]) << 4) | digit(s[i + 2]));
@@ -120,8 +142,10 @@ StringRef AsyncWebServerRequest::url_to(std::span<char, URL_BUF_SIZE> buf) const
 }
 size_t AsyncWebServerRequest::get_header_to(const char *name, std::span<char> buf) const {
   for (const auto &h : headers_) {
-    if (!equals_ci(h.first, name)) continue;
-    if (h.second.size() >= buf.size()) return SIZE_MAX;
+    if (!equals_ci(h.first, name))
+      continue;
+    if (h.second.size() >= buf.size())
+      return SIZE_MAX;
     std::memcpy(buf.data(), h.second.data(), h.second.size());
     buf[h.second.size()] = 0;
     return h.second.size();
@@ -130,7 +154,8 @@ size_t AsyncWebServerRequest::get_header_to(const char *name, std::span<char> bu
 }
 bool AsyncWebServerRequest::hasHeader(const char *name) const {
   for (const auto &h : headers_)
-    if (equals_ci(h.first, name)) return true;
+    if (equals_ci(h.first, name))
+      return true;
   return false;
 }
 bool AsyncWebServerRequest::find_arg_(const std::string &query, const char *name, std::string *out) {
@@ -164,7 +189,8 @@ bool AsyncWebServerRequest::authenticate(const char *basic_auth_hash) const {
     if (!equals_ci(h.first, "Authorization"))
       continue;
     const std::string expected = std::string("Basic ") + basic_auth_hash;
-    if (h.second.size() != expected.size()) return false;
+    if (h.second.size() != expected.size())
+      return false;
     uint8_t diff = 0;
     for (size_t i = 0; i < expected.size(); ++i)
       diff |= static_cast<uint8_t>(h.second[i] ^ expected[i]);
@@ -185,9 +211,7 @@ void AsyncWebServerRequest::redirect(const char *url) {
 void AsyncWebServerRequest::send(int status, const char *type, const char *text) {
   this->send(new AsyncWebServerResponseContent(status, type, text == nullptr ? "" : text));
 }
-void AsyncWebServerRequest::send(AsyncWebServerResponse *response) {
-  response_.reset(response);
-}
+void AsyncWebServerRequest::send(AsyncWebServerResponse *response) { response_.reset(response); }
 AsyncWebServerResponse *AsyncWebServerRequest::beginResponse(int status, const char *type) {
   return new AsyncWebServerResponseContent(status, type, "");
 }
@@ -195,7 +219,7 @@ AsyncWebServerResponse *AsyncWebServerRequest::beginResponse(int status, const c
   return new AsyncWebServerResponseContent(status, type, text);
 }
 AsyncWebServerResponse *AsyncWebServerRequest::beginResponse(int status, const char *type, const uint8_t *data,
-                                                              size_t len) {
+                                                             size_t len) {
   return new AsyncWebServerResponseProgmem(status, type, data, len);
 }
 AsyncResponseStream *AsyncWebServerRequest::beginResponseStream(const char *type) {
@@ -207,9 +231,13 @@ DefaultHeaders &DefaultHeaders::Instance() {
 }
 
 void AsyncWebServer::begin() {
-  if (listener_ != nullptr) return;
+  if (listener_ != nullptr)
+    return;
   auto socket = socket::socket_ip(SOCK_STREAM, IPPROTO_TCP);
-  if (socket == nullptr) { ESP_LOGE(TAG, "HTTP socket allocation failed"); return; }
+  if (socket == nullptr) {
+    ESP_LOGE(TAG, "HTTP socket allocation failed");
+    return;
+  }
   int reuse = 1;
   socket->setsockopt(SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
   sockaddr_storage addr{};
@@ -256,19 +284,23 @@ void AsyncWebServer::register_event_source(AsyncEventSource *source) {
 void AsyncWebServer::dispatch_(Client &c) {
   // Split headers and body only after Content-Length bytes have arrived.
   const size_t line_end = c.input.find("\r\n");
-  if (line_end == std::string::npos) { c.socket.reset(); return; }
+  if (line_end == std::string::npos) {
+    c.socket.reset();
+    return;
+  }
   const std::string request_line = c.input.substr(0, line_end);
   const size_t first_space = request_line.find(' ');
   const size_t second_space = request_line.find(' ', first_space == std::string::npos ? 0 : first_space + 1);
   if (first_space == std::string::npos || second_space == std::string::npos ||
-      request_line.substr(second_space + 1) != "HTTP/1.1" &&
-          request_line.substr(second_space + 1) != "HTTP/1.0") {
+      request_line.substr(second_space + 1) != "HTTP/1.1" && request_line.substr(second_space + 1) != "HTTP/1.0") {
     c.socket.reset();
     return;
   }
   const std::string verb = request_line.substr(0, first_space);
-  const http_method method = verb == "GET" ? HTTP_GET : verb == "POST" ? HTTP_POST :
-                             verb == "OPTIONS" ? HTTP_OPTIONS : HTTP_UNKNOWN;
+  const http_method method = verb == "GET"       ? HTTP_GET
+                             : verb == "POST"    ? HTTP_POST
+                             : verb == "OPTIONS" ? HTTP_OPTIONS
+                                                 : HTTP_UNKNOWN;
   const std::string target = request_line.substr(first_space + 1, second_space - first_space - 1);
   if (target.empty() || target.front() != '/' || target.size() > AsyncWebServerRequest::URL_BUF_SIZE - 1) {
     c.socket.reset();
@@ -284,29 +316,40 @@ void AsyncWebServer::dispatch_(Client &c) {
   size_t header_cursor = line_end + 2;
   size_t content_length = 0;
   bool has_length = false, unsupported_transfer = false, bad_length = false;
-  if (c.header_end > MAX_HEADER_BYTES) { c.socket.reset(); return; }
+  if (c.header_end > MAX_HEADER_BYTES) {
+    c.socket.reset();
+    return;
+  }
   while (header_cursor < c.header_end - 2) {
     const size_t end = c.input.find("\r\n", header_cursor);
-    if (end == std::string::npos || end > c.header_end) { c.socket.reset(); return; }
+    if (end == std::string::npos || end > c.header_end) {
+      c.socket.reset();
+      return;
+    }
     const std::string line = c.input.substr(header_cursor, end - header_cursor);
     const size_t colon = line.find(':');
-    if (colon == std::string::npos) { c.socket.reset(); return; }
+    if (colon == std::string::npos) {
+      c.socket.reset();
+      return;
+    }
     std::string name = line.substr(0, colon);
     const size_t start = line.find_first_not_of(" \t", colon + 1);
     std::string value = start == std::string::npos ? "" : line.substr(start);
     if (equals_ci(name, "Content-Length")) {
-      if (has_length) { bad_length = true; break; }
+      if (has_length) {
+        bad_length = true;
+        break;
+      }
       has_length = true;
       char *tail = nullptr;
       const unsigned long parsed = std::strtoul(value.c_str(), &tail, 10);
-      if (value.empty() || value.front() < '0' || value.front() > '9' ||
-          tail == value.c_str() || *tail != 0 ||
+      if (value.empty() || value.front() < '0' || value.front() > '9' || tail == value.c_str() || *tail != 0 ||
 #ifdef USE_WEBSERVER_OTA
           parsed > (is_ota_upload ? MAX_UPLOAD_BYTES : MAX_BODY_BYTES)
 #else
           parsed > MAX_BODY_BYTES
 #endif
-          )
+      )
         bad_length = true;
       else
         content_length = static_cast<size_t>(parsed);
@@ -320,9 +363,11 @@ void AsyncWebServer::dispatch_(Client &c) {
   }
   c.dispatched = true;
   if (method == HTTP_UNKNOWN || unsupported_transfer || bad_length || (method == HTTP_POST && !has_length)) {
-    c.response = std::make_unique<AsyncWebServerResponseContent>(
-        method == HTTP_UNKNOWN ? 405 : unsupported_transfer ? 415 : bad_length ? 413 : 411,
-        "text/plain", "Unsupported HTTP request");
+    c.response = std::make_unique<AsyncWebServerResponseContent>(method == HTTP_UNKNOWN ? 405
+                                                                 : unsupported_transfer ? 415
+                                                                 : bad_length           ? 413
+                                                                                        : 411,
+                                                                 "text/plain", "Unsupported HTTP request");
     return;
   }
 #ifdef USE_WEBSERVER_OTA
@@ -425,7 +470,8 @@ void AsyncWebServer::process_upload_(Client &c) {
 #endif
 
 void AsyncWebServer::process_(Client &c) {
-  if (!c.socket) return;
+  if (!c.socket)
+    return;
   const uint32_t now = millis();
   if (now - c.started > CLIENT_TIMEOUT_MS) {
     c.socket.reset();
@@ -435,22 +481,33 @@ void AsyncWebServer::process_(Client &c) {
     char buf[512];
     for (size_t nread = 0; nread < 4; ++nread) {
       const ssize_t n = c.socket->read(buf, sizeof(buf));
-      if (n == 0) { c.socket.reset(); return; }
+      if (n == 0) {
+        c.socket.reset();
+        return;
+      }
       if (n < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) c.socket.reset();
+        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+          c.socket.reset();
         break;
       }
       c.input.append(buf, static_cast<size_t>(n));
       c.started = now;  // Timeout is an idle timer, not a total download budget.
       if (c.header_end == 0) {
         const size_t marker = c.input.find("\r\n\r\n");
-        if (marker != std::string::npos) c.header_end = marker + 4;
+        if (marker != std::string::npos)
+          c.header_end = marker + 4;
       }
-      if ((c.header_end == 0 && c.input.size() > MAX_HEADER_BYTES) ||
-          c.header_end > MAX_HEADER_BYTES) { c.socket.reset(); return; }
-      if (c.input.size() > MAX_HEADER_BYTES + MAX_BODY_BYTES) { c.socket.reset(); return; }
+      if ((c.header_end == 0 && c.input.size() > MAX_HEADER_BYTES) || c.header_end > MAX_HEADER_BYTES) {
+        c.socket.reset();
+        return;
+      }
+      if (c.input.size() > MAX_HEADER_BYTES + MAX_BODY_BYTES) {
+        c.socket.reset();
+        return;
+      }
     }
-    if (c.header_end == 0) return;
+    if (c.header_end == 0)
+      return;
     dispatch_(c);
   }
 #ifdef USE_WEBSERVER_OTA
@@ -460,9 +517,13 @@ void AsyncWebServer::process_(Client &c) {
       char upload_buf[512];
       for (size_t i = 0; i < 4 && !c.upload_done; ++i) {
         const ssize_t n = c.socket->read(upload_buf, sizeof(upload_buf));
-        if (n == 0) { c.socket.reset(); break; }
+        if (n == 0) {
+          c.socket.reset();
+          break;
+        }
         if (n < 0) {
-          if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) c.socket.reset();
+          if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+            c.socket.reset();
           break;
         }
         c.input.append(upload_buf, static_cast<size_t>(n));
@@ -472,12 +533,13 @@ void AsyncWebServer::process_(Client &c) {
     }
   }
 #endif
-  if (c.socket == nullptr || c.response == nullptr) return;
+  if (c.socket == nullptr || c.response == nullptr)
+    return;
   if (c.output.empty()) {
     const auto &r = *c.response;
     char start[128];
-    std::snprintf(start, sizeof(start), "HTTP/1.1 %d %s\r\nContent-Length: %zu\r\nConnection: close\r\n",
-                  r.status(), reason_phrase(r.status()), r.get_content_size());
+    std::snprintf(start, sizeof(start), "HTTP/1.1 %d %s\r\nContent-Length: %zu\r\nConnection: close\r\n", r.status(),
+                  reason_phrase(r.status()), r.get_content_size());
     c.output = start;
     if (!r.content_type().empty()) {
       c.output += "Content-Type: " + r.content_type() + "\r\n";
@@ -496,24 +558,31 @@ void AsyncWebServer::process_(Client &c) {
   while (c.output_sent < c.output.size()) {
     const ssize_t n = c.socket->send(c.output.data() + c.output_sent, c.output.size() - c.output_sent, MSG_DONTWAIT);
     if (n < 0) {
-      if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) c.socket.reset();
+      if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+        c.socket.reset();
       return;
     }
-    if (n == 0) return;
+    if (n == 0)
+      return;
     c.output_sent += static_cast<size_t>(n);
     c.started = now;
   }
   const size_t body_size = c.response->get_content_size();
   const char *body_data = c.response->get_content_data();
-  if (body_size != 0 && body_data == nullptr) { c.socket.reset(); return; }
+  if (body_size != 0 && body_data == nullptr) {
+    c.socket.reset();
+    return;
+  }
   while (c.body_sent < body_size) {
-    const ssize_t n = c.socket->send(body_data + c.body_sent, std::min<size_t>(1024, body_size - c.body_sent),
-                                     MSG_DONTWAIT);
+    const ssize_t n =
+        c.socket->send(body_data + c.body_sent, std::min<size_t>(1024, body_size - c.body_sent), MSG_DONTWAIT);
     if (n < 0) {
-      if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) c.socket.reset();
+      if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+        c.socket.reset();
       return;
     }
-    if (n == 0) return;
+    if (n == 0)
+      return;
     c.body_sent += static_cast<size_t>(n);
     c.started = now;
   }
@@ -547,7 +616,8 @@ void AsyncEventSource::close_all() {
 }
 
 bool AsyncEventSource::canHandle(AsyncWebServerRequest *req) const {
-  if (req->method() != HTTP_GET) return false;
+  if (req->method() != HTTP_GET)
+    return false;
   char url[AsyncWebServerRequest::URL_BUF_SIZE];
   return req->url_to(url) == path_;
 }
@@ -626,8 +696,8 @@ void AsyncEventSource::queue_(const char *message, size_t len, const char *event
   for (auto &session : sessions_)
     this->queue_to_session_(session, message, len, event, id, reconnect);
 }
-void AsyncEventSource::try_send_nodefer(const char *message, size_t len, const char *event,
-                                       uint32_t id, uint32_t reconnect) {
+void AsyncEventSource::try_send_nodefer(const char *message, size_t len, const char *event, uint32_t id,
+                                        uint32_t reconnect) {
   this->queue_(message, len, event, id, reconnect);
 }
 void AsyncEventSource::deferrable_send_state(void *source, bool detail_all, message_generator_t *generator) {
@@ -676,8 +746,8 @@ bool AsyncEventSource::loop() {
     const size_t pending = session.pending.size() - session.sent;
     if (pending == 0)
       continue;
-    const ssize_t n = session.socket->send(session.pending.data() + session.sent,
-                                          std::min<size_t>(1024, pending), MSG_DONTWAIT);
+    const ssize_t n =
+        session.socket->send(session.pending.data() + session.sent, std::min<size_t>(1024, pending), MSG_DONTWAIT);
     if (n < 0) {
       if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
         session.socket.reset();
@@ -692,8 +762,9 @@ bool AsyncEventSource::loop() {
       }
     }
   }
-  sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(),
-                                 [](const Session &s) { return s.socket == nullptr; }), sessions_.end());
+  sessions_.erase(
+      std::remove_if(sessions_.begin(), sessions_.end(), [](const Session &s) { return s.socket == nullptr; }),
+      sessions_.end());
   return !sessions_.empty();
 }
 #endif
