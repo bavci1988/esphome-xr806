@@ -321,5 +321,11 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_standby_controller.o
 $(eval $(call XR806_COMPILE_CPP,xr_standby_controller,$(XR806_SRC)/esphome/components/xr806/standby_controller.cpp))
 -include $(XR806_OBJDIR)/xr_standby_controller.d
 
+# Native XR806 lwIP HTTP + captive DNS; the source is inert without YAML opt-in.
+XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_http_portal.o
+$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_http_portal.o
+$(eval $(call XR806_COMPILE_CPP,xr_http_portal,$(XR806_SRC)/esphome/components/xr806/http_portal.cpp))
+-include $(XR806_OBJDIR)/xr_http_portal.d
+
 # Restore the default tab recipe prefix for any makefile read after this one.
 .RECIPEPREFIX :=
