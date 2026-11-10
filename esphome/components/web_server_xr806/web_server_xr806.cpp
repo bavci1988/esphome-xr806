@@ -229,8 +229,29 @@ void AsyncWebServer::end() {
   for (auto *handler : handlers_)
     handler->onServerStop();
   clients_.clear();
-  listener_.reset();
+  this->stop_accepting();
 }
+
+void AsyncWebServer::stop_accepting() { listener_.reset(); }
+
+bool AsyncWebServer::has_active_connections() const {
+  if (!clients_.empty())
+    return true;
+#ifdef USE_WEBSERVER
+  for (auto *source : event_sources_) {
+    if (source != nullptr && !source->empty())
+      return true;
+  }
+#endif
+  return false;
+}
+
+#ifdef USE_WEBSERVER
+void AsyncWebServer::register_event_source(AsyncEventSource *source) {
+  if (source != nullptr && std::find(event_sources_.begin(), event_sources_.end(), source) == event_sources_.end())
+    event_sources_.push_back(source);
+}
+#endif
 
 void AsyncWebServer::dispatch_(Client &c) {
   // Split headers and body only after Content-Length bytes have arrived.
@@ -414,6 +435,11 @@ void AsyncWebServer::loop() {
 }
 
 #ifdef USE_WEBSERVER
+void AsyncEventSource::close_all() {
+  sessions_.clear();
+  listing_session_ = nullptr;
+}
+
 bool AsyncEventSource::canHandle(AsyncWebServerRequest *req) const {
   if (req->method() != HTTP_GET) return false;
   char url[AsyncWebServerRequest::URL_BUF_SIZE];
