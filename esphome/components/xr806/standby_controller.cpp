@@ -29,6 +29,9 @@ extern "C" {
 #include "pm/pm.h"
 }
 
+#ifdef USE_XR806_STANDBY_HTTP_CLIENT
+#include "esphome/components/http_request/http_request_xr806.h"
+#endif
 #ifdef USE_LOGGER
 #include "esphome/components/logger/logger.h"
 extern "C" {
@@ -145,6 +148,11 @@ bool XR806StandbyController::is_any_transport_unowned_() const {
 bool XR806StandbyController::may_quiesce() const {
   if (this->is_any_transport_unowned_())
     return false;
+#ifdef USE_XR806_STANDBY_HTTP_CLIENT
+  // An outgoing request or a response still being read would lose its connection.
+  if (http_request::HttpContainerXR806::any_open())
+    return false;
+#endif
   const uint32_t required =
       (this->no_network_ ? 0u : XR806LowPowerPolicy::NETWORK_BUSY) |
       (this->no_api_ ? 0u : XR806LowPowerPolicy::API_BUSY) | (this->no_ota_ ? 0u : XR806LowPowerPolicy::OTA_BUSY) |
@@ -198,6 +206,12 @@ void XR806StandbyController::cancel_prepared_(size_t prepared) {
 void XR806StandbyController::attempt_standby_() {
   if (this->busy_)
     return;
+#ifdef USE_XR806_STANDBY_HTTP_CLIENT
+  if (http_request::HttpContainerXR806::any_open()) {
+    this->state_.postpone();
+    return;
+  }
+#endif
   this->busy_ = true;
   auto &p = lowpower_policy();
   p.set_scheduler_idle(false);

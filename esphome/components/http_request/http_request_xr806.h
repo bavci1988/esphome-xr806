@@ -15,6 +15,9 @@ class HttpContainerXR806 : public HttpContainer {
   int read(uint8_t *buf, size_t max_len) override;
   void end() override;
 
+  /// True while any response is still open; standby must not switch the radio off under it.
+  static bool any_open();
+
  protected:
   friend class HttpRequestXR806;
   uint32_t session_{0};  ///< SDK HTTP_SESSION_HANDLE; 0 once closed
@@ -23,7 +26,7 @@ class HttpContainerXR806 : public HttpContainer {
 };
 
 /// http_request on XR806 through the XRadio SDK HTTP client, with TLS from mbedTLS.
-/// The client supports GET, HEAD and POST; HTTPS runs without certificate verification.
+/// HTTPS runs without certificate verification; user information in the URL is sent as Basic authentication.
 class HttpRequestXR806 final : public HttpRequestComponent {
  protected:
   std::shared_ptr<HttpContainer> perform(const char *url, const char *method, const std::string &body,
