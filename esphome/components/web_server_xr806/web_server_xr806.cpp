@@ -13,6 +13,10 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
+#ifdef USE_WEBSERVER
+#include "esphome/components/web_server/web_server.h"
+#endif
+
 namespace esphome::web_server_idf {
 
 ESPHOME_LOG_TAG(TAG, "web_server_xr806");

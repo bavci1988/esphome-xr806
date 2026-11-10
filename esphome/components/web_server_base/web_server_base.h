@@ -48,9 +48,6 @@ class MiddlewareHandler : public AsyncWebHandler {
   // owns detached TCP sockets. Forward close notifications before freeing sockets.
   void onServerStop() override { next_->onServerStop(); }
 #endif
-#ifdef USE_XR806
-  void onServerStop() override { next_->onServerStop(); }
-#endif
 
  protected:
   AsyncWebHandler *next_;
