@@ -94,6 +94,8 @@ workflows:
         - 'peter-evans/create-pull-request@v8.1.1'
     '.github/workflows/verify-lockfile.yml':
         - 'actions/checkout@v7.0.1'
+    '.github/workflows/xr806-http-smoke.yml':
+        - 'actions/checkout@v7.0.1'
 dependencies:
     'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9':
         ref: 'v6.1.0'
