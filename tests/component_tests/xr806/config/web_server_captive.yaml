@@ -1,0 +1,13 @@
+esphome:
+  name: xr806-web-ap-ci
+xr806:
+  board: wxu
+wifi:
+  ap:
+    ssid: XR806-Lab
+    password: TestOnlyAP123
+web_server:
+  version: 3
+  local: true
+  log: false
+captive_portal:
