@@ -277,6 +277,9 @@ void AsyncWebServer::dispatch_(Client &c) {
   const size_t qm = target.find('?');
   const std::string uri = target.substr(0, qm);
   const std::string query = qm == std::string::npos ? "" : target.substr(qm + 1);
+#ifdef USE_WEBSERVER_OTA
+  const bool is_ota_upload = method == HTTP_POST && uri == "/update";
+#endif
   std::vector<std::pair<std::string, std::string>> headers;
   size_t header_cursor = line_end + 2;
   size_t content_length = 0;
@@ -297,7 +300,13 @@ void AsyncWebServer::dispatch_(Client &c) {
       char *tail = nullptr;
       const unsigned long parsed = std::strtoul(value.c_str(), &tail, 10);
       if (value.empty() || value.front() < '0' || value.front() > '9' ||
-          tail == value.c_str() || *tail != 0 || parsed > MAX_BODY_BYTES)
+          tail == value.c_str() || *tail != 0 ||
+#ifdef USE_WEBSERVER_OTA
+          parsed > (is_ota_upload ? MAX_UPLOAD_BYTES : MAX_BODY_BYTES)
+#else
+          parsed > MAX_BODY_BYTES
+#endif
+          )
         bad_length = true;
       else
         content_length = static_cast<size_t>(parsed);
@@ -316,6 +325,45 @@ void AsyncWebServer::dispatch_(Client &c) {
         "text/plain", "Unsupported HTTP request");
     return;
   }
+#ifdef USE_WEBSERVER_OTA
+  if (is_ota_upload) {
+    std::string boundary;
+    for (const auto &h : headers) {
+      if (equals_ci(h.first, "Content-Type")) {
+        boundary = web_server_xr806::MultipartStream::boundary_from_content_type(h.second);
+        break;
+      }
+    }
+    if (boundary.empty() || content_length == 0) {
+      c.response = std::make_unique<AsyncWebServerResponseContent>(400, "text/plain", "Invalid multipart update");
+      return;
+    }
+    c.upload_request = std::make_unique<AsyncWebServerRequest>(method, uri, query, "", std::move(headers), &c.socket);
+    c.upload_request->set_content_length(content_length);
+    for (auto *handler : handlers_) {
+      if (handler->canHandle(c.upload_request.get())) {
+        c.upload_handler = handler;
+        break;
+      }
+    }
+    if (c.upload_handler == nullptr) {
+      c.response = std::make_unique<AsyncWebServerResponseContent>(404, "text/plain", "OTA handler unavailable");
+      return;
+    }
+    // Run the standard origin/auth guard before accepting any flash bytes.
+    c.upload_handler->handleUpload(c.upload_request.get(), "", 0, nullptr, 0, false);
+    if (c.upload_request->has_response()) {
+      c.response = c.upload_request->take_response();
+      return;
+    }
+    c.multipart = std::make_unique<web_server_xr806::MultipartStream>(std::move(boundary), content_length);
+    c.is_upload = true;
+    c.upload_expected = content_length;
+    c.input.erase(0, c.header_end);
+    c.header_end = 0;
+    return;
+  }
+#endif
   if (c.input.size() - c.header_end < content_length) {
     c.dispatched = false;
     return;
@@ -336,6 +384,45 @@ void AsyncWebServer::dispatch_(Client &c) {
   if (c.socket != nullptr && c.response == nullptr)
     c.response = std::make_unique<AsyncWebServerResponseContent>(404, "text/plain", "Not found");
 }
+
+#ifdef USE_WEBSERVER_OTA
+void AsyncWebServer::process_upload_(Client &c) {
+  if (!c.is_upload || c.upload_done || c.upload_request == nullptr || c.multipart == nullptr)
+    return;
+  if (c.input.size() > c.upload_expected - c.upload_received) {
+    c.response = std::make_unique<AsyncWebServerResponseContent>(400, "text/plain", "Upload body length exceeded");
+    c.upload_done = true;
+    return;
+  }
+  const size_t length = c.input.size();
+  if (length == 0)
+    return;
+  auto callback = [&c](uint8_t *data, size_t len, bool final) -> bool {
+    c.upload_handler->handleUpload(c.upload_request.get(), c.multipart->filename(), c.upload_file_index, data, len,
+                                   final);
+    c.upload_file_index += len;
+    return !c.upload_request->has_response();
+  };
+  if (!c.multipart->feed(reinterpret_cast<const uint8_t *>(c.input.data()), length, callback)) {
+    c.response = std::make_unique<AsyncWebServerResponseContent>(400, "text/plain", "Malformed firmware upload");
+    c.upload_done = true;
+    return;
+  }
+  c.upload_received += length;
+  c.input.clear();
+  if (c.upload_received == c.upload_expected) {
+    c.upload_done = true;
+    if (!c.multipart->complete()) {
+      c.response = std::make_unique<AsyncWebServerResponseContent>(400, "text/plain", "Incomplete firmware upload");
+      return;
+    }
+    c.upload_handler->handleRequest(c.upload_request.get());
+    c.response = c.upload_request->take_response();
+    if (c.response == nullptr)
+      c.response = std::make_unique<AsyncWebServerResponseContent>(500, "text/plain", "OTA response missing");
+  }
+}
+#endif
 
 void AsyncWebServer::process_(Client &c) {
   if (!c.socket) return;
@@ -366,6 +453,25 @@ void AsyncWebServer::process_(Client &c) {
     if (c.header_end == 0) return;
     dispatch_(c);
   }
+#ifdef USE_WEBSERVER_OTA
+  if (c.is_upload && !c.upload_done && c.socket != nullptr) {
+    this->process_upload_(c);
+    if (!c.upload_done) {
+      char upload_buf[512];
+      for (size_t i = 0; i < 4 && !c.upload_done; ++i) {
+        const ssize_t n = c.socket->read(upload_buf, sizeof(upload_buf));
+        if (n == 0) { c.socket.reset(); break; }
+        if (n < 0) {
+          if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) c.socket.reset();
+          break;
+        }
+        c.input.append(upload_buf, static_cast<size_t>(n));
+        c.started = now;
+        this->process_upload_(c);
+      }
+    }
+  }
+#endif
   if (c.socket == nullptr || c.response == nullptr) return;
   if (c.output.empty()) {
     const auto &r = *c.response;
@@ -431,8 +537,7 @@ void AsyncWebServer::loop() {
   }
   for (auto &client : clients_)
     process_(client);
-  clients_.erase(std::remove_if(clients_.begin(), clients_.end(),
-                                [](const Client &c) { return c.socket == nullptr; }), clients_.end());
+  clients_.remove_if([](const Client &c) { return c.socket == nullptr; });
 }
 
 #ifdef USE_WEBSERVER
