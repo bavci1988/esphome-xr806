@@ -131,6 +131,8 @@ class AsyncWebHandler {
                             size_t len, bool final) {}
   virtual void handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {}
   virtual bool isRequestHandlerTrivial() const { return true; }
+  // Listener shutdown also closes detached SSE sockets owned by handlers.
+  virtual void onServerStop() {}
 };
 
 class AsyncWebServer {
