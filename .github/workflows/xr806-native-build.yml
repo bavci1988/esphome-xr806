@@ -15,8 +15,31 @@ permissions:
   contents: read
 
 jobs:
+  sdk-access:
+    name: Check private SDK CI access
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.detect.outputs.enabled }}
+    steps:
+      - name: Detect read-only cross-repository access
+        id: detect
+        shell: bash
+        env:
+          SDK_TOKEN: ${{ secrets.XR806_SDK_READ_TOKEN }}
+        run: |
+          if [ -z "$SDK_TOKEN" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "### XR806 ARM cross-build not run" >> "$GITHUB_STEP_SUMMARY"
+            echo "Configure read-only repository secret XR806_SDK_READ_TOKEN" >> "$GITHUB_STEP_SUMMARY"
+            echo "with access to bavci1988/xr806-sdk to enable this check." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
   wxu-captive:
     name: Native ARM WXU firmware (SoftAP + captive_portal)
+    needs: sdk-access
+    if: needs.sdk-access.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -30,7 +53,7 @@ jobs:
           repository: bavci1988/xr806-sdk
           ref: 36d5f54c5d524cc9d32ce444c79b2fe2797e5f3c
           path: xr806-sdk
-          token: ${{ secrets.XR806_SDK_READ_TOKEN || github.token }}
+          token: ${{ secrets.XR806_SDK_READ_TOKEN }}
           persist-credentials: false
 
       - name: Toolchain
