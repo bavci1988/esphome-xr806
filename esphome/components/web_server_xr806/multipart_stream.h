@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <functional>
 #include <string>
-#include <string_view>
 #include <utility>
 
 namespace esphome::web_server_xr806 {
@@ -18,16 +17,16 @@ class MultipartStream {
  public:
   using Sink = std::function<bool(uint8_t *data, size_t size, bool final)>;
 
-  static std::string boundary_from_content_type(std::string_view value) {
+  static std::string boundary_from_content_type(const std::string &value) {
     // Never treat CR/LF as a valid Content-Type parameter delimiter: accepting
     // a truncated boundary enables request smuggling across HTTP parsers.
-    if (value.find_first_of("\r\n") != std::string_view::npos)
+    if (value.find_first_of("\r\n") != std::string::npos)
       return {};
-    constexpr std::string_view PREFIX = "multipart/form-data;";
-    if (value.size() < PREFIX.size() || value.substr(0, PREFIX.size()) != PREFIX)
+    constexpr char prefix[] = "multipart/form-data;";
+    if (!value.starts_with(prefix))
       return {};
     auto pos = value.find("boundary=");
-    if (pos == value.npos)
+    if (pos == std::string::npos)
       return {};
     pos += 9;
     const bool quoted = pos < value.size() && value[pos] == '"';
@@ -38,7 +37,7 @@ class MultipartStream {
       const unsigned char ch = static_cast<unsigned char>(value[pos]);
       if ((quoted && ch == '"') || (!quoted && (ch == ';' || std::isspace(ch))))
         break;
-      if (!(std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '+' || ch == '/'))
+      if (!std::isalnum(ch) && ch != '-' && ch != '_' && ch != '.' && ch != '+' && ch != '/')
         return {};
       ++pos;
     }
@@ -58,7 +57,7 @@ class MultipartStream {
       ++received_;
       buffer_.push_back(static_cast<char>(data[i]));
       if (phase_ == Phase::FIRST_LINE) {
-        if (buffer_.size() > first_line_.size() || first_line_.compare(0, buffer_.size(), buffer_) != 0)
+        if (buffer_.size() > first_line_.size() || !first_line_.starts_with(buffer_))
           return this->fail_();
         if (buffer_.size() == first_line_.size()) {
           buffer_.clear();
@@ -67,7 +66,7 @@ class MultipartStream {
       } else if (phase_ == Phase::HEADERS) {
         if (buffer_.size() > 1024)
           return this->fail_();
-        if (buffer_.size() >= 4 && buffer_.compare(buffer_.size() - 4, 4, "\r\n\r\n") == 0) {
+        if (buffer_.ends_with("\r\n\r\n")) {
           if (!this->validate_headers_())
             return this->fail_();
           buffer_.clear();
@@ -91,11 +90,10 @@ class MultipartStream {
     if (phase_ != Phase::BODY)
       return this->fail_();
     size_t trailer = closing_.size();
-    if (buffer_.size() >= trailer + 2 &&
-        buffer_.compare(buffer_.size() - 2, 2, "\r\n") == 0)
+    if (buffer_.ends_with("\r\n"))
       trailer += 2;
     if (buffer_.size() < trailer ||
-        buffer_.compare(buffer_.size() - trailer, closing_.size(), closing_) != 0)
+        buffer_.substr(buffer_.size() - trailer, closing_.size()) != closing_)
       return this->fail_();
     const size_t tail = buffer_.size() - trailer;
     if (file_bytes_ + tail == 0)
@@ -128,32 +126,32 @@ class MultipartStream {
   bool validate_headers_() {
     // Strict single-part upload. No unbounded embedded form fields, nested
     // multipart, filenames with directories, or Content-Transfer-Encoding.
-    constexpr std::string_view DISPOSITION = "Content-Disposition: form-data;";
-    const std::string_view headers{buffer_};
+    constexpr char disposition_header[] = "Content-Disposition: form-data;";
+    const std::string &headers = buffer_;
     const size_t first = headers.find("\r\n");
-    if (first == headers.npos || headers.substr(0, DISPOSITION.size()) != DISPOSITION)
+    if (first == std::string::npos || !headers.starts_with(disposition_header))
       return false;
     const auto disposition = headers.substr(0, first);
-    if (disposition.find("; name=\"update\"") == disposition.npos)
+    if (disposition.find("; name=\"update\"") == std::string::npos)
       return false;
     const auto fn = disposition.find("; filename=\"");
-    if (fn == disposition.npos)
+    if (fn == std::string::npos)
       return false;
     const size_t start = fn + 12;
     const size_t end = disposition.find('"', start);
-    if (end == disposition.npos || end == start || end - start > 96)
+    if (end == std::string::npos || end == start || end - start > 96)
       return false;
     filename_ = std::string(disposition.substr(start, end - start));
     for (char c : filename_) {
-      if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.'))
+      if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-' && c != '.')
         return false;
     }
     // The only optional extra header we permit is Content-Type for the blob.
     auto remainder = headers.substr(first + 2);
     if (remainder == "\r\n")
       return true;
-    constexpr std::string_view CONTENT_TYPE = "Content-Type: application/octet-stream\r\n\r\n";
-    return remainder == CONTENT_TYPE;
+    constexpr char content_type_header[] = "Content-Type: application/octet-stream\r\n\r\n";
+    return remainder == content_type_header;
   }
 
   std::string boundary_;
