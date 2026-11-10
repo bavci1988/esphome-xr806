@@ -10,6 +10,7 @@
 
 extern "C" {
 #include "demo/trv16_port/prj_config.h"
+#include "image/flash.h"
 }
 
 namespace esphome::xr806 {
@@ -22,8 +23,11 @@ static_assert(PRJCONF_ESPHOME_PREFS_FLASH == PRJCONF_SYSINFO_FLASH);
 static_assert(PRJCONF_ESPHOME_PREFS_SECTOR == 4096);
 static_assert(PRJCONF_ESPHOME_PREFS0_ADDR + PRJCONF_ESPHOME_PREFS_SECTOR == PRJCONF_ESPHOME_PREFS1_ADDR);
 static_assert(PRJCONF_ESPHOME_PREFS1_ADDR + PRJCONF_ESPHOME_PREFS_SECTOR == PRJCONF_SYSINFO_ADDR);
-static_assert(PRJCONF_SYSINFO_ADDR + PRJCONF_SYSINFO_SIZE == 2048 * 1024);
+static_assert(PRJCONF_SYSINFO_ADDR == 1980 * 1024);
+static_assert(PRJCONF_SYSINFO_ADDR + PRJCONF_SYSINFO_SIZE == 1984 * 1024);
 static_assert(PRJCONF_ESPHOME_PREFS0_ADDR >= 1920 * 1024);
+static_assert(PRJCONF_ESPHOME_PREFS0_ADDR == 1972 * 1024);
+static_assert(PRJCONF_ESPHOME_PREFS1_ADDR == 1976 * 1024);
 
 // Snapshot: 16-byte header, followed by packed entries {key32, len16, data[len]}.
 // The CRC includes the generation and length, preventing a damaged generation
@@ -44,10 +48,45 @@ bool XR806Preferences::read_slot_(uint8_t slot, SnapshotHeader *header) {
   return this->valid_snapshot_(this->scratch_, header);
 }
 
+// A foreign flash sector must NEVER be erased by FDCM's automatic rewrite.
+// The original Tuya 2 MiB dump includes nonblank OEM data after 2004 KiB;
+// permit only completely erased sectors or matching FDCM snapshot headers.
+// Read the entire 4 KiB sector so a blank prefix cannot hide other data.
+static bool safe_preference_sector(uint32_t address) {
+  uint8_t probe[64];
+  uint32_t magic = 0;
+  uint16_t payload_length = 0;
+  bool all_erased = true;
+  for (uint32_t offset = 0; offset < PRJCONF_ESPHOME_PREFS_SECTOR; offset += sizeof(probe)) {
+    if (flash_read(PRJCONF_ESPHOME_PREFS_FLASH, address + offset, probe, sizeof(probe)) != sizeof(probe))
+      return false;
+    if (offset == 0) {
+      memcpy(&magic, probe, sizeof(magic));
+      memcpy(&payload_length, probe + 6, sizeof(payload_length));
+    }
+    for (uint8_t value : probe) {
+      if (value != 0xFF) {
+        all_erased = false;
+        break;
+      }
+    }
+  }
+  constexpr uint32_t FDCM_ID_CODE = 0xA55A5AA5;
+  return all_erased || (magic == FDCM_ID_CODE && payload_length == 2048);
+}
+
 bool XR806Preferences::open_() {
   if (this->initialized_)
     return this->available_;
   this->initialized_ = true;
+
+  // Fail closed on any unexpected sector contents before fdcm_write() can
+  // erase foreign Tuya calibration/credentials/metadata.
+  if (!safe_preference_sector(PRJCONF_ESPHOME_PREFS0_ADDR) ||
+      !safe_preference_sector(PRJCONF_ESPHOME_PREFS1_ADDR)) {
+    ESP_LOGE(TAG, "Nonblank foreign flash data in reserved preference sectors; refusing writes");
+    return false;
+  }
 
   // The SDK's platform_init() initializes flash/FDCM before ESPHome setup().
   this->slots_[0] = fdcm_open(PRJCONF_ESPHOME_PREFS_FLASH, PRJCONF_ESPHOME_PREFS0_ADDR,
