@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "esphome/core/preference_backend.h"
+#include "preference_snapshot.h"
 
 extern "C" {
 #include "image/fdcm.h"
@@ -36,14 +37,7 @@ class XR806Preferences final : public PreferencesMixin<XR806Preferences> {
   static constexpr uint32_t MAGIC = 0x58525046;  // "FPRX", little-endian
   static constexpr uint16_t VERSION = 1;
 
-  struct SnapshotHeader {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t used;
-    uint32_t generation;
-    uint32_t checksum;
-  };
-  static_assert(sizeof(SnapshotHeader) == 16);
+  using SnapshotHeader = PreferenceSnapshotHeader;
 
   bool open_();
   bool valid_snapshot_(const uint8_t *data, SnapshotHeader *header) const;
