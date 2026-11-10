@@ -29,7 +29,15 @@ extern "C" {
 namespace esphome::ota {
 ESPHOME_LOG_TAG(TAG, "ota.xr806");
 static struct wakelock ota_native_wakelock = {};
+bool XR806OTABackend::session_open = false;            // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+bool XR806OTABackend::committed_until_reboot = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
 std::unique_ptr<XR806OTABackend> make_ota_backend() { return std::make_unique<XR806OTABackend>(); }
+
+void XR806OTABackend::release_lock_() {
+  this->update_lock_.release();
+  session_open = false;
+}
 XR806OTABackend::~XR806OTABackend() { this->abort(); }
 
 OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
@@ -37,6 +45,7 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
     return OTA_RESPONSE_ERROR_UNSUPPORTED_OTA_TYPE;
   if (!this->update_lock_.try_acquire())
     return OTA_RESPONSE_ERROR_UPDATE_BUSY;
+  session_open = true;
   // A previous aborted transfer must not poison the next OTA attempt.
   this->received_ = 0;
   this->declared_ = 0;
@@ -47,14 +56,14 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
   this->writing_ = false;
   this->committed_ = false;
   if (image_size > std::numeric_limits<uint32_t>::max()) {
-    this->update_lock_.release();
+    this->release_lock_();
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
   }
 
   const image_ota_param_t *runtime = image_get_ota_param();
   if (runtime == nullptr) {
     ESP_LOGE(TAG, "Cannot read XR806 ROM OTA geometry");
-    this->update_lock_.release();
+    this->release_lock_();
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
   }
   // A wired AWIH flash leaves FDCM empty. ROM and bootloader then boot seq0, and the
@@ -63,7 +72,7 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
   const bool has_cfg = image_get_cfg(&cfg) == 0;
   const image_seq_t running = image_get_running_seq();
   if (running >= IMAGE_SEQ_NUM || running != runtime->running_seq) {
-    this->update_lock_.release();
+    this->release_lock_();
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
   }
 
@@ -71,7 +80,7 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
   struct FlashDev *dev = getFlashDev(flash_id);
   struct FlashChip *chip = dev != nullptr ? getFlashChip(dev) : nullptr;
   if (chip == nullptr || chip->cfg.mSize == 0) {
-    this->update_lock_.release();
+    this->release_lock_();
     return OTA_RESPONSE_ERROR_WRONG_CURRENT_FLASH_CONFIG;
   }
 
@@ -97,7 +106,7 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
   if (this->plan_.error != xr806::WriterError::OK) {
     ESP_LOGE(TAG, "XR806 OTA runtime layout rejected (%u): active=0x%X staging=0x%X FDCM=0x%X",
              static_cast<unsigned>(this->plan_.error), g.image_addr[0], g.image_addr[1], g.metadata_addr);
-    this->update_lock_.release();
+    this->release_lock_();
     return OTA_RESPONSE_ERROR_NO_UPDATE_PARTITION;
   }
 #ifdef USE_XR806_STANDBY_CONTROLLER
@@ -107,7 +116,7 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
 #endif
   ota_native_wakelock.name = const_cast<char *>("xr806.ota.flash");
   if (pm_wake_lock(&ota_native_wakelock) != 0) {
-    this->update_lock_.release();
+    this->release_lock_();
     return OTA_RESPONSE_ERROR_UPDATE_BUSY;
   }
   this->pm_held_ = true;
@@ -223,6 +232,8 @@ OTAResponseTypes XR806OTABackend::end() {
   ota_push_stop();
   this->sdk_initialized_ = false;
   this->update_lock_.hold_until_reboot();
+  session_open = false;
+  committed_until_reboot = true;
   // The wakelock is kept until the restart as well.
   if (!finished || !selected) {
     ESP_LOGE(TAG, "OTA commit incomplete (finish=%d, FDCM readback=%d); next boot state uncertain",
@@ -313,7 +324,7 @@ void XR806OTABackend::stop_() {
     this->pm_held_ = false;
   }
   // No permanent "busy" OTA state after an interrupted/invalid update.
-  this->update_lock_.release();
+  this->release_lock_();
 }
 
 void XR806OTABackend::abort() {

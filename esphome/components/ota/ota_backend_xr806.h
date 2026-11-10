@@ -18,12 +18,18 @@ class XR806OTABackend final {
   void abort();
   // ESPHome gzip/deflate is not XRadio's XZ OTA container.
   static constexpr bool supports_compression() { return false; }
+  /// True while an update holds the staging slot, and after a commit until the reboot that installs it.
+  static bool flash_busy() { return session_open || committed_until_reboot; }
 
  private:
   bool push_(uint8_t *data, size_t bytes);
   bool probe_staged_image_();
   bool read_commit_();
   void stop_();
+  void release_lock_();
+  // One update at a time: UpdateLock is global, so these describe the only possible session.
+  static bool session_open;            // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+  static bool committed_until_reboot;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
   UpdateLock update_lock_{};
   md5::MD5Digest digest_{};
   xr806::WriterPlan plan_{};

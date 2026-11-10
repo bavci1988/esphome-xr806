@@ -5,6 +5,7 @@
 #if defined(USE_XR806_STANDBY_CONTROLLER) && defined(USE_OTA_STATE_LISTENER)
 #include "esphome/core/component.h"
 #include "esphome/components/ota/ota_backend.h"
+#include "esphome/components/ota/ota_backend_xr806.h"
 #include "standby_controller.h"
 #include "lowpower_policy.h"
 
@@ -62,12 +63,12 @@ class XR806OTAStandbyGuard final : public Component,
   // has stopped accepting and all clients/flash writers have drained.
   bool may_quiesce() const override { return http_only_ && !active_ && !committed_; }
   void standby_preflight(bool requested) override {
-    bool ready = requested && this->may_quiesce() && !ota::UpdateLock::is_active() &&
+    bool ready = requested && this->may_quiesce() && !ota::XR806OTABackend::flash_busy() &&
                  !(lowpower_policy().blockers() & XR806LowPowerPolicy::HTTP_BUSY);
     lowpower_policy().set_ota_idle(ready);
   }
   bool prepare_for_standby() override {
-    return this->may_quiesce() && !ota::UpdateLock::is_active() &&
+    return this->may_quiesce() && !ota::XR806OTABackend::flash_busy() &&
            !(lowpower_policy().blockers() & XR806LowPowerPolicy::HTTP_BUSY);
   }
   void standby_cancelled() override { lowpower_policy().set_ota_idle(false); }
