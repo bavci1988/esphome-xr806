@@ -37,8 +37,12 @@ jobs:
         run: |
           esphome config tests/fixtures/xr806/captive_portal.yaml
           esphome compile --only-generate tests/fixtures/xr806/captive_portal.yaml
-          grep -R -q '^#define USE_XR806_HTTP_PORTAL' .esphome/build
-          grep -R -q '^#define USE_CAPTIVE_PORTAL' .esphome/build
+          # build_path is relative to the configuration directory, not
+          # necessarily the checkout root.
+          defines="$(find tests/fixtures/xr806 -type f -path '*/esphome/core/defines.h' -print -quit)"
+          test -n "$defines"
+          grep -q '^#define USE_XR806_HTTP_PORTAL' "$defines"
+          grep -q '^#define USE_CAPTIVE_PORTAL' "$defines"
 
   sdk-access:
     name: Check private SDK CI access
