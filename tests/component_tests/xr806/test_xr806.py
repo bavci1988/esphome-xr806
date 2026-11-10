@@ -138,3 +138,13 @@ def test_http_request_rejects_certificate_verification(
 
     assert read_config({}) is None
     assert "certificate verification on XR806" in capsys.readouterr().out
+
+
+def test_homeassistant_time_with_timezone(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("homeassistant_time.yaml"))
+
+    assert {"USE_API", "USE_TIME", "USE_TIME_TIMEZONE"} <= defines()
+    assert "homeassistant::HomeassistantTime" in generated
