@@ -15,18 +15,8 @@
 #ifdef USE_XR806_LOWPOWER
 #include "esphome/components/xr806/lowpower_policy.h"
 #endif
-#ifdef USE_XR806
-#include "esphome/components/uart/uart_component_xr806.h"
-#endif
 
 namespace esphome::tuya {
-
-#ifdef USE_XR806
-// On XR806 every UART is the XR806 backend, which can change its baud rate at run time.
-static uart::XR806UARTComponent *xr806_uart(uart::UARTComponent *parent) {
-  return static_cast<uart::XR806UARTComponent *>(parent);
-}
-#endif
 
 static const char *const LP_TAG = "tuya.low_power_v0";
 static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
@@ -66,11 +56,6 @@ void Tuya::setup_low_power_() {
   // The original WXU probes CMD01 at each candidate baud, without a heartbeat.
   // With a fixed rate the existing queued CMD01 request is sufficient.
   if (this->auto_baud_) {
-#ifdef USE_XR806
-    // A wrong candidate rate produces expected LSR framing errors. The
-    // physical UART driver must not latch a permanent fault during probes.
-    xr806_uart(this->parent_)->set_baud_probe_mode(true);
-#endif
     this->lp_autobaud_.start(this->parent_->get_baud_rate());
   } else {
     this->send_low_power_product_query_(false);
@@ -160,11 +145,6 @@ void Tuya::handle_low_power_frame_(uint8_t command, uint8_t version, const uint8
     // independent so bad/wrong frames cannot unlock the boot state machine.
     if (!this->lp_autobaud_.accept_frame(this->rx_message_.data(), this->rx_message_.size(), millis()))
       return;
-#ifdef USE_XR806
-    // The accepted CMD01 packet was checksum-validated and matches this rate.
-    // From now on, any hardware framing/overrun error is a real sticky fault.
-    xr806_uart(this->parent_)->set_baud_probe_mode(false);
-#endif
     ESP_LOGI(LP_TAG, "Tuya low_power_v0 baud locked: %u", static_cast<unsigned>(this->lp_autobaud_.baud()));
   }
 
@@ -302,9 +282,13 @@ void Tuya::poll_low_power_autobaud_() {
 
 #ifdef USE_XR806
   const uint32_t baud = this->lp_autobaud_.baud();
-  // This is a synchronous, bounded HAL reconfiguration, not a busy-wait
-  // through the 500 ms window. The UART backend drains TX and clears stale RX.
-  if (this->parent_ == nullptr || !xr806_uart(this->parent_)->reconfigure_baud_rate(baud)) {
+  // load_settings() sends pending TX, applies the rate and discards RX from the old rate.
+  // Framing errors at a wrong candidate rate are expected and do not fail the UART.
+  if (this->parent_ != nullptr) {
+    this->parent_->set_baud_rate(baud);
+    this->parent_->load_settings(false);
+  }
+  if (this->parent_ == nullptr || !this->parent_->is_connected()) {
     ESP_LOGE(LP_TAG, "Unable to configure MCU UART for %u baud", static_cast<unsigned>(baud));
     this->lp_autobaud_.stop();
     this->init_failed_ = true;
