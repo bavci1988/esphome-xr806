@@ -123,11 +123,10 @@ bool XR806StandbyController::is_any_transport_unowned_() const {
 bool XR806StandbyController::may_quiesce() const {
   if (this->is_any_transport_unowned_())
     return false;
-  const uint32_t required = (this->no_network_ ? 0u : XR806LowPowerPolicy::NETWORK_BUSY) |
-                            (this->no_api_ ? 0u : XR806LowPowerPolicy::API_BUSY) |
-                            (this->no_ota_ ? 0u : XR806LowPowerPolicy::OTA_BUSY) |
-                            (this->no_mdns_ ? 0u : XR806LowPowerPolicy::MDNS_BUSY) |
-                            (this->no_http_ ? 0u : XR806LowPowerPolicy::HTTP_BUSY);
+  const uint32_t required =
+      (this->no_network_ ? 0u : XR806LowPowerPolicy::NETWORK_BUSY) |
+      (this->no_api_ ? 0u : XR806LowPowerPolicy::API_BUSY) | (this->no_ota_ ? 0u : XR806LowPowerPolicy::OTA_BUSY) |
+      (this->no_mdns_ ? 0u : XR806LowPowerPolicy::MDNS_BUSY) | (this->no_http_ ? 0u : XR806LowPowerPolicy::HTTP_BUSY);
   uint32_t registered = 0;
   for (size_t i = 0; i < this->participant_count_; ++i) {
     registered |= this->participants_[i]->owned_services();
