@@ -415,8 +415,9 @@ void AsyncWebServer::process_(Client &c) {
 }
 
 void AsyncWebServer::loop() {
-  if (listener_ == nullptr) return;
-  if (clients_.size() < MAX_CLIENTS) {
+  // The listener is parked during standby preflight, but previously accepted
+  // requests must still drain and complete before HTTP_BUSY can be cleared.
+  if (listener_ != nullptr && clients_.size() < MAX_CLIENTS) {
     sockaddr_storage peer{};
     socklen_t len = sizeof(peer);
     auto incoming = listener_->accept(reinterpret_cast<sockaddr *>(&peer), &len);
