@@ -936,11 +936,6 @@ def lint_relative_py_import(fname: Path, line, col, content):
         "esphome/components/host/helpers.cpp",
         "esphome/components/zephyr/helpers.cpp",
         "esphome/components/xr806/helpers.cpp",
-        # Native XR806 HTTP deliberately implements the shared IDF-shaped
-        # AsyncWebServer interface in esphome::web_server_idf, so that the
-        # upstream web_server REST handlers are reused unchanged.
-        "esphome/components/web_server_xr806/web_server_xr806.cpp",
-        "esphome/components/web_server_xr806/web_server_xr806.h",
         "esphome/components/http_request/httplib.h",
         # Global extern "C" esp_now_* linker symbols + shared C wire header;
         # neither can live in a C++ namespace.

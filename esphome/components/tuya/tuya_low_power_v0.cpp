@@ -15,8 +15,18 @@
 #ifdef USE_XR806_LOWPOWER
 #include "esphome/components/xr806/lowpower_policy.h"
 #endif
+#ifdef USE_XR806
+#include "esphome/components/uart/uart_component_xr806.h"
+#endif
 
 namespace esphome::tuya {
+
+#ifdef USE_XR806
+// On XR806 every UART is the XR806 backend, which can change its baud rate at run time.
+static uart::XR806UARTComponent *xr806_uart(uart::UARTComponent *parent) {
+  return static_cast<uart::XR806UARTComponent *>(parent);
+}
+#endif
 
 static const char *const LP_TAG = "tuya.low_power_v0";
 static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
@@ -59,7 +69,7 @@ void Tuya::setup_low_power_() {
 #ifdef USE_XR806
     // A wrong candidate rate produces expected LSR framing errors. The
     // physical UART driver must not latch a permanent fault during probes.
-    this->parent_->set_baud_probe_mode(true);
+    xr806_uart(this->parent_)->set_baud_probe_mode(true);
 #endif
     this->lp_autobaud_.start(this->parent_->get_baud_rate());
   } else {
@@ -153,7 +163,7 @@ void Tuya::handle_low_power_frame_(uint8_t command, uint8_t version, const uint8
 #ifdef USE_XR806
     // The accepted CMD01 packet was checksum-validated and matches this rate.
     // From now on, any hardware framing/overrun error is a real sticky fault.
-    this->parent_->set_baud_probe_mode(false);
+    xr806_uart(this->parent_)->set_baud_probe_mode(false);
 #endif
     ESP_LOGI(LP_TAG, "Tuya low_power_v0 baud locked: %u", static_cast<unsigned>(this->lp_autobaud_.baud()));
   }
@@ -294,7 +304,7 @@ void Tuya::poll_low_power_autobaud_() {
   const uint32_t baud = this->lp_autobaud_.baud();
   // This is a synchronous, bounded HAL reconfiguration, not a busy-wait
   // through the 500 ms window. The UART backend drains TX and clears stale RX.
-  if (this->parent_ == nullptr || !this->parent_->reconfigure_baud_rate(baud)) {
+  if (this->parent_ == nullptr || !xr806_uart(this->parent_)->reconfigure_baud_rate(baud)) {
     ESP_LOGE(LP_TAG, "Unable to configure MCU UART for %u baud", static_cast<unsigned>(baud));
     this->lp_autobaud_.stop();
     this->init_failed_ = true;

@@ -10,7 +10,6 @@
 #include "esphome/core/hal.h"
 #include "esphome/components/web_server_idf/web_server_idf.h"
 #elif defined(USE_XR806)
-#include "esphome/core/component.h"
 #include "esphome/components/web_server_xr806/web_server_xr806.h"
 #else
 #include <ESPAsyncWebServer.h>
@@ -43,11 +42,6 @@ class MiddlewareHandler : public AsyncWebHandler {
     next_->handleBody(request, data, len, index, total);
   }
   bool isRequestHandlerTrivial() const override { return next_->isRequestHandlerTrivial(); }
-#ifdef USE_XR806
-  // The shared server owns middleware wrappers, but the wrapped SSE handler
-  // owns detached TCP sockets. Forward close notifications before freeing sockets.
-  void onServerStop() override { next_->onServerStop(); }
-#endif
 
  protected:
   AsyncWebHandler *next_;
@@ -96,11 +90,7 @@ class GuardMiddlewareHandler : public MiddlewareHandler {
 
 }  // namespace internal
 
-class WebServerBase final
-#ifdef USE_XR806
-    : public Component
-#endif
-{
+class WebServerBase final {
  public:
   // The AsyncWebServer is created once and intentionally never deleted: on Arduino
   // platforms ESPAsyncWebServer owns its registered handlers, so destroying it would
@@ -126,13 +116,6 @@ class WebServerBase final
     for (auto *handler : this->handlers_)
       this->server_->addHandler(handler);
   }
-#ifdef USE_XR806
-  // Poll the lwIP HTTP transport on the normal ESPHome main loop.
-  void loop() override {
-    if (this->initialized_ != 0 && this->server_ != nullptr)
-      this->server_->loop();
-  }
-#endif
   void deinit() {
     if (this->initialized_ == 0)
       return;  // unbalanced deinit()

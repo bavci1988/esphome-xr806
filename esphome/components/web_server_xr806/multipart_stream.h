@@ -49,78 +49,79 @@ class MultipartStream {
   MultipartStream(std::string boundary, size_t total)
       : boundary_(std::move(boundary)),
         total_(total),
-        first_line_("--" + boundary_ + "\r\n"),
-        closing_("\r\n--" + boundary_ + "--") {}
+        first_line_("--" + this->boundary_ + "\r\n"),
+        closing_("\r\n--" + this->boundary_ + "--") {}
 
   bool feed(const uint8_t *data, size_t size, const Sink &sink) {
-    if (failed_ || done_ || data == nullptr || size > total_ - received_)
+    if (this->failed_ || this->done_ || data == nullptr || size > this->total_ - this->received_)
       return this->fail_();
     for (size_t i = 0; i < size; ++i) {
-      ++received_;
-      buffer_.push_back(static_cast<char>(data[i]));
-      if (phase_ == Phase::FIRST_LINE) {
-        if (buffer_.size() > first_line_.size() || !first_line_.starts_with(buffer_))
+      ++this->received_;
+      this->buffer_.push_back(static_cast<char>(data[i]));
+      if (this->phase_ == Phase::FIRST_LINE) {
+        if (this->buffer_.size() > this->first_line_.size() || !this->first_line_.starts_with(this->buffer_))
           return this->fail_();
-        if (buffer_.size() == first_line_.size()) {
-          buffer_.clear();
-          phase_ = Phase::HEADERS;
+        if (this->buffer_.size() == this->first_line_.size()) {
+          this->buffer_.clear();
+          this->phase_ = Phase::HEADERS;
         }
-      } else if (phase_ == Phase::HEADERS) {
-        if (buffer_.size() > 1024)
+      } else if (this->phase_ == Phase::HEADERS) {
+        if (this->buffer_.size() > 1024)
           return this->fail_();
-        if (buffer_.ends_with("\r\n\r\n")) {
+        if (this->buffer_.ends_with("\r\n\r\n")) {
           if (!this->validate_headers_())
             return this->fail_();
-          buffer_.clear();
-          phase_ = Phase::BODY;
+          this->buffer_.clear();
+          this->phase_ = Phase::BODY;
         }
-      } else if (phase_ == Phase::BODY) {
+      } else if (this->phase_ == Phase::BODY) {
         // Retain the maximum possible delimiter suffix; stream everything
         // else in small blocks without buffering the entire XZ firmware.
-        const size_t keep = closing_.size() + 2;
-        if (buffer_.size() > keep + 1024) {
-          const size_t output = buffer_.size() - keep;
-          if (!sink(reinterpret_cast<uint8_t *>(buffer_.data()), output, false))
+        const size_t keep = this->closing_.size() + 2;
+        if (this->buffer_.size() > keep + 1024) {
+          const size_t output = this->buffer_.size() - keep;
+          if (!sink(reinterpret_cast<uint8_t *>(this->buffer_.data()), output, false))
             return this->fail_();
-          file_bytes_ += output;
-          buffer_.erase(0, output);
+          this->file_bytes_ += output;
+          this->buffer_.erase(0, output);
         }
       }
     }
-    if (received_ != total_)
+    if (this->received_ != this->total_)
       return true;
-    if (phase_ != Phase::BODY)
+    if (this->phase_ != Phase::BODY)
       return this->fail_();
-    size_t trailer = closing_.size();
-    if (buffer_.ends_with("\r\n"))
+    size_t trailer = this->closing_.size();
+    if (this->buffer_.ends_with("\r\n"))
       trailer += 2;
-    if (buffer_.size() < trailer || buffer_.substr(buffer_.size() - trailer, closing_.size()) != closing_)
+    if (this->buffer_.size() < trailer ||
+        this->buffer_.substr(this->buffer_.size() - trailer, this->closing_.size()) != this->closing_)
       return this->fail_();
-    const size_t tail = buffer_.size() - trailer;
-    if (file_bytes_ + tail == 0)
+    const size_t tail = this->buffer_.size() - trailer;
+    if (this->file_bytes_ + tail == 0)
       return this->fail_();
-    if (tail && !sink(reinterpret_cast<uint8_t *>(buffer_.data()), tail, false))
+    if (tail && !sink(reinterpret_cast<uint8_t *>(this->buffer_.data()), tail, false))
       return this->fail_();
-    file_bytes_ += tail;
-    buffer_.clear();
+    this->file_bytes_ += tail;
+    this->buffer_.clear();
     // The caller's end() now validates XZ/image and commits the alternate
     // firmware slot. This marker must never precede complete HTTP framing.
     if (!sink(nullptr, 0, true))
       return this->fail_();
-    phase_ = Phase::DONE;
-    done_ = true;
+    this->phase_ = Phase::DONE;
+    this->done_ = true;
     return true;
   }
 
-  bool complete() const { return done_ && received_ == total_; }
-  bool failed() const { return failed_; }
-  size_t file_bytes() const { return file_bytes_; }
-  const std::string &filename() const { return filename_; }
+  bool complete() const { return this->done_ && this->received_ == this->total_; }
+  bool failed() const { return this->failed_; }
+  size_t file_bytes() const { return this->file_bytes_; }
+  const std::string &filename() const { return this->filename_; }
 
  private:
   enum class Phase : uint8_t { FIRST_LINE, HEADERS, BODY, DONE };
   bool fail_() {
-    failed_ = true;
+    this->failed_ = true;
     return false;
   }
 
@@ -128,7 +129,7 @@ class MultipartStream {
     // Strict single-part upload. No unbounded embedded form fields, nested
     // multipart, filenames with directories, or Content-Transfer-Encoding.
     constexpr char disposition_header[] = "Content-Disposition: form-data;";
-    const std::string &headers = buffer_;
+    const std::string &headers = this->buffer_;
     const size_t first = headers.find("\r\n");
     if (first == std::string::npos || !headers.starts_with(disposition_header))
       return false;
@@ -144,8 +145,8 @@ class MultipartStream {
       return false;
     // The name is only logged. Browsers rename repeated downloads ("firmware (1).ota"),
     // so allow any printable text and reject only control characters.
-    filename_ = std::string(disposition.substr(start, end - start));
-    for (char c : filename_) {
+    this->filename_ = std::string(disposition.substr(start, end - start));
+    for (char c : this->filename_) {
       const auto ch = static_cast<unsigned char>(c);
       if (ch < 0x20 || ch == 0x7F)
         return false;

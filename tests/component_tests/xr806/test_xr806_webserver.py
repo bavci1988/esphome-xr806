@@ -9,6 +9,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
+from esphome.config import read_config
 from esphome.core import CORE
 
 
@@ -86,3 +89,12 @@ def test_captive_portal_credentials_are_persisted(
     generated = generate_main(component_config_path("web_server_captive.yaml"))
     assert "USE_PREFERENCE_KEY_LOOKUP" in _defines()
     assert "preferences::IntervalSyncer" in generated
+
+
+def test_digest_authentication_is_rejected(
+    component_config_path: Callable[[str], Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    CORE.config_path = component_config_path("web_server_digest.yaml")
+    assert read_config({}) is None
+    assert "supports Basic authentication only" in capsys.readouterr().out
