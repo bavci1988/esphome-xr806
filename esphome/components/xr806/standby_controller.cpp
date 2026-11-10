@@ -29,11 +29,33 @@ extern "C" {
 #include "pm/pm.h"
 }
 
+#ifdef USE_LOGGER
+#include "esphome/components/logger/logger.h"
+extern "C" {
+#include "driver/chip/hal_uart.h"
+}
+#endif
+
 namespace esphome::xr806 {
 
 ESPHOME_LOG_TAG(TAG, "xr806.standby");
 
 static XR806StandbyController *active_controller = nullptr;
+
+#ifdef USE_LOGGER
+// The SDK UART suspend does not wait for the TX FIFO, so the last log line would be cut off.
+// 64 bytes at 9600 baud take about 67 ms.
+static constexpr uint32_t LOG_DRAIN_TIMEOUT_MS = 80;
+
+static void drain_log_uart() {
+  if (logger::global_logger == nullptr || logger::global_logger->get_baud_rate() == 0)
+    return;
+  UART_T *uart = HAL_UART_GetInstance(UART2_ID);
+  const uint32_t start = millis();
+  while (!HAL_UART_IsTxEmpty(uart) && millis() - start < LOG_DRAIN_TIMEOUT_MS) {
+  }
+}
+#endif
 
 XR806StandbyController *standby_controller() { return active_controller; }
 
@@ -265,6 +287,9 @@ void XR806StandbyController::attempt_standby_() {
   if (!p.commit_valid(commit_epoch))
     goto abort;
 
+#ifdef USE_LOGGER
+  drain_log_uart();
+#endif
   HAL_Wakeup_SetEvent(0);
   pm_called = true;
   // '500' is the SDK wakelock-touch deadline, NOT an upper bound on the
