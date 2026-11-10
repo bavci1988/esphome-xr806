@@ -15,6 +15,7 @@
 #ifdef USE_CAPTIVE_PORTAL
 #include "esphome/components/captive_portal/captive_index.h"
 #include "esphome/core/application.h"
+#include "esphome/core/helpers.h"
 #endif
 
 extern "C" {
@@ -30,7 +31,7 @@ namespace esphome::xr806 {
 ESPHOME_LOG_TAG(TAG, "xr806_http");
 
 static constexpr uint32_t RETRY_MS = 5000;
-static constexpr uint32_t CLIENT_TIMEOUT_MS = 5000;
+static constexpr uint32_t CLIENT_TIMEOUT_MS = 10000;
 
 // Keep the page standalone. The XR806 has no Arduino web framework.
 // This is deliberately limited to Wi-Fi provisioning and HTTP diagnostics.
@@ -275,7 +276,10 @@ void XR806HTTPServer::prepare_request_() {
       // No concurrent scanning on XR806's exclusive AP radio. The user can
       // manually enter an SSID on the standard portal page.
       char json[256];
-      const int bytes = snprintf(json, sizeof(json), "{\"name\":\"%s\",\"aps\":[]}", App.get_name().c_str());
+      char mac[MAC_ADDRESS_PRETTY_BUFFER_SIZE];
+      const char *address = get_mac_address_pretty_into_buffer(mac);
+      const int bytes = snprintf(json, sizeof(json), "{\"mac\":\"%s\",\"name\":\"%s\",\"aps\":[{}]}",
+                                 address, App.get_name().c_str());
       if (bytes <= 0 || static_cast<size_t>(bytes) >= sizeof(json)) {
         this->send_response_(400, "text/plain", "Invalid device name");
       } else {
@@ -362,6 +366,7 @@ void XR806HTTPServer::handle_client_() {
     } else {
       const int received = lwip_recv(this->client_fd_, this->request_ + this->request_used_, max_read, MSG_DONTWAIT);
       if (received > 0) {
+        this->client_started_ = millis();  // idle timeout, not total transfer time
         this->request_used_ += static_cast<size_t>(received);
         this->request_[this->request_used_] = '\0';
         this->prepare_request_();
@@ -381,8 +386,10 @@ void XR806HTTPServer::handle_client_() {
       this->close_client_();
       return;
     }
-    if (sent > 0)
+    if (sent > 0) {
+      this->client_started_ = millis();
       this->response_sent_ += static_cast<size_t>(sent);
+    }
   }
   if (this->response_sent_ == this->response_len_ && this->static_body_ != nullptr &&
       this->static_body_sent_ < this->static_body_len_) {
@@ -393,8 +400,10 @@ void XR806HTTPServer::handle_client_() {
       this->close_client_();
       return;
     }
-    if (body_sent > 0)
+    if (body_sent > 0) {
+      this->client_started_ = millis();
       this->static_body_sent_ += static_cast<size_t>(body_sent);
+    }
   }
   if (this->response_sent_ == this->response_len_ && this->static_body_sent_ == this->static_body_len_) {
     // Close the HTTP response before changing the radio mode.
