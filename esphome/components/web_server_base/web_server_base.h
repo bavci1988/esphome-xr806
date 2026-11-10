@@ -44,6 +44,11 @@ class MiddlewareHandler : public AsyncWebHandler {
   }
   bool isRequestHandlerTrivial() const override { return next_->isRequestHandlerTrivial(); }
 #ifdef USE_XR806
+  // The shared server owns middleware wrappers, but the wrapped SSE handler
+  // owns detached TCP sockets. Forward close notifications before freeing sockets.
+  void onServerStop() override { next_->onServerStop(); }
+#endif
+#ifdef USE_XR806
   void onServerStop() override { next_->onServerStop(); }
 #endif
 
