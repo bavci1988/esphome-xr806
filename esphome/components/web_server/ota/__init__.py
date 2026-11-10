@@ -28,6 +28,11 @@ WebServerOTAComponent = web_server_ns.class_("WebServerOTAComponent", OTACompone
 
 
 def _web_server_ota_final_validate(config: ConfigType) -> None:
+    """Merge multiple web_server OTA instances into one.
+
+    Multiple web_server OTA instances register duplicate HTTP handlers for /update,
+    causing undefined behavior. Merge them into a single instance.
+    """
     if CORE.is_xr806:
         # No validated multipart upload, verified flash writer or interrupted-
         # update recovery yet. Reject it rather than advertising broken OTA.
@@ -35,11 +40,6 @@ def _web_server_ota_final_validate(config: ConfigType) -> None:
             "ota: - platform: web_server is not available on XR806: "
             "the HTTP upload and safe flash writer are not implemented"
         )
-    """Merge multiple web_server OTA instances into one.
-
-    Multiple web_server OTA instances register duplicate HTTP handlers for /update,
-    causing undefined behavior. Merge them into a single instance.
-    """
     full_conf = fv.full_config.get()
     ota_confs = full_conf.get(OTA_DOMAIN, [])
 
