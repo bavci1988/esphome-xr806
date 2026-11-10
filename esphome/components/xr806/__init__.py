@@ -319,6 +319,19 @@ async def to_code(config: ConfigType) -> None:
             await cg.register_component(standby_wlan, {})
 
 
+def compiler_build_flags(build_flags: set[str]) -> list[str]:
+    """Compiler flags from cg.add_build_flag(), such as the log level.
+
+    The vendor Makefile does not see PlatformIO build flags, so these are passed to
+    the Make adapter. Linker flags do not apply to its compile rules.
+    """
+    return sorted(
+        flag
+        for flag in build_flags
+        if flag.startswith(("-D", "-W", "-f")) and not flag.startswith("-Wl,")
+    )
+
+
 def run_compile(args: object, config: ConfigType) -> bool:
     """Build an XR806 AWIH image using the XRadio vendor SDK."""
     import shutil
@@ -411,6 +424,16 @@ def run_compile(args: object, config: ConfigType) -> bool:
         "XR806_IMAGE_CFG": str(fw_dir / "image.cfg"),
         "XR806_AWIH": str(image),
     }
+
+    import shlex
+
+    extra_flags = shlex.join(compiler_build_flags(CORE.build_flags))
+    obj.mkdir(parents=True, exist_ok=True)
+    flags_stamp = obj / "esphome_build_flags.txt"
+    if not flags_stamp.is_file() or flags_stamp.read_text() != extra_flags:
+        flags_stamp.write_text(extra_flags)
+    variables["XR806_EXTRA_CXXFLAGS"] = extra_flags
+    variables["XR806_FLAGS_STAMP"] = str(flags_stamp)
 
     # Plain esphome compile owns crypto builds.
     import re

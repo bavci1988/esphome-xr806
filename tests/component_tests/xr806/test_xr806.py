@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
+from esphome.components.xr806 import compiler_build_flags
+from esphome.config import read_config
 from esphome.core import CORE
 
 
@@ -43,3 +47,39 @@ def test_ota_platform(
     generate_main(component_config_path("ota.yaml"))
 
     assert {"USE_OTA", "USE_WIFI", "USE_XR806"} <= defines()
+
+
+def test_logger_uses_the_console_uart(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("logger.yaml"))
+
+    assert "USE_LOGGER" in defines()
+    assert "set_uart_selection(logger::UART_SELECTION_UART2)" in generated
+    assert "-DESPHOME_LOG_LEVEL=ESPHOME_LOG_LEVEL_DEBUG" in CORE.build_flags
+
+
+def test_logger_rejects_the_mcu_uart(
+    component_config_path: Callable[[str], Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    CORE.config_path = component_config_path("logger_uart0.yaml")
+
+    assert read_config({}) is None
+    assert "UART2" in capsys.readouterr().out
+
+
+def test_compiler_build_flags_reach_the_make_adapter() -> None:
+    flags = {
+        "-DESPHOME_LOG_LEVEL=ESPHOME_LOG_LEVEL_DEBUG",
+        "-Wno-sign-compare",
+        "-fno-exceptions",
+        "-Wl,--wrap=x",
+    }
+
+    assert compiler_build_flags(flags) == [
+        "-DESPHOME_LOG_LEVEL=ESPHOME_LOG_LEVEL_DEBUG",
+        "-Wno-sign-compare",
+        "-fno-exceptions",
+    ]

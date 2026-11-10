@@ -59,6 +59,11 @@ $(XR806_OUTPUT): $(XR806_SDK_OBJECTS) $(XR806_ESPHOME_MAIN) $(XR806_ESPHOME_OBJE
 
 XR806_SRC ?= $(error XR806_SRC must be provided by ESPHome)
 XR806_DEFINES := $(XR806_SRC)/esphome/core/defines.h
+# Compiler flags from cg.add_build_flag(), such as the log level. The stamp file changes
+# only when they do, so a changed flag rebuilds every object that it affects.
+XR806_EXTRA_CXXFLAGS ?=
+XR806_FLAGS_STAMP ?=
+XR806_DEPS := $(XR806_DEFINES) $(XR806_FLAGS_STAMP)
 XR806_CXX ?= arm-none-eabi-g++
 
 XR806_CXXFLAGS := \
@@ -86,7 +91,8 @@ XR806_CXXFLAGS := \
     -I$(ROOT_PATH)/include/driver/cmsis \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1 \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1/portable/GCC/ARM_CM33_NTZ \
-    -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1/portable/GCC/ARM_CM33_NTZ/non_secure
+    -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1/portable/GCC/ARM_CM33_NTZ/non_secure \
+    $(XR806_EXTRA_CXXFLAGS)
 
 # Archives supplied by ESPHome run_compile.
 ifneq ($(strip $(XR806_NOISE_C_ARCHIVE)),)
@@ -100,7 +106,7 @@ LIBRARIES += $(XR806_NOISE_C_ARCHIVE) $(XR806_SODIUM_ARCHIVE) -lm -lc -lgcc
 endif
 
 define XR806_COMPILE_CPP
-$(XR806_OBJDIR)/$(1).o: $(2) $(XR806_DEFINES)
+$(XR806_OBJDIR)/$(1).o: $(2) $(XR806_DEPS)
 >@mkdir -p $$(@D)
 >$$(XR806_CXX) $$(XR806_CXXFLAGS) -c $$< -o $$@
 endef
@@ -124,7 +130,7 @@ $(eval $(call XR806_COMPILE_CPP,xr_socket_compat,$(XR806_SRC)/esphome/components
 XR806_SOCKET_SHIM := $(XR806_SRC)/esphome/components/xr806/socket_compat.h
 
 define XR806_COMPILE_SOCKET_CPP
-$(XR806_OBJDIR)/$(1).o: $(2) $(XR806_DEFINES) $(XR806_SOCKET_SHIM)
+$(XR806_OBJDIR)/$(1).o: $(2) $(XR806_DEPS) $(XR806_SOCKET_SHIM)
 >@mkdir -p $$(@D)
 >$$(XR806_CXX) $$(XR806_CXXFLAGS) -include $$(XR806_SOCKET_SHIM) -c $$< -o $$@
 endef
@@ -250,7 +256,7 @@ XR806_ESPHOME_OBJECTS += $(XR806_AUTO_COMPONENT_OBJECTS)
 
 $(XR806_OUTPUT): $(XR806_AUTO_COMPONENT_OBJECTS)
 
-$(XR806_OBJDIR)/auto/components/%.o: $(XR806_SRC)/esphome/components/%.cpp $(XR806_DEFINES)
+$(XR806_OBJDIR)/auto/components/%.o: $(XR806_SRC)/esphome/components/%.cpp $(XR806_DEPS)
 >@mkdir -p $(@D)
 >$(XR806_CXX) $(XR806_CXXFLAGS) -c $< -o $@
 
@@ -263,7 +269,7 @@ ifneq ($(wildcard $(XR806_OTA_INFLATE_C)),)
 XR806_OTA_INFLATE_OBJ := $(XR806_OBJDIR)/xr_ota_inflate.o
 XR806_ESPHOME_OBJECTS += $(XR806_OTA_INFLATE_OBJ)
 $(XR806_OUTPUT): $(XR806_OTA_INFLATE_OBJ)
-$(XR806_OTA_INFLATE_OBJ): $(XR806_OTA_INFLATE_C) $(XR806_DEFINES)
+$(XR806_OTA_INFLATE_OBJ): $(XR806_OTA_INFLATE_C) $(XR806_DEPS)
 >@mkdir -p $(@D)
 >$(CC) $(CC_FLAGS) $(CC_SYMBOLS) $(INCLUDE_PATHS) \
 >    -I$(XR806_SRC) -include $(XR806_DEFINES) -MMD -MP -c $< -o $@
