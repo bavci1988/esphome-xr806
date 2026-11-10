@@ -68,6 +68,16 @@ def test_filter_drops_components_with_no_cpp_or_h(tmp_path: Path) -> None:
     assert result == []
 
 
+def test_filter_drops_foreign_target_platforms(tmp_path: Path) -> None:
+    for name in ("xr806", "host"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "x_test.cpp").write_text("")
+
+    result = build_helpers.filter_components_with_files(["xr806", "host"], tmp_path)
+
+    assert result == ["host"]
+
+
 # ---------------------------------------------------------------------------
 # get_platform_components
 # ---------------------------------------------------------------------------
