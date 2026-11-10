@@ -6,9 +6,9 @@ The stock ESPHome safe_mode component uses the XR806 FDCM preferences backend.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from pathlib import Path
+import re
 
 import pytest
 
