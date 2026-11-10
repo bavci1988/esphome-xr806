@@ -277,7 +277,6 @@ TEST(XR806PreferenceJournal, ClearCommitsEmptyAndErasesOldSlot) {
   ASSERT_TRUE(r.used() == 0);
 }
 
-
 TEST(XR806PreferenceJournal, SafeModeCounterAndManualMarkerSurviveReboots) {
   // Mirrors RTC_KEY and ENTER_SAFE_MODE_MAGIC in safe_mode/safe_mode.h.
   // XR806 deliberately stores this "RTC" preference in flash.
@@ -296,8 +295,7 @@ TEST(XR806PreferenceJournal, SafeModeCounterAndManualMarkerSurviveReboots) {
     if (boot > 1)
       ASSERT_TRUE(j.get(safe_mode_key, reinterpret_cast<uint8_t *>(&previous), sizeof(previous)));
     ASSERT_EQ(previous, boot - 1);
-    ASSERT_EQ(j.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&boot), sizeof(boot)),
-              Put::PUT_RESULT_CHANGED);
+    ASSERT_EQ(j.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&boot), sizeof(boot)), Put::PUT_RESULT_CHANGED);
     ASSERT_TRUE(j.commit(flash));
   }
 
@@ -316,7 +314,7 @@ TEST(XR806PreferenceJournal, SafeModeCounterAndManualMarkerSurviveReboots) {
   ASSERT_TRUE(pending.get(safe_mode_key, reinterpret_cast<uint8_t *>(&count), sizeof(count)));
   ASSERT_EQ(count, manual_marker);
 
-  // Marking a boot successful saves zero in RAM and persists at the next sync.
+  // Simulate the success path: zero is staged in RAM and persisted at the next sync.
   const uint32_t clear = 0;
   ASSERT_EQ(pending.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&clear), sizeof(clear)),
             Put::PUT_RESULT_CHANGED);
