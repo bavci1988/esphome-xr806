@@ -19,6 +19,10 @@ class MultipartStream {
   using Sink = std::function<bool(uint8_t *data, size_t size, bool final)>;
 
   static std::string boundary_from_content_type(std::string_view value) {
+    // Never treat CR/LF as a valid Content-Type parameter delimiter: accepting
+    // a truncated boundary enables request smuggling across HTTP parsers.
+    if (value.find_first_of("\r\n") != std::string_view::npos)
+      return {};
     constexpr std::string_view PREFIX = "multipart/form-data;";
     if (value.size() < PREFIX.size() || value.substr(0, PREFIX.size()) != PREFIX)
       return {};
