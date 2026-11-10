@@ -35,7 +35,7 @@ new credentials.
   `wlan_ap_disable()` and `wlan_ap_sta_num()`.
 - XRadio vendor `net_ctrl.c`: DHCP server starts on the AP network-up event.
   Patched `udhcpd` now supplies 5 addresses in the AP subnet (normally
-  `192.168.176.101` through `192.168.176.105`). DHCP advertises the AP
+  `192.168.4.101` through `192.168.4.105`). DHCP advertises the AP
   interface itself as the DNS server.
 - Vendor DHCP's own DNS listener is disabled to avoid competing for UDP/53.
 - `xr806/http_portal.cpp`: bounded, nonblocking native lwIP socket server
@@ -58,9 +58,9 @@ new credentials.
    before replacing it with the fresh pinned dependency.
 2. Confirm on an isolated XR806/WXU test device that the AP is visible and
    the phone receives a DHCP lease, gateway and DNS server.
-3. Connect the phone, then request `http://192.168.176.1/health`.
+3. Connect the phone, then request `http://192.168.4.1/health`.
    Expect `{"ok":true,"platform":"xr806"}`.
-4. Visit `http://192.168.176.1/`, or make an arbitrary DNS A request
+4. Visit `http://192.168.4.1/`, or make an arbitrary DNS A request
    through the AP resolver. Confirm captive DNS points to the AP IP.
 5. POST a valid SSID/password. Check the response is sent before
    fallback AP stops and STA reconnect begins; repeat with interrupted
