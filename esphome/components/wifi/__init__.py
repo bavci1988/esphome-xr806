@@ -580,7 +580,7 @@ def _validate_xr806(config: ConfigType) -> ConfigType:
         return config
     if CONF_AP in config and CONF_MANUAL_IP in config[CONF_AP]:
         raise cv.Invalid(
-            "XR806 SoftAP currently uses the vendor's 192.168.176.1/24 address",
+            "XR806 SoftAP IP is sourced from vendor sysinfo (default 192.168.4.1/24)",
             path=[CONF_AP, CONF_MANUAL_IP],
         )
     if CONF_MANUAL_IP in config or any(
