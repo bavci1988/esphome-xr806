@@ -47,8 +47,10 @@ class MultipartStream {
   }
 
   MultipartStream(std::string boundary, size_t total)
-      : boundary_(std::move(boundary)), total_(total),
-        first_line_("--" + boundary_ + "\r\n"), closing_("\r\n--" + boundary_ + "--") {}
+      : boundary_(std::move(boundary)),
+        total_(total),
+        first_line_("--" + boundary_ + "\r\n"),
+        closing_("\r\n--" + boundary_ + "--") {}
 
   bool feed(const uint8_t *data, size_t size, const Sink &sink) {
     if (failed_ || done_ || data == nullptr || size > total_ - received_)
@@ -92,8 +94,7 @@ class MultipartStream {
     size_t trailer = closing_.size();
     if (buffer_.ends_with("\r\n"))
       trailer += 2;
-    if (buffer_.size() < trailer ||
-        buffer_.substr(buffer_.size() - trailer, closing_.size()) != closing_)
+    if (buffer_.size() < trailer || buffer_.substr(buffer_.size() - trailer, closing_.size()) != closing_)
       return this->fail_();
     const size_t tail = buffer_.size() - trailer;
     if (file_bytes_ + tail == 0)
