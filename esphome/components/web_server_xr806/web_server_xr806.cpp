@@ -111,7 +111,7 @@ AsyncWebServerRequest::AsyncWebServerRequest(http_method method, std::string uri
       headers_(std::move(headers)),
       socket_(socket) {}
 
-std::string AsyncWebServerRequest::decode_(const std::string &s) {
+std::string AsyncWebServerRequest::decode(const std::string &s) {
   std::string out;
   out.reserve(s.size());
   auto digit = [](char c) -> int {
@@ -139,7 +139,7 @@ std::string AsyncWebServerRequest::decode_(const std::string &s) {
   return out;
 }
 StringRef AsyncWebServerRequest::url_to(std::span<char, URL_BUF_SIZE> buf) const {
-  const std::string decoded = decode_(this->uri_);
+  const std::string decoded = decode(this->uri_);
   const size_t n = std::min(decoded.size(), buf.size() - 1);
   std::memcpy(buf.data(), decoded.data(), n);
   buf[n] = 0;
@@ -163,15 +163,15 @@ bool AsyncWebServerRequest::hasHeader(const char *name) const {
       return true;
   return false;
 }
-bool AsyncWebServerRequest::find_arg_(const std::string &query, const char *name, std::string *out) {
+bool AsyncWebServerRequest::find_arg(const std::string &query, const char *name, std::string *out) {
   for (size_t pos = 0; pos < query.size();) {
     const size_t end = query.find('&', pos);
     const size_t finish = end == std::string::npos ? query.size() : end;
     const size_t eq = query.find('=', pos);
     const size_t key_end = eq == std::string::npos || eq >= finish ? finish : eq;
-    if (decode_(query.substr(pos, key_end - pos)) == name) {
+    if (decode(query.substr(pos, key_end - pos)) == name) {
       if (out != nullptr)
-        *out = key_end == finish ? "" : decode_(query.substr(key_end + 1, finish - key_end - 1));
+        *out = key_end == finish ? "" : decode(query.substr(key_end + 1, finish - key_end - 1));
       return true;
     }
     pos = finish + 1;
@@ -179,11 +179,11 @@ bool AsyncWebServerRequest::find_arg_(const std::string &query, const char *name
   return false;
 }
 bool AsyncWebServerRequest::hasArg(const char *name) const {
-  return find_arg_(this->query_, name, nullptr) || find_arg_(this->body_, name, nullptr);
+  return find_arg(this->query_, name, nullptr) || find_arg(this->body_, name, nullptr);
 }
 std::string AsyncWebServerRequest::arg(const char *name) const {
   std::string val;
-  if (find_arg_(this->body_, name, &val) || find_arg_(this->query_, name, &val))
+  if (find_arg(this->body_, name, &val) || find_arg(this->query_, name, &val))
     return val;
   return {};
 }

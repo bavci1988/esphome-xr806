@@ -63,7 +63,7 @@ template<size_t SIZE> class PreferenceJournal {
     bool found = false;
     for (uint8_t slot = 0; slot < 2; slot++) {
       PreferenceSnapshotHeader header{};
-      if (!storage.read(slot, this->scratch_, SIZE) || !valid_(this->scratch_, &header))
+      if (!storage.read(slot, this->scratch_, SIZE) || !valid(this->scratch_, &header))
         continue;
       if (found && !preference_generation_newer(header.generation, this->generation_))
         continue;
@@ -78,7 +78,7 @@ template<size_t SIZE> class PreferenceJournal {
 
   bool get(uint32_t key, uint8_t *dest, size_t len) const {
     const size_t offset = this->find_(key);
-    if (offset == NOT_FOUND || record_len_(this->data_ + offset) != len)
+    if (offset == NOT_FOUND || record_len(this->data_ + offset) != len)
       return false;
     std::memcpy(dest, this->data_ + offset + RECORD_HEADER_SIZE, len);
     return true;
@@ -89,7 +89,7 @@ template<size_t SIZE> class PreferenceJournal {
     if (len == 0 || len > SIZE - HEADER_SIZE - RECORD_HEADER_SIZE)
       return PutResult::PUT_RESULT_FULL;
     const size_t existing = this->find_(key);
-    if (existing != NOT_FOUND && record_len_(this->data_ + existing) == len &&
+    if (existing != NOT_FOUND && record_len(this->data_ + existing) == len &&
         std::memcmp(this->data_ + existing + RECORD_HEADER_SIZE, src, len) == 0)
       return PutResult::PUT_RESULT_UNCHANGED;
 
@@ -98,7 +98,7 @@ template<size_t SIZE> class PreferenceJournal {
     size_t out = HEADER_SIZE;
     const size_t end = HEADER_SIZE + this->used_;
     for (size_t cursor = HEADER_SIZE; cursor < end;) {
-      const size_t bytes = RECORD_HEADER_SIZE + record_len_(this->data_ + cursor);
+      const size_t bytes = RECORD_HEADER_SIZE + record_len(this->data_ + cursor);
       if (cursor != existing) {
         std::memcpy(this->scratch_ + out, this->data_ + cursor, bytes);
         out += bytes;
@@ -158,7 +158,7 @@ template<size_t SIZE> class PreferenceJournal {
  protected:
   static constexpr size_t NOT_FOUND = SIZE;
 
-  static uint16_t record_len_(const uint8_t *record) {
+  static uint16_t record_len(const uint8_t *record) {
     uint16_t len;
     std::memcpy(&len, record + 4, sizeof(len));
     return len;
@@ -166,7 +166,7 @@ template<size_t SIZE> class PreferenceJournal {
 
   size_t find_(uint32_t key) const {
     const size_t end = HEADER_SIZE + this->used_;
-    for (size_t cursor = HEADER_SIZE; cursor < end; cursor += RECORD_HEADER_SIZE + record_len_(this->data_ + cursor)) {
+    for (size_t cursor = HEADER_SIZE; cursor < end; cursor += RECORD_HEADER_SIZE + record_len(this->data_ + cursor)) {
       uint32_t stored_key;
       std::memcpy(&stored_key, this->data_ + cursor, sizeof(stored_key));
       if (stored_key == key)
@@ -175,7 +175,7 @@ template<size_t SIZE> class PreferenceJournal {
     return NOT_FOUND;
   }
 
-  static bool valid_(const uint8_t *data, PreferenceSnapshotHeader *out) {
+  static bool valid(const uint8_t *data, PreferenceSnapshotHeader *out) {
     PreferenceSnapshotHeader header;
     std::memcpy(&header, data, sizeof(header));
     if (header.magic != MAGIC || header.version != VERSION || header.used > SIZE - HEADER_SIZE)
@@ -186,7 +186,7 @@ template<size_t SIZE> class PreferenceJournal {
     while (cursor < end) {
       if (end - cursor < RECORD_HEADER_SIZE)
         return false;
-      const uint16_t len = record_len_(data + cursor);
+      const uint16_t len = record_len(data + cursor);
       if (len == 0 || len > end - cursor - RECORD_HEADER_SIZE)
         return false;
       cursor += RECORD_HEADER_SIZE + len;
