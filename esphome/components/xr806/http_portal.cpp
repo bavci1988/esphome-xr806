@@ -147,7 +147,9 @@ static bool parse_wifi_form(const char *data, size_t length, char ssid[33], char
 
 bool XR806HTTPServer::is_ap_active_() const {
   struct netif *nif = wlan_netif_get(WLAN_MODE_HOSTAP);
-  return nif != nullptr && wlan_netif_get_mode(nif) == WLAN_MODE_HOSTAP && netif_is_up(nif) && netif_is_link_up(nif) &&
+  // Some XRadio AP configurations report link_up only after the first
+  // client associates. The portal must already be available at that point.
+  return nif != nullptr && wlan_netif_get_mode(nif) == WLAN_MODE_HOSTAP && netif_is_up(nif) &&
          !ip4_addr_isany_val(*netif_ip4_addr(nif));
 }
 
@@ -467,7 +469,7 @@ void XR806HTTPServer::setup() { ESP_LOGI(TAG, "Native lwIP HTTP/DNS support enab
 
 void XR806HTTPServer::loop() {
   const uint32_t now = millis();
-  const bool ap = this->is_ap_active_();
+  const bool ap = this->portal_active_ && this->is_ap_active_();
   if (ap != this->ap_active_) {
     this->ap_active_ = ap;
     if (!ap) {
