@@ -43,7 +43,7 @@ static const char PAGE[] =
     "<label>Wi-Fi SSID <input name=\"ssid\" maxlength=\"32\" required></label><p>"
     "<label>Password <input type=\"password\" name=\"psk\" maxlength=\"63\"></label></p>"
     "<button type=\"submit\">Connect</button></form>"
-    "<p>Credentials are applied now but the current XR806 preferences backend does not retain them over power loss.</p>"
+    "<p>Wi-Fi settings use experimental flash-backed preferences; test reboot recovery before production use.</p>"
     "</body></html>";
 
 static int socket_nonblocking(int fd) {
@@ -300,7 +300,7 @@ void XR806HTTPServer::prepare_request_() {
                            this->pending_password_)) {
         this->send_response_(400, "text/plain", "Invalid SSID or password");
       } else {
-        this->send_response_(200, "text/plain", "Saved. Connecting...");
+        this->send_response_(200, "text/plain", "Wi-Fi settings received; attempting connection...");
         this->save_pending_ = true;
       }
 #endif
@@ -332,7 +332,7 @@ void XR806HTTPServer::prepare_request_() {
     return;
   }
   this->send_response_(200, "text/plain",
-                       "Wi-Fi settings applied. This XR806 build cannot yet persist them across a power cycle.");
+                       "Wi-Fi settings received. Experimental flash persistence; verify after reboot.");
   this->save_pending_ = true;
 }
 
