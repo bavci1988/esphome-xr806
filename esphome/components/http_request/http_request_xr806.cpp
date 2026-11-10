@@ -14,6 +14,7 @@
 extern "C" {
 #include "xr_config.h"
 #include "net/HTTPClient/HTTPCUsr_api.h"
+#include "mbedtls/base64.h"
 }
 // lwIP's POSIX socket names are function-like macros that would rename HttpContainer::read().
 #undef read
@@ -24,8 +25,50 @@ namespace esphome::http_request {
 
 ESPHOME_LOG_TAG(TAG, "http_request");
 
+// Responses not yet closed; only touched from the main loop.
+static uint8_t open_sessions = 0;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
 // Longest response header line that is read; longer ones end the search for that header.
 static constexpr size_t HEADER_LINE_MAX = 512;
+
+/// Decodes %XX escapes; invalid escapes are kept as they are.
+static std::string percent_decode(const std::string &in) {
+  std::string out;
+  out.reserve(in.size());
+  for (size_t i = 0; i < in.size(); i++) {
+    uint8_t byte;
+    if (in[i] == '%' && i + 2 < in.size() && parse_hex(in.c_str() + i + 1, 2, &byte, 1) == 2) {
+      out += static_cast<char>(byte);
+      i += 2;
+    } else {
+      out += in[i];
+    }
+  }
+  return out;
+}
+
+/// Returns url without "user:password@". The SDK client does not parse it, so when authorization is not null
+/// it receives the matching "Basic ..." header value (empty when the URL has no user information).
+static std::string strip_userinfo(const std::string &url, std::string *authorization) {
+  const size_t scheme_end = url.find("://");
+  if (scheme_end == std::string::npos)
+    return url;
+  const size_t host_start = scheme_end + 3;
+  const size_t authority_end = std::min(url.find_first_of("/?#", host_start), url.size());
+  const size_t at = url.rfind('@', authority_end);
+  if (at == std::string::npos || at < host_start)
+    return url;
+  if (authorization != nullptr) {
+    const std::string userinfo = percent_decode(url.substr(host_start, at - host_start));
+    std::string encoded(((userinfo.size() + 2) / 3) * 4 + 1, '\0');
+    size_t written = 0;
+    mbedtls_base64_encode(reinterpret_cast<unsigned char *>(&encoded[0]), encoded.size(), &written,
+                          reinterpret_cast<const unsigned char *>(userinfo.data()), userinfo.size());
+    encoded.resize(written);
+    *authorization = "Basic " + encoded;
+  }
+  return url.substr(0, host_start) + url.substr(at + 1);
+}
 
 /// Calls on_value with the value of every response header called name.
 template<typename F> static void for_each_header(uint32_t session, const char *name, F &&on_value) {
@@ -66,7 +109,8 @@ std::shared_ptr<HttpContainer> HttpRequestXR806::perform(const char *url, const 
       return nullptr;
     if (location.empty() || redirects >= this->redirect_limit_) {
       if (!is_success(container->status_code)) {
-        ESP_LOGE(TAG, "HTTP Request failed; URL: %s; Code: %d", current.c_str(), container->status_code);
+        ESP_LOGE(TAG, "HTTP Request failed; URL: %s; Code: %d", strip_userinfo(current, nullptr).c_str(),
+                 container->status_code);
         this->status_momentary_error(1000);
       }
       return container;
@@ -82,7 +126,7 @@ std::shared_ptr<HttpContainer> HttpRequestXR806::perform(const char *url, const 
     }
     if (container->status_code == HTTP_STATUS_SEE_OTHER)
       current_method = "GET";
-    ESP_LOGD(TAG, "Following redirect to %s", current.c_str());
+    ESP_LOGD(TAG, "Following redirect to %s", strip_userinfo(current, nullptr).c_str());
   }
 }
 
@@ -102,10 +146,19 @@ std::shared_ptr<HttpContainerXR806> HttpRequestXR806::perform_once_(
     verb = VerbHead;
   } else if (std::strcmp(method, "POST") == 0) {
     verb = VerbPost;
+  } else if (std::strcmp(method, "PUT") == 0) {
+    verb = VerbPut;
+  } else if (std::strcmp(method, "DELETE") == 0) {
+    verb = VerbDelete;
+  } else if (std::strcmp(method, "PATCH") == 0) {
+    verb = VerbPatch;
   } else {
-    ESP_LOGE(TAG, "HTTP method %s is not supported on XR806 (GET, HEAD and POST are)", method);
+    ESP_LOGE(TAG, "HTTP method %s is not supported", method);
     return nullptr;
   }
+
+  std::string authorization;
+  const std::string request_url = strip_userinfo(url, &authorization);
 
   auto container = std::make_shared<HttpContainerXR806>();
   container->set_parent(this);
@@ -121,25 +174,30 @@ std::shared_ptr<HttpContainerXR806> HttpRequestXR806::perform_once_(
     this->status_momentary_error(1000);
     return nullptr;
   }
+  open_sessions++;
   const uint32_t session = container->session_;
   HTTPClientSetVerb(session, verb);
   if (this->useragent_ != nullptr)
     HTTPClientAddRequestHeaders(session, const_cast<char *>("User-Agent"), const_cast<char *>(this->useragent_), FALSE);
+  if (!authorization.empty()) {
+    HTTPClientAddRequestHeaders(session, const_cast<char *>("Authorization"), const_cast<char *>(authorization.c_str()),
+                                FALSE);
+  }
   for (const auto &header : request_headers) {
     HTTPClientAddRequestHeaders(session, const_cast<char *>(header.name.c_str()),
                                 const_cast<char *>(header.value.c_str()), FALSE);
   }
 
-  const bool has_body = verb == VerbPost;
+  const bool has_body = HTTP_VERB_HAS_BODY(verb);
   App.feed_wdt();
-  UINT32 rc = HTTPClientSendRequest(session, const_cast<char *>(url.c_str()),
+  UINT32 rc = HTTPClientSendRequest(session, const_cast<char *>(request_url.c_str()),
                                     has_body ? const_cast<char *>(body.data()) : nullptr, has_body ? body.size() : 0,
                                     has_body ? TRUE : FALSE, container->timeout_s_, 0);
   if (rc == HTTP_CLIENT_SUCCESS)
     rc = HTTPClientRecvResponse(session, container->timeout_s_);
   App.feed_wdt();
   if (rc != HTTP_CLIENT_SUCCESS) {
-    ESP_LOGW(TAG, "HTTP Request failed; URL: %s; Error: %u", url.c_str(), static_cast<unsigned>(rc));
+    ESP_LOGW(TAG, "HTTP Request failed; URL: %s; Error: %u", request_url.c_str(), static_cast<unsigned>(rc));
     this->status_momentary_error(1000);
     container->end();
     return nullptr;
@@ -209,7 +267,10 @@ void HttpContainerXR806::end() {
     return;
   HTTPClientCloseRequest(&this->session_);
   this->session_ = 0;
+  open_sessions--;
 }
+
+bool HttpContainerXR806::any_open() { return open_sessions != 0; }
 
 }  // namespace esphome::http_request
 

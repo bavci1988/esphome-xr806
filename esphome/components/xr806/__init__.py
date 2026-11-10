@@ -227,6 +227,8 @@ async def to_code(config: ConfigType) -> None:
             domain in CORE.config for domain in ("web_server", "captive_portal")
         )
         cg.add(controller.set_no_http(not has_http))
+        if "http_request" in CORE.config:
+            cg.add_define("USE_XR806_STANDBY_HTTP_CLIENT")
         cg.add(controller.set_external_sync_required(cfg[CONF_REQUIRE_EXTERNAL_SYNC]))
         cg.add(controller.set_require_uart_participant("uart" in CORE.config))
         await cg.register_component(controller, cfg)

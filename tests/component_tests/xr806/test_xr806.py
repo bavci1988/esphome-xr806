@@ -131,6 +131,20 @@ def test_http_request_with_ota_and_update(
     assert 'ESPHOME_VARIANT="XR806"' in {str(define) for define in CORE.defines}
 
 
+def test_http_request_blocks_standby_and_sends_put(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("http_request_standby.yaml"))
+
+    assert {
+        "USE_XR806_STANDBY_CONTROLLER",
+        "USE_XR806_STANDBY_HTTP_CLIENT",
+    } <= defines()
+    assert '"PUT"' in generated
+    assert '"DELETE"' in generated
+
+
 def test_http_request_rejects_certificate_verification(
     component_config_path: Callable[[str], Path],
     capsys: pytest.CaptureFixture[str],
