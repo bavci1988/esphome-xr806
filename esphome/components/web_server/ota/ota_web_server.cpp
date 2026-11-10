@@ -16,7 +16,7 @@ bool WebServerOTAComponent::canHandle(AsyncWebServerRequest *request) const {
   if (request->method() != HTTP_POST)
     return false;
   // Check if this is an OTA update request
-#ifdef USE_ESP32
+#if defined(USE_ESP32) || defined(USE_XR806)
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
   bool is_ota_request = request->url_to(url_buf) == "/update";
 #else
@@ -62,7 +62,12 @@ void WebServerOTAComponent::report_ota_progress_(AsyncWebServerRequest *request)
 
 void WebServerOTAComponent::schedule_ota_reboot_() {
   ESP_LOGI(TAG, "OTA update successful!");
+  // XR806 must flush the HTTP response and FDCM before rebooting.
+#ifdef USE_XR806
+  this->set_timeout(2000, []() {
+#else
   this->set_timeout(100, []() {
+#endif
     ESP_LOGI(TAG, "Performing OTA reboot now");
     App.safe_reboot();
   });
