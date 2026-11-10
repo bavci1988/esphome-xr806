@@ -62,7 +62,18 @@ void Tuya::setup() {
 }
 
 void Tuya::loop() {
-  this->read_available([this](uint8_t b) { this->handle_char_(b); });
+  this->read_available([this](uint8_t b) {
+#ifdef USE_TUYA_LOW_POWER_V0
+    // The UART may discover an RX overflow while filling its ring. Drop
+    // this read chunk rather than accepting a partial/incorrect MCU frame.
+    if (this->is_low_power_() && this->check_low_power_uart_rx_errors_()) {
+      this->discard_available();
+      return false;
+    }
+#endif
+    this->handle_char_(b);
+    return true;
+  });
 #ifdef USE_TUYA_LOW_POWER_V0
   if (this->is_low_power_()) {
     this->loop_low_power_();

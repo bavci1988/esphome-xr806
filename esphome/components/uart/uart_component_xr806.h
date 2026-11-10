@@ -10,6 +10,9 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart_component.h"
+#ifdef USE_XR806_LOWPOWER
+#include "esphome/components/uart/uart_idle_guard.h"
+#endif
 
 extern "C" {
 #include "driver/chip/hal_uart.h"
@@ -37,6 +40,7 @@ class XR806UARTComponent final : public UARTComponent, public Component {
 
   /// False after a TX timeout or a failed reconfiguration; the fault is not cleared.
   bool is_connected() override { return this->initialized_ && !this->tx_fault_; }
+  uint32_t get_rx_error_count() const override { return this->rx_dropped_ + this->rx_line_errors_; }
 
   void write_array(const uint8_t *data, size_t len) override;
   bool peek_byte(uint8_t *data) override;
@@ -72,7 +76,7 @@ class XR806UARTComponent final : public UARTComponent, public Component {
 
   struct wakelock uart_pm_wakelock_{};
   bool uart_pm_wakelock_held_{false};
-  uint32_t last_uart_activity_ms_{0};
+  UARTIdleGuard idle_guard_{};
 #endif
 };
 
