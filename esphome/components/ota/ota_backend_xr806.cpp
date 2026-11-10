@@ -29,14 +29,16 @@ extern "C" {
 namespace esphome::ota {
 ESPHOME_LOG_TAG(TAG, "ota.xr806");
 static struct wakelock ota_native_wakelock = {};
-bool XR806OTABackend::session_open = false;            // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-bool XR806OTABackend::committed_until_reboot = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<bool> XR806OTABackend::session_open{false};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<bool> XR806OTABackend::committed_until_reboot{false};
 
 std::unique_ptr<XR806OTABackend> make_ota_backend() { return std::make_unique<XR806OTABackend>(); }
 
 void XR806OTABackend::release_lock_() {
   this->update_lock_.release();
-  session_open = false;
+  session_open.store(false, std::memory_order_release);
 }
 XR806OTABackend::~XR806OTABackend() { this->abort(); }
 
@@ -45,7 +47,7 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
     return OTA_RESPONSE_ERROR_UNSUPPORTED_OTA_TYPE;
   if (!this->update_lock_.try_acquire())
     return OTA_RESPONSE_ERROR_UPDATE_BUSY;
-  session_open = true;
+  session_open.store(true, std::memory_order_release);
   // A previous aborted transfer must not poison the next OTA attempt.
   this->received_ = 0;
   this->declared_ = 0;
@@ -232,8 +234,9 @@ OTAResponseTypes XR806OTABackend::end() {
   ota_push_stop();
   this->sdk_initialized_ = false;
   this->update_lock_.hold_until_reboot();
-  session_open = false;
-  committed_until_reboot = true;
+  // Set the commit first, so flash_busy() never sees neither flag in between.
+  committed_until_reboot.store(true, std::memory_order_release);
+  session_open.store(false, std::memory_order_release);
   // The wakelock is kept until the restart as well.
   if (!finished || !selected) {
     ESP_LOGE(TAG, "OTA commit incomplete (finish=%d, FDCM readback=%d); next boot state uncertain",

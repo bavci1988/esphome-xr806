@@ -5,6 +5,7 @@
 #include "esphome/components/xr806/ota_writer_geometry.h"
 #include "esphome/components/xr806/ota_writer_image.h"
 #include <cstddef>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 namespace esphome::ota {
@@ -19,7 +20,9 @@ class XR806OTABackend final {
   // ESPHome gzip/deflate is not XRadio's XZ OTA container.
   static constexpr bool supports_compression() { return false; }
   /// True while an update holds the staging slot, and after a commit until the reboot that installs it.
-  static bool flash_busy() { return session_open || committed_until_reboot; }
+  static bool flash_busy() {
+    return session_open.load(std::memory_order_acquire) || committed_until_reboot.load(std::memory_order_acquire);
+  }
 
  private:
   bool push_(uint8_t *data, size_t bytes);
@@ -28,8 +31,9 @@ class XR806OTABackend final {
   void stop_();
   void release_lock_();
   // One update at a time: UpdateLock is global, so these describe the only possible session.
-  static bool session_open;            // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-  static bool committed_until_reboot;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+  // Atomic so that a standby check from another task never reads a torn or stale value.
+  static std::atomic<bool> session_open;            // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+  static std::atomic<bool> committed_until_reboot;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
   UpdateLock update_lock_{};
   md5::MD5Digest digest_{};
   xr806::WriterPlan plan_{};

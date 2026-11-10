@@ -235,13 +235,13 @@ DefaultHeaders &DefaultHeaders::Instance() {
   return headers;
 }
 
-void AsyncWebServer::begin() {
+bool AsyncWebServer::begin() {
   if (this->listener_ != nullptr)
-    return;
+    return true;
   auto socket = socket::socket_ip(SOCK_STREAM, IPPROTO_TCP);
   if (socket == nullptr) {
     ESP_LOGE(TAG, "HTTP socket allocation failed");
-    return;
+    return false;
   }
   int reuse = 1;
   socket->setsockopt(SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
@@ -250,10 +250,11 @@ void AsyncWebServer::begin() {
   if (len == 0 || socket->bind(reinterpret_cast<const sockaddr *>(&addr), len) != 0 ||
       socket->listen(MAX_CLIENTS) != 0 || socket->setblocking(false) != 0) {
     ESP_LOGE(TAG, "Cannot bind/listen on HTTP port %u (errno=%d)", this->port_, errno);
-    return;
+    return false;
   }
   this->listener_ = std::move(socket);
   ESP_LOGI(TAG, "Native XR806 HTTP listener on port %u", this->port_);
+  return true;
 }
 
 void AsyncWebServer::end() {
