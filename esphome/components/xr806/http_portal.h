@@ -17,6 +17,7 @@ class XR806HTTPServer : public Component {
   void set_port(uint16_t port) { this->port_ = port; }
   void set_captive_dns(bool enable) { this->captive_dns_ = enable; }
   void set_ap_only(bool enable) { this->ap_only_ = enable; }
+  void set_portal_active(bool active) { this->portal_active_ = active; }
 
   void setup() override;
   void loop() override;
@@ -42,6 +43,7 @@ class XR806HTTPServer : public Component {
   uint16_t port_{80};
   bool captive_dns_{false};
   bool ap_only_{false};
+  bool portal_active_{true};
   bool ap_active_{false};
   bool save_pending_{false};
   int listen_fd_{-1};
