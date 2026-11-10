@@ -1,0 +1,23 @@
+esphome:
+  name: xr806-udp-ci
+xr806:
+  board: wxu
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+logger:
+  level: DEBUG
+udp:
+  addresses: 239.255.0.1
+  listen_address: 239.255.0.1
+  port: 18511
+packet_transport:
+  - platform: udp
+    update_interval: 10s
+    sensors:
+      - xr806_test_value
+sensor:
+  - platform: template
+    id: xr806_test_value
+    lambda: return 42.0;
+    update_interval: 10s
