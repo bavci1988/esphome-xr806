@@ -25,6 +25,9 @@ IS_TARGET_PLATFORM = True
 OTA_IMAGE_NAME = "firmware.ota.bin"
 
 CONF_WLAN = "wlan"
+CONF_HTTP_SERVER = "http_server"
+CONF_CAPTIVE_DNS = "captive_dns"
+CONF_HTTP_PORT = "port"
 CONF_NETWORK_SUSPEND = "network_suspend"
 CONF_DTIM = "dtim"
 CONF_LISTEN_INTERVAL = "listen_interval"
@@ -43,6 +46,7 @@ CONF_WAKE_EDGE = "wake_edge"
 CONF_RESUME_MARKER_PB05 = "resume_marker_pb05"
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
+XR806HTTPServer = xr806_ns.class_("XR806HTTPServer", cg.Component)
 XR806WiFiStandby = xr806_ns.class_("XR806WiFiStandby", cg.Component)
 XR806APIStandby = xr806_ns.class_("XR806APIStandby", cg.Component)
 XR806StandbyTrial = xr806_ns.class_("XR806StandbyTrial", cg.Component)
@@ -60,6 +64,17 @@ XR806_WLAN_SCHEMA = cv.Schema(
         cv.Optional(CONF_NETWORK_SUSPEND, default=False): cv.boolean,
     }
 )
+
+
+# Native, bounded HTTP server; it does not replace ESPHome's full web_server
+# backend. Provisioning uses the existing WiFi state machine with exclusive AP.
+XR806_HTTP_SERVER_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(XR806HTTPServer),
+        cv.Optional(CONF_HTTP_PORT, default=80): cv.port,
+        cv.Optional(CONF_CAPTIVE_DNS, default=False): cv.boolean,
+    }
+).extend(cv.COMPONENT_SCHEMA)
 
 
 # Stage 7b is an OFFLINE, bounded one-shot for an isolated WXU test board.
@@ -106,6 +121,10 @@ STANDBY_SCHEMA = cv.Schema(
 
 
 def _update_core_data(config: ConfigType) -> None:
+    if CONF_HTTP_SERVER in config and config[CONF_HTTP_SERVER][CONF_CAPTIVE_DNS]:
+        # Full-config checks for wifi.ap are deferred until final validation.
+        if config[CONF_HTTP_SERVER][CONF_HTTP_PORT] != 80:
+            raise cv.Invalid("XR806 captive portal requires HTTP port 80")
     if config[CONF_WLAN][CONF_NETWORK_SUSPEND] and CONF_STANDBY not in config:
         raise cv.Invalid(
             "xr806.wlan.network_suspend requires xr806.standby and full PM gating"
@@ -146,6 +165,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional("lowpower", default=False): cv.boolean,
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
             cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
+            cv.Optional(CONF_HTTP_SERVER): XR806_HTTP_SERVER_SCHEMA,
             cv.Optional(CONF_STANDBY_TRIAL): STANDBY_TRIAL_SCHEMA,
             cv.Optional(CONF_STANDBY): STANDBY_SCHEMA,
             cv.Optional(CONF_OTA_DIAGNOSTIC_READONLY, default=False): cv.boolean,
@@ -180,10 +200,37 @@ def _final_validate_uart(config: ConfigType) -> ConfigType:
     return config
 
 
-FINAL_VALIDATE_SCHEMA = _final_validate_uart
+def _final_validate_http(config: ConfigType) -> ConfigType:
+    full_config = fv.full_config.get()
+    if CONF_HTTP_SERVER in config:
+        wifi_config = full_config.get("wifi")
+        if wifi_config is None:
+            raise cv.Invalid("xr806.http_server requires wifi")
+        if config[CONF_HTTP_SERVER][CONF_CAPTIVE_DNS] and "ap" not in wifi_config:
+            raise cv.Invalid("xr806.http_server.captive_dns requires wifi.ap")
+        if "web_server" in full_config or "captive_portal" in full_config:
+            raise cv.Invalid(
+                "xr806.http_server is a native provisioning backend; do not combine "
+                "it with ESPHome web_server or captive_portal until those backends are ported"
+            )
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = cv.All(_final_validate_uart, _final_validate_http)
 
 
 async def to_code(config: ConfigType) -> None:
+    if CONF_HTTP_SERVER in config:
+        http = config[CONF_HTTP_SERVER]
+        cg.add_define("USE_XR806_HTTP_PORTAL")
+        cg.add_global(
+            cg.RawStatement('#include "esphome/components/xr806/http_portal.h"')
+        )
+        native_http = cg.new_Pvariable(http[CONF_ID])
+        cg.add(native_http.set_port(http[CONF_HTTP_PORT]))
+        cg.add(native_http.set_captive_dns(http[CONF_CAPTIVE_DNS]))
+        await cg.register_component(native_http, http)
+
     if config[CONF_OTA_DIAGNOSTIC_READONLY]:
         # ROM/FDCM read-only snapshot: does not enable ESPHome OTA.
         cg.add_define("USE_XR806_OTA_RUNTIME_PROBE")
