@@ -17,10 +17,17 @@ class CaptivePortal final : public xr806::XR806HTTPServer {
     this->set_port(80);
     this->set_captive_dns(true);
     this->set_ap_only(true);
+    this->set_portal_active(false);
     global_captive_portal = this;
   }
-  void start() { this->active_ = true; }
-  void end() { this->active_ = false; }
+  void start() {
+    this->active_ = true;
+    this->set_portal_active(true);
+  }
+  void end() {
+    this->active_ = false;
+    this->set_portal_active(false);
+  }
   bool is_active() const { return this->active_; }
 
  protected:
