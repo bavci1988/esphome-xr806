@@ -1240,7 +1240,15 @@ def has_cpp_unit_tests(component: str, tests_dir: Path) -> bool:
     Shared by CI job selection and the build itself
     (``build_helpers.filter_components_with_files``) so both agree on
     which components have something to build.
+
+    A target platform other than ``host`` is never compiled into the host
+    test build (see ``build_helpers``), so tests in its folder cannot build
+    there and are left to the platform's own CI.
     """
+    from esphome.const import Platform
+
+    if component != Platform.HOST and component in {p.value for p in Platform}:
+        return False
     component_dir = tests_dir / component
     return component_dir.is_dir() and (
         any(component_dir.glob("*.cpp")) or any(component_dir.glob("*.h"))

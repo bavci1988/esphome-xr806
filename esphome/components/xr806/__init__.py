@@ -163,7 +163,7 @@ CONFIG_SCHEMA = cv.All(
 )
 
 
-# The UART backend drives UART0 only, with 8 data bits, no parity and 1 stop bit.
+# The UART backend drives UART0 only.
 XR806_UART0_TX = 32  # PB0, WXU pad 15
 XR806_UART0_RX = 33  # PB1, WXU pad 16
 
@@ -179,12 +179,6 @@ def _final_validate_uart(config: ConfigType) -> ConfigType:
             pin = uart.get(key)
             if pin is not None and pin["number"] != expected:
                 raise cv.Invalid(f"XR806 UART0 {key} must be {name}", path=[*path, key])
-        if (uart["data_bits"], uart["stop_bits"], str(uart["parity"])) != (
-            8,
-            1,
-            "NONE",
-        ):
-            raise cv.Invalid("XR806 UART supports only 8N1", path=path)
     return config
 
 

@@ -1,0 +1,26 @@
+esphome:
+  name: xr806-uart
+xr806:
+  board: wxu
+logger:
+  level: VERY_VERBOSE
+uart:
+  id: uart_bus
+  tx_pin: PB0
+  rx_pin: PB1
+  baud_rate: 9600
+  data_bits: 7
+  parity: EVEN
+  stop_bits: 2
+  rx_buffer_size: 512
+  debug:
+    direction: BOTH
+interval:
+  - interval: 10s
+    then:
+      - uart.write:
+          id: uart_bus
+          data: [0x55, 0xAA]
+      - lambda: |-
+          id(uart_bus).set_baud_rate(115200);
+          id(uart_bus).load_settings(false);
