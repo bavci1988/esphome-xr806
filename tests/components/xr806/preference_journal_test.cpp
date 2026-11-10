@@ -358,12 +358,10 @@ TEST(XR806PreferenceJournal, SafeModeCounterFallsBackWhenLatestSnapshotCorrupted
   Journal j;
   ASSERT_TRUE(!j.load(flash));
   const uint32_t first = 3;
-  ASSERT_EQ(j.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&first), sizeof(first)),
-            Put::PUT_RESULT_CHANGED);
+  ASSERT_EQ(j.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&first), sizeof(first)), Put::PUT_RESULT_CHANGED);
   ASSERT_TRUE(j.commit(flash));
   const uint32_t second = 4;
-  ASSERT_EQ(j.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&second), sizeof(second)),
-            Put::PUT_RESULT_CHANGED);
+  ASSERT_EQ(j.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&second), sizeof(second)), Put::PUT_RESULT_CHANGED);
   ASSERT_TRUE(j.commit(flash));
 
   flash.slots[1][Journal::HEADER_SIZE + Journal::RECORD_HEADER_SIZE] ^= 0x01;
