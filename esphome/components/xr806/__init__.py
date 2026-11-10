@@ -202,6 +202,11 @@ def _final_validate_uart(config: ConfigType) -> ConfigType:
 
 def _final_validate_http(config: ConfigType) -> ConfigType:
     full_config = fv.full_config.get()
+    if CONF_STANDBY in config and "captive_portal" in full_config:
+        raise cv.Invalid(
+            "XR806 captive_portal is not a guarded standby participant yet: "
+            "disable xr806.standby while HTTP/DNS sockets are active"
+        )
     if CONF_HTTP_SERVER in config:
         if CONF_STANDBY in config:
             raise cv.Invalid(
