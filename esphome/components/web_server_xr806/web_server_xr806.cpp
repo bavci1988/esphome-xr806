@@ -438,6 +438,16 @@ void AsyncEventSource::handleRequest(AsyncWebServerRequest *req) {
   // not only the periodic uptime pings.
   auto config = web_server_->get_config_json();
   this->queue_to_session_(sessions_.back(), config.c_str(), config.size(), "ping", millis(), 30000);
+#ifdef USE_WEBSERVER_SORTING
+  for (const auto &group : web_server_->get_sorting_groups()) {
+    json::JsonBuilder builder;
+    auto root = builder.root();
+    root["name"] = json::linked(group.second.name);
+    root["sorting_weight"] = group.second.weight;
+    auto message = builder.serialize();
+    this->queue_to_session_(sessions_.back(), message.c_str(), message.size(), "sorting_group", 0, 0);
+  }
+#endif
 }
 void AsyncEventSource::queue_to_session_(Session &session, const char *message, size_t len, const char *event,
                                          uint32_t id, uint32_t reconnect) {
