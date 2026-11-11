@@ -412,16 +412,16 @@ def test_standby_wake_pin_is_dedicated(
     # The standby HAL configures PA20 directly, so the normal GPIO pin
     # duplicate-use validation does not detect a second consumer.
     standby_fields = (
-        "    enabled: true\\n    wake_pin: PA20\\n    wake_edge: falling\\n"
+        "    enabled: true\n    wake_pin: PA20\n    wake_edge: falling\n"
         if standby_type == "standby"
-        else "    confirm_offline: true\\n    wake_after_ms: 1000\\n    wake_pin: PA20\\n"
+        else "    confirm_offline: true\n    wake_after_ms: 1000\n    wake_pin: PA20\n"
     )
     config = (
-        "esphome:\\n  name: xr806-wake-pin-test\\n"
-        "xr806:\\n  board: wxu\\n  lowpower: true\\n"
-        f"  {standby_type}:\\n{standby_fields}"
-        "switch:\\n  - platform: gpio\\n    id: test_switch\\n"
-        f"    pin: {gpio_pin}\\n"
+        "esphome:\n  name: xr806-wake-pin-test\n"
+        "xr806:\n  board: wxu\n  lowpower: true\n"
+        f"  {standby_type}:\n{standby_fields}"
+        "switch:\n  - platform: gpio\n    id: test_switch\n"
+        f"    pin: {gpio_pin}\n"
     )
     CORE.config_path = tmp_path / "wake_gpio.yaml"
     CORE.config_path.write_text(config)
@@ -438,11 +438,11 @@ def test_standby_wake_pin_rejects_allow_other_uses(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     config = (
-        "esphome:\\n  name: xr806-wake-pin-sharing\\n"
-        "xr806:\\n  board: wxu\\n  lowpower: true\\n"
-        "  standby:\\n    enabled: true\\n    wake_pin: PA20\\n    wake_edge: falling\\n"
-        "binary_sensor:\\n  - platform: gpio\\n    id: wake_sensor\\n"
-        "    pin:\\n      number: PA20\\n      allow_other_uses: true\\n"
+        "esphome:\n  name: xr806-wake-pin-sharing\n"
+        "xr806:\n  board: wxu\n  lowpower: true\n"
+        "  standby:\n    enabled: true\n    wake_pin: PA20\n    wake_edge: falling\n"
+        "binary_sensor:\n  - platform: gpio\n    id: wake_sensor\n"
+        "    pin:\n      number: PA20\n      allow_other_uses: true\n"
     )
     CORE.config_path = tmp_path / "wake_shared.yaml"
     CORE.config_path.write_text(config)
