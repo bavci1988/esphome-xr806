@@ -429,7 +429,10 @@ def test_standby_wake_pin_is_dedicated(
     result = read_config({})
     if gpio_pin == "PA20":
         assert result is None
-        assert f"xr806.{standby_type}.wake_pin PA20 must be dedicated" in capsys.readouterr().out
+        assert (
+            f"xr806.{standby_type}.wake_pin PA20 must be dedicated"
+            in capsys.readouterr().out
+        )
     else:
         assert result is not None
 
