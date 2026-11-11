@@ -47,7 +47,7 @@ static constexpr uint16_t MAX_RX_TOPIC_LEN = 256;
 // Bytes read per socket call, and calls per loop() before the rest waits for the next pass.
 static constexpr size_t RX_CHUNK_SIZE = 256;
 static constexpr uint8_t MAX_READS_PER_LOOP = 16;
-// A disconnect waits this long for the queued bytes and the DISCONNECT to leave before it closes the socket.
+// A disconnect waits this long for the broker to close the connection after the DISCONNECT, then closes it itself.
 static constexpr uint32_t CLOSE_TIMEOUT_MS = 2000;
 // Room for the fixed header (type byte and up to 4 length bytes), a topic or ID length and a packet ID.
 static constexpr size_t HEADER_BUFFER_SIZE = 1 + 4 + 2 + 2;
@@ -168,11 +168,7 @@ void MQTTBackendXR806::disconnect() {
   struct iovec iov = {packet, sizeof(packet)};
   if (!this->send_(&iov, 1, true) || this->socket_ == nullptr)
     return;  // The write failed and the connection is already closed and reported
-  if (this->tx_pending_.empty()) {
-    this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
-    return;
-  }
-  // Report the disconnect now and close once the rest has left
+  // Report the disconnect now; the socket closes once the broker has closed its side
   this->state_ = State::STATE_CLOSING;
   this->state_start_ = App.get_loop_component_start_time();
   this->on_disconnect_.call(MQTTClientDisconnectReason::TCP_DISCONNECTED);
@@ -182,7 +178,23 @@ void MQTTBackendXR806::loop_closing_() {
   this->flush_();
   if (this->socket_ == nullptr)
     return;
-  if (this->tx_pending_.empty() || App.get_loop_component_start_time() - this->state_start_ >= CLOSE_TIMEOUT_MS) {
+  // Bytes leaving this socket do not prove the broker got them. A broker closes the connection once it has
+  // processed the DISCONNECT, so wait for that end of stream before the connection counts as closed.
+  if (this->tx_pending_.empty()) {
+    uint8_t buf[RX_CHUNK_SIZE];
+    for (uint8_t i = 0; i < MAX_READS_PER_LOOP; i++) {
+      const ssize_t len = this->transport_read_(buf, sizeof(buf));
+      if (len > 0)
+        continue;  // Late packets for a session that is ending
+      if (len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        break;
+      ESP_LOGD(TAG, "Broker closed the connection after DISCONNECT");
+      this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+      return;
+    }
+  }
+  if (App.get_loop_component_start_time() - this->state_start_ >= CLOSE_TIMEOUT_MS) {
+    ESP_LOGW(TAG, "Broker did not close the connection after DISCONNECT; closing it");
     this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
   }
 }
