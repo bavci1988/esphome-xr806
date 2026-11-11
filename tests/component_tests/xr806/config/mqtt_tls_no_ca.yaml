@@ -1,0 +1,10 @@
+esphome:
+  name: xr806-mqtt-tls-no-ca
+xr806:
+  board: wxu
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+mqtt:
+  broker: mqtt.example.com
+  tls: true

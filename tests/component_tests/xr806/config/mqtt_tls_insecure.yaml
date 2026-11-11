@@ -1,0 +1,10 @@
+esphome:
+  name: xr806-mqtt-tls-insecure
+xr806:
+  board: wxu
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+mqtt:
+  broker: 192.168.1.10
+  verify_ssl: false

@@ -335,6 +335,25 @@ def validate_config(value):
     return out
 
 
+# ESP-IDF's esp-mqtt and the XR806 backend (mbedTLS) implement MQTT over TLS
+_only_on_tls_platforms = cv.only_on([PLATFORM_ESP32, PLATFORM_XR806])
+
+
+def _require_xr806_trust(config: ConfigType) -> ConfigType:
+    """XR806 has no certificate bundle: TLS needs a CA, or verification switched off explicitly."""
+    if (
+        CORE.is_xr806
+        and config.get(CONF_TLS)
+        and config.get(CONF_VERIFY_SSL) is not False
+        and CONF_CERTIFICATE_AUTHORITY not in config
+    ):
+        raise cv.Invalid(
+            "XR806 has no certificate bundle; set 'certificate_authority' to the "
+            "CA that signed the broker certificate, or 'verify_ssl: false'"
+        )
+    return config
+
+
 # Keys that only make sense over TLS; any of them switches it on
 TLS_IMPLYING_KEYS = frozenset(
     {CONF_CERTIFICATE_AUTHORITY, CONF_VERIFY_SSL, CONF_CLIENT_CERTIFICATE}
@@ -421,19 +440,19 @@ CONFIG_SCHEMA = cv.All(
             cv.SplitDefault(CONF_IDF_SEND_ASYNC, esp32=False): cv.All(
                 cv.boolean, cv.only_on_esp32
             ),
-            cv.Optional(CONF_TLS): cv.All(cv.boolean, cv.only_on_esp32),
-            cv.Optional(CONF_VERIFY_SSL): cv.All(cv.boolean, cv.only_on_esp32),
+            cv.Optional(CONF_TLS): cv.All(cv.boolean, _only_on_tls_platforms),
+            cv.Optional(CONF_VERIFY_SSL): cv.All(cv.boolean, _only_on_tls_platforms),
             cv.Optional(CONF_CERTIFICATE_AUTHORITY): cv.All(
-                cv.string, cv.only_on_esp32
+                cv.string, _only_on_tls_platforms
             ),
             cv.Inclusive(CONF_CLIENT_CERTIFICATE, "cert-key-pair"): cv.All(
-                cv.string, cv.only_on_esp32
+                cv.string, _only_on_tls_platforms
             ),
             cv.Inclusive(CONF_CLIENT_CERTIFICATE_KEY, "cert-key-pair"): cv.sensitive(
-                cv.All(cv.string, cv.only_on_esp32)
+                cv.All(cv.string, _only_on_tls_platforms)
             ),
-            cv.SplitDefault(CONF_SKIP_CERT_CN_CHECK, esp32=False): cv.All(
-                cv.boolean, cv.only_on_esp32
+            cv.SplitDefault(CONF_SKIP_CERT_CN_CHECK, esp32=False, xr806=False): cv.All(
+                cv.boolean, _only_on_tls_platforms
             ),
             cv.Optional(CONF_DISCOVERY, default=True): cv.Any(
                 cv.boolean, cv.one_of("CLEAN", upper=True)
@@ -628,7 +647,7 @@ def _validate_topic_lengths(config: ConfigType) -> ConfigType:
     return config
 
 
-FINAL_VALIDATE_SCHEMA = _validate_topic_lengths
+FINAL_VALIDATE_SCHEMA = cv.All(_validate_topic_lengths, _require_xr806_trust)
 
 
 def exp_mqtt_message(
@@ -775,10 +794,12 @@ async def to_code(config):
         # Trust source: none, the given CA, or the certificate bundle
         if config.get(CONF_VERIFY_SSL) is False:
             cg.add_define("USE_MQTT_TLS_INSECURE")
-            allow_insecure_tls()
+            if CORE.is_esp32:
+                allow_insecure_tls()
         elif (ca := config.get(CONF_CERTIFICATE_AUTHORITY)) is not None:
             cg.add(var.set_ca_certificate(ca))
         else:
+            # Only ESP32 gets here; XR806 requires a CA or verify_ssl: false
             cg.add_define("USE_MQTT_CERT_BUNDLE")
             require_certificate_bundle()
 

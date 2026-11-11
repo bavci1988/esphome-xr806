@@ -1,0 +1,24 @@
+esphome:
+  name: xr806-mqtt-tls-ci
+xr806:
+  board: wxu
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+logger:
+  level: DEBUG
+mqtt:
+  broker: mqtt.example.com
+  skip_cert_cn_check: true
+  certificate_authority: |
+    -----BEGIN CERTIFICATE-----
+    MIIBszCCAVoCCQDAAAAAAAAAADAKBggqhkjOPQQDAjAfMR0wGwYDVQQDDBRtcXR0
+    -----END CERTIFICATE-----
+  client_certificate: |
+    -----BEGIN CERTIFICATE-----
+    MIIBszCCAVoCCQDAAAAAAAAAADAKBggqhkjOPQQDAjAfMR0wGwYDVQQDDBRjbGll
+    -----END CERTIFICATE-----
+  client_certificate_key: |
+    -----BEGIN PRIVATE KEY-----
+    MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgAAAAAAAAAAAAAAAA
+    -----END PRIVATE KEY-----
