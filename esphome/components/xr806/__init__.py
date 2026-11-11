@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from esphome import final_validate as fv
+from esphome import pins
 import esphome.codegen as cg
 from esphome.components.const import CONF_ENABLED
 import esphome.config_validation as cv
@@ -199,7 +200,30 @@ def _final_validate_standby_mqtt(config: ConfigType) -> ConfigType:
     return config
 
 
-FINAL_VALIDATE_SCHEMA = cv.All(_final_validate_uart, _final_validate_standby_mqtt)
+def _final_validate_wake_pin_ownership(config: ConfigType) -> ConfigType:
+    # wake_pin is configured directly through the PM HAL, not via a GPIO pin
+    # schema, so ESPHome's normal duplicate-pin checker cannot see this owner.
+    # In particular, allow_other_uses does NOT make a second GPIO consumer safe.
+    for standby_type in (CONF_STANDBY, CONF_STANDBY_TRIAL):
+        standby = config.get(standby_type)
+        if standby is None or CONF_WAKE_PIN not in standby:
+            continue
+        wake_pin = standby[CONF_WAKE_PIN]
+        gpio_number = int(wake_pin[2:])  # The schema only permits PA wake inputs.
+        if pins.PIN_SCHEMA_REGISTRY.get_count(DOMAIN, DOMAIN, gpio_number):
+            raise cv.Invalid(
+                f"xr806.{standby_type}.wake_pin {wake_pin} must be dedicated: "
+                "another component already uses this GPIO",
+                path=[standby_type, CONF_WAKE_PIN],
+            )
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = cv.All(
+    _final_validate_uart,
+    _final_validate_standby_mqtt,
+    _final_validate_wake_pin_ownership,
+)
 
 
 async def to_code(config: ConfigType) -> None:
