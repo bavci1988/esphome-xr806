@@ -37,6 +37,7 @@ CONF_OTA_GUARD_ID = "ota_guard_id"
 CONF_OTA_DIAGNOSTIC_READONLY = "ota_diagnostic_readonly"
 CONF_API_STANDBY_ID = "api_standby_id"
 CONF_HTTP_STANDBY_ID = "http_standby_id"
+CONF_MQTT_STANDBY_ID = "mqtt_standby_id"
 CONF_QUIET_MS = "quiet_ms"
 CONF_MIN_AWAKE_MS = "min_awake_ms"
 CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
@@ -53,6 +54,7 @@ XR806StandbyTrial = xr806_ns.class_("XR806StandbyTrial", cg.Component)
 XR806StandbyController = xr806_ns.class_("XR806StandbyController", cg.Component)
 XR806OTAStandbyGuard = xr806_ns.class_("XR806OTAStandbyGuard", cg.Component)
 XR806HTTPStandby = xr806_ns.class_("XR806HTTPStandby", cg.Component)
+XR806MQTTStandby = xr806_ns.class_("XR806MQTTStandby", cg.Component)
 
 
 # Radio settings for the standard wifi: component. DTIM and the listen interval
@@ -98,6 +100,7 @@ STANDBY_SCHEMA = cv.Schema(
         cv.GenerateID(CONF_OTA_GUARD_ID): cv.declare_id(XR806OTAStandbyGuard),
         cv.GenerateID(CONF_API_STANDBY_ID): cv.declare_id(XR806APIStandby),
         cv.GenerateID(CONF_HTTP_STANDBY_ID): cv.declare_id(XR806HTTPStandby),
+        cv.GenerateID(CONF_MQTT_STANDBY_ID): cv.declare_id(XR806MQTTStandby),
         cv.Required(CONF_ENABLED): cv.boolean,
         cv.Optional(CONF_WAKE_AFTER_MS, default=3000): cv.int_range(min=500, max=60000),
         cv.Optional(CONF_QUIET_MS, default=250): cv.int_range(min=200, max=30000),
@@ -190,15 +193,6 @@ def _final_validate_uart(config: ConfigType) -> ConfigType:
     return config
 
 
-def _final_validate_standby_mqtt(config: ConfigType) -> ConfigType:
-    # Standby parks the WLAN link, and no standby participant waits for MQTT traffic yet
-    if CONF_STANDBY in config and "mqtt" in fv.full_config.get():
-        raise cv.Invalid(
-            "xr806.standby cannot be combined with mqtt yet", path=[CONF_STANDBY]
-        )
-    return config
-
-
 def _final_validate_wake_pin_ownership(config: ConfigType) -> ConfigType:
     # wake_pin is configured directly through the PM HAL, not via a GPIO pin
     # schema, so ESPHome's normal duplicate-pin checker cannot see this owner.
@@ -220,7 +214,6 @@ def _final_validate_wake_pin_ownership(config: ConfigType) -> ConfigType:
 
 FINAL_VALIDATE_SCHEMA = cv.All(
     _final_validate_uart,
-    _final_validate_standby_mqtt,
     _final_validate_wake_pin_ownership,
 )
 
@@ -261,6 +254,7 @@ async def to_code(config: ConfigType) -> None:
             domain in CORE.config for domain in ("web_server", "captive_portal")
         )
         cg.add(controller.set_no_http(not has_http))
+        cg.add(controller.set_no_mqtt("mqtt" not in CORE.config))
         if "http_request" in CORE.config:
             cg.add_define("USE_XR806_STANDBY_HTTP_CLIENT")
         cg.add(controller.set_external_sync_required(cfg[CONF_REQUIRE_EXTERNAL_SYNC]))
@@ -282,6 +276,13 @@ async def to_code(config: ConfigType) -> None:
             )
             api_standby = cg.new_Pvariable(cfg[CONF_API_STANDBY_ID])
             await cg.register_component(api_standby, {})
+        if "mqtt" in CORE.config:
+            # Disconnects cleanly before standby and votes MQTT_BUSY until the socket is closed.
+            cg.add_global(
+                cg.RawStatement('#include "esphome/components/xr806/mqtt_standby.h"')
+            )
+            mqtt_standby = cg.new_Pvariable(cfg[CONF_MQTT_STANDBY_ID])
+            await cg.register_component(mqtt_standby, {})
         if "ota" in CORE.config:
             # OTA state updates are informative, NOT evidence that the
             # OTA listener and flash writer are already disarmed.

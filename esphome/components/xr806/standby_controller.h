@@ -54,6 +54,7 @@ class XR806StandbyController final : public Component {
   void set_no_ota(bool value) { no_ota_ = value; }
   void set_no_mdns(bool value) { no_mdns_ = value; }
   void set_no_http(bool value) { no_http_ = value; }
+  void set_no_mqtt(bool value) { no_mqtt_ = value; }
   void set_external_sync_required(bool value) { external_sync_required_ = value; }
   void set_require_uart_participant(bool value) { require_uart_participant_ = value; }
 
@@ -83,7 +84,7 @@ class XR806StandbyController final : public Component {
   void cancel_prepared_(size_t prepared);
   bool is_any_transport_unowned_() const;
 
-  // MCU UART + WLAN + Native API + OTA + mDNS, plus one future board owner.
+  // MCU UART + WLAN + Native API + OTA + mDNS + HTTP + MQTT, plus one future board owner.
   static constexpr size_t MAX_PARTICIPANTS = 8;
   XR806StandbyParticipant *participants_[MAX_PARTICIPANTS]{};
   size_t participant_count_{0};
@@ -101,6 +102,7 @@ class XR806StandbyController final : public Component {
   bool no_ota_{false};
   bool no_mdns_{false};
   bool no_http_{false};
+  bool no_mqtt_{false};
   bool external_sync_required_{false};
   bool require_uart_participant_{false};
   bool busy_{false};

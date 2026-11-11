@@ -70,9 +70,10 @@ void XR806WiFiStandby::standby_preflight(bool requested) {
     return;  // Without network_suspend NETWORK_BUSY stays asserted.
   auto &policy = lowpower_policy();
   constexpr uint32_t other_services = XR806LowPowerPolicy::API_BUSY | XR806LowPowerPolicy::OTA_BUSY |
-                                      XR806LowPowerPolicy::MDNS_BUSY | XR806LowPowerPolicy::HTTP_BUSY;
+                                      XR806LowPowerPolicy::MDNS_BUSY | XR806LowPowerPolicy::HTTP_BUSY |
+                                      XR806LowPowerPolicy::MQTT_BUSY;
   if ((policy.blockers() & other_services) != 0)
-    return;  // Never take Wi-Fi down while API, mDNS or OTA still own sockets.
+    return;  // Never take Wi-Fi down while API, mDNS, OTA, HTTP or MQTT still own sockets.
   if (!this->suspending_) {
     policy.set_network_quiescing(true);  // Declare the intentional link teardown first.
     wifi::global_wifi_component->disable();

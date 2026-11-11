@@ -37,6 +37,8 @@ static constexpr uint16_t MAX_RX_TOPIC_LEN = 256;
 // Bytes read per socket call, and calls per loop() before the rest waits for the next pass.
 static constexpr size_t RX_CHUNK_SIZE = 256;
 static constexpr uint8_t MAX_READS_PER_LOOP = 16;
+// A disconnect waits this long for the queued bytes and the DISCONNECT to leave before it closes the socket.
+static constexpr uint32_t CLOSE_TIMEOUT_MS = 2000;
 // Room for the fixed header (type byte and up to 4 length bytes), a topic or ID length and a packet ID.
 static constexpr size_t HEADER_BUFFER_SIZE = 1 + 4 + 2 + 2;
 
@@ -62,6 +64,13 @@ void MQTTBackendXR806::set_server(network::IPAddress ip, uint16_t port) {
   this->set_server(this->server_ip_.c_str(), port);
 }
 
+// The backend of the MQTT client; there is at most one.
+static MQTTBackendXR806 *instance = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+MQTTBackendXR806::MQTTBackendXR806() { instance = this; }
+
+bool MQTTBackendXR806::any_open() { return instance != nullptr && instance->socket_ != nullptr; }
+
 void MQTTBackendXR806::connect() {
   this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
   if (this->host_ == nullptr)
@@ -73,16 +82,36 @@ void MQTTBackendXR806::connect() {
 }
 
 void MQTTBackendXR806::disconnect() {
-  if (this->state_ == State::STATE_CONNECTED && this->tx_pending_.empty()) {
-    uint8_t packet[2] = {PACKET_DISCONNECT << 4, 0};
-    // Best effort: the socket is closed right after
-    this->socket_->write(packet, sizeof(packet));
+  if (this->state_ != State::STATE_CONNECTED) {
+    this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+    return;
   }
-  this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+  uint8_t packet[2] = {PACKET_DISCONNECT << 4, 0};
+  struct iovec iov = {packet, sizeof(packet)};
+  if (!this->send_(&iov, 1, true) || this->socket_ == nullptr)
+    return;  // The write failed and the connection is already closed and reported
+  if (this->tx_pending_.empty()) {
+    this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+    return;
+  }
+  // Report the disconnect now and close once the rest has left
+  this->state_ = State::STATE_CLOSING;
+  this->state_start_ = App.get_loop_component_start_time();
+  this->on_disconnect_.call(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+}
+
+void MQTTBackendXR806::loop_closing_() {
+  this->flush_();
+  if (this->socket_ == nullptr)
+    return;
+  if (this->tx_pending_.empty() || App.get_loop_component_start_time() - this->state_start_ >= CLOSE_TIMEOUT_MS) {
+    this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+  }
 }
 
 void MQTTBackendXR806::close_(MQTTClientDisconnectReason reason) {
-  const bool was_open = this->state_ != State::STATE_DISCONNECTED;
+  // A closing connection was reported when it began to close
+  const bool was_open = this->state_ != State::STATE_DISCONNECTED && this->state_ != State::STATE_CLOSING;
   if (this->socket_ != nullptr) {
     this->socket_->close();
     this->socket_.reset();
@@ -195,6 +224,9 @@ void MQTTBackendXR806::check_tcp_() {
 void MQTTBackendXR806::loop() {
   switch (this->state_) {
     case State::STATE_DISCONNECTED:
+      return;
+    case State::STATE_CLOSING:
+      this->loop_closing_();
       return;
     case State::STATE_RESOLVING:
       if (this->resolve_.consume_failure()) {
