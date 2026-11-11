@@ -175,7 +175,10 @@ def _final_validate_uart(config: ConfigType) -> ConfigType:
         raise cv.Invalid("XR806 exposes only one UART0 bus (PB0/PB1)", path=["uart"])
     for index, uart in enumerate(buses):
         if not 1 <= uart["rx_buffer_size"] <= 4096:
-            raise cv.Invalid("XR806 UART RX buffer must be 1..4096 bytes", path=["uart", index, "rx_buffer_size"])
+            raise cv.Invalid(
+                "XR806 UART RX buffer must be 1..4096 bytes",
+                path=["uart", index, "rx_buffer_size"],
+            )
         path = ["uart", index]
         for key, expected, name in (
             ("tx_pin", XR806_UART0_TX, "PB0"),
