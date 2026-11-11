@@ -11,7 +11,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart_component.h"
 #ifdef USE_XR806_LOWPOWER
-#include "esphome/components/uart/uart_idle_guard.h"
+#include "esphome/components/xr806/uart_idle_guard.h"
 #endif
 
 extern "C" {
@@ -76,7 +76,7 @@ class XR806UARTComponent final : public UARTComponent, public Component {
 
   struct wakelock uart_pm_wakelock_{};
   bool uart_pm_wakelock_held_{false};
-  UARTIdleGuard idle_guard_{};
+  xr806::UARTIdleGuard idle_guard_{};
 #endif
 };
 
