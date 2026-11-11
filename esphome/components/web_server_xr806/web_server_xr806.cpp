@@ -765,7 +765,12 @@ bool AsyncEventSource::loop() {
     if (n < 0) {
       const int err = errno;
       if (err != EAGAIN && err != EWOULDBLOCK && err != EINTR) {
-        ESP_LOGW(TAG, "Event stream closed: send failed, errno %d", err);
+        // A closed browser tab resets the connection; only other errors are worth a warning.
+        if (err == ECONNRESET || err == EPIPE) {
+          ESP_LOGD(TAG, "Event stream closed by the browser");
+        } else {
+          ESP_LOGW(TAG, "Event stream closed: send failed, errno %d", err);
+        }
         session.socket.reset();
       }
       continue;
