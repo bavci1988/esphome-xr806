@@ -7,12 +7,17 @@
 #include "esphome/core/component.h"
 #include "standby_controller.h"
 
+namespace esphome::mqtt {
+class MQTTClientComponent;
+}  // namespace esphome::mqtt
+
 namespace esphome::xr806 {
 
 /// Standby owner of the MQTT broker connection.
 ///
-/// While standby is being prepared the client is disabled, which sends a DISCONNECT, so the broker keeps the
-/// device's birth message and does not publish the will. MQTT votes idle only once the socket is closed. On wake,
+/// While standby is being prepared the client is disabled, which sends a DISCONNECT, so the broker can keep the
+/// device's birth message instead of publishing the will (best effort: confirmed on a host broker, not yet on WXU
+/// hardware). MQTT votes idle only once the broker has closed the connection, or after a timeout. On wake,
 /// or when the attempt is cancelled, the client is enabled again unless it was already disabled before.
 class XR806MQTTStandby final : public Component, public XR806StandbyParticipant {
  public:
@@ -31,6 +36,8 @@ class XR806MQTTStandby final : public Component, public XR806StandbyParticipant 
 
  protected:
   void restore_();
+  /// The client is off and its connection closed
+  bool quiet_(const mqtt::MQTTClientComponent *client) const;
 
   bool parked_{false};
   /// The client was enabled when it was parked, so it is enabled again afterwards

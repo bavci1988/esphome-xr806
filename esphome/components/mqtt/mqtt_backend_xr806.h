@@ -57,6 +57,7 @@ class MQTTBackendXR806 final : public MQTTBackend {
   }
 
   MQTTBackendXR806();
+  ~MQTTBackendXR806();
 
   /// True while the broker socket is open, including a disconnect that is still sending its last bytes.
   /// Standby must not switch the radio off under it.
@@ -81,6 +82,7 @@ class MQTTBackendXR806 final : public MQTTBackend {
     STATE_DISCONNECTED,
     STATE_RESOLVING,
     STATE_TCP_CONNECTING,
+    STATE_TLS_HANDSHAKE,
     STATE_WAIT_CONNACK,
     STATE_CONNECTED,
     STATE_CLOSING,  ///< Disconnect reported; the queued bytes and the DISCONNECT are still being sent
@@ -98,6 +100,12 @@ class MQTTBackendXR806 final : public MQTTBackend {
 
   void start_tcp_();
   void check_tcp_();
+  /// Sends CONNECT once the TCP connection, and over TLS the handshake, is complete.
+  void send_connect_();
+  /// Reads from the socket, or the TLS session; returns -1 with errno EAGAIN when nothing is there yet.
+  ssize_t transport_read_(uint8_t *buf, size_t len);
+  /// Writes to the socket, or the TLS session; returns -1 with errno EAGAIN when nothing could be sent.
+  ssize_t transport_write_(const uint8_t *buf, size_t len);
   /// Closes the socket; reports reason to the disconnect callbacks when a connection was open or being opened.
   void close_(MQTTClientDisconnectReason reason);
   void loop_closing_();
@@ -131,6 +139,27 @@ class MQTTBackendXR806 final : public MQTTBackend {
   bool clean_session_{true};
 
   std::unique_ptr<socket::Socket> socket_;
+#ifdef USE_MQTT_TLS
+ public:
+  void set_ca_certificate(const char *cert) { this->ca_certificate_ = cert; }
+  void set_cl_certificate(const char *cert) { this->cl_certificate_ = cert; }
+  void set_cl_key(const char *key) { this->cl_key_ = key; }
+  void set_skip_cert_cn_check(bool skip_check) { this->skip_cert_cn_check_ = skip_check; }
+
+ protected:
+  struct TlsSession;
+  /// Starts the TLS handshake on the connected socket; false when TLS could not be set up.
+  bool tls_begin_();
+  void tls_handshake_();
+
+  // PEM strings from the configuration; they live for the whole run
+  const char *ca_certificate_{nullptr};
+  const char *cl_certificate_{nullptr};
+  const char *cl_key_{nullptr};
+  bool skip_cert_cn_check_{false};
+  /// Created at the first TLS connection and reset, not freed, for the next ones
+  std::unique_ptr<TlsSession> tls_;
+#endif
   socket::Ipv4Resolve resolve_;
   State state_{State::STATE_DISCONNECTED};
   uint32_t state_start_{0};

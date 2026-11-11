@@ -5,10 +5,20 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cinttypes>
 #include <cstring>
 
 #include "esphome/core/application.h"
+#include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+
+#ifdef USE_MQTT_TLS
+extern "C" {
+#include "mbedtls/pk.h"
+#include "mbedtls/ssl.h"
+#include "mbedtls/x509_crt.h"
+}
+#endif
 
 namespace esphome::mqtt {
 
@@ -37,7 +47,7 @@ static constexpr uint16_t MAX_RX_TOPIC_LEN = 256;
 // Bytes read per socket call, and calls per loop() before the rest waits for the next pass.
 static constexpr size_t RX_CHUNK_SIZE = 256;
 static constexpr uint8_t MAX_READS_PER_LOOP = 16;
-// A disconnect waits this long for the queued bytes and the DISCONNECT to leave before it closes the socket.
+// A disconnect waits this long for the broker to close the connection after the DISCONNECT, then closes it itself.
 static constexpr uint32_t CLOSE_TIMEOUT_MS = 2000;
 // Room for the fixed header (type byte and up to 4 length bytes), a topic or ID length and a packet ID.
 static constexpr size_t HEADER_BUFFER_SIZE = 1 + 4 + 2 + 2;
@@ -58,6 +68,69 @@ static size_t put_fixed_header(uint8_t *buf, uint8_t type_and_flags, uint32_t re
 
 static size_t string_size(const char *str) { return str == nullptr ? 0 : strlen(str); }
 
+#ifdef USE_MQTT_TLS
+// Network errors as mbedTLS's net module reports them; that module is not used here
+static constexpr int TLS_ERR_SEND_FAILED = -0x004E;
+static constexpr int TLS_ERR_RECV_FAILED = -0x004C;
+
+struct MQTTBackendXR806::TlsSession {
+  mbedtls_ssl_context ssl;
+  mbedtls_ssl_config conf;
+  mbedtls_x509_crt ca;
+  mbedtls_x509_crt own_cert;
+  mbedtls_pk_context own_key;
+  /// Length of a record that mbedTLS has encrypted but not fully sent
+  size_t inflight_len{0};
+  bool active{false};
+  bool skip_cn{false};
+
+  TlsSession() {
+    mbedtls_ssl_init(&this->ssl);
+    mbedtls_ssl_config_init(&this->conf);
+    mbedtls_x509_crt_init(&this->ca);
+    mbedtls_x509_crt_init(&this->own_cert);
+    mbedtls_pk_init(&this->own_key);
+  }
+  ~TlsSession() {
+    mbedtls_ssl_free(&this->ssl);
+    mbedtls_ssl_config_free(&this->conf);
+    mbedtls_x509_crt_free(&this->ca);
+    mbedtls_x509_crt_free(&this->own_cert);
+    mbedtls_pk_free(&this->own_key);
+  }
+  TlsSession(const TlsSession &) = delete;
+  TlsSession &operator=(const TlsSession &) = delete;
+};
+
+static int tls_send(void *ctx, const unsigned char *buf, size_t len) {
+  const ssize_t ret = static_cast<socket::Socket *>(ctx)->write(buf, len);
+  if (ret >= 0)
+    return static_cast<int>(ret);
+  return errno == EAGAIN || errno == EWOULDBLOCK ? MBEDTLS_ERR_SSL_WANT_WRITE : TLS_ERR_SEND_FAILED;
+}
+
+static int tls_recv(void *ctx, unsigned char *buf, size_t len) {
+  const ssize_t ret = static_cast<socket::Socket *>(ctx)->read(buf, len);
+  if (ret >= 0)
+    return static_cast<int>(ret);  // 0 is the end of the stream
+  return errno == EAGAIN || errno == EWOULDBLOCK ? MBEDTLS_ERR_SSL_WANT_READ : TLS_ERR_RECV_FAILED;
+}
+
+static int tls_random(void * /*ctx*/, unsigned char *out, size_t len) {
+  return random_bytes(out, len) ? 0 : MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+}
+
+// Accepts a certificate whose name does not match the broker, for skip_cert_cn_check
+static int tls_ignore_cn(void * /*ctx*/, mbedtls_x509_crt * /*crt*/, int /*depth*/, uint32_t *flags) {
+  *flags &= ~MBEDTLS_X509_BADCERT_CN_MISMATCH;
+  return 0;
+}
+
+static void log_tls_error(const char *what, int ret) {
+  ESP_LOGW(TAG, "%s: -0x%04x", what, static_cast<unsigned>(-ret));
+}
+#endif  // USE_MQTT_TLS
+
 void MQTTBackendXR806::set_server(network::IPAddress ip, uint16_t port) {
   char buf[network::IP_ADDRESS_BUFFER_SIZE];
   this->server_ip_ = ip.str_to(buf);
@@ -68,6 +141,11 @@ void MQTTBackendXR806::set_server(network::IPAddress ip, uint16_t port) {
 static MQTTBackendXR806 *instance = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 MQTTBackendXR806::MQTTBackendXR806() { instance = this; }
+
+MQTTBackendXR806::~MQTTBackendXR806() {
+  if (instance == this)
+    instance = nullptr;
+}
 
 bool MQTTBackendXR806::any_open() { return instance != nullptr && instance->socket_ != nullptr; }
 
@@ -90,11 +168,7 @@ void MQTTBackendXR806::disconnect() {
   struct iovec iov = {packet, sizeof(packet)};
   if (!this->send_(&iov, 1, true) || this->socket_ == nullptr)
     return;  // The write failed and the connection is already closed and reported
-  if (this->tx_pending_.empty()) {
-    this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
-    return;
-  }
-  // Report the disconnect now and close once the rest has left
+  // Report the disconnect now; the socket closes once the broker has closed its side
   this->state_ = State::STATE_CLOSING;
   this->state_start_ = App.get_loop_component_start_time();
   this->on_disconnect_.call(MQTTClientDisconnectReason::TCP_DISCONNECTED);
@@ -104,7 +178,23 @@ void MQTTBackendXR806::loop_closing_() {
   this->flush_();
   if (this->socket_ == nullptr)
     return;
-  if (this->tx_pending_.empty() || App.get_loop_component_start_time() - this->state_start_ >= CLOSE_TIMEOUT_MS) {
+  // Bytes leaving this socket do not prove the broker got them. A broker closes the connection once it has
+  // processed the DISCONNECT, so wait for that end of stream before the connection counts as closed.
+  if (this->tx_pending_.empty()) {
+    uint8_t buf[RX_CHUNK_SIZE];
+    for (uint8_t i = 0; i < MAX_READS_PER_LOOP; i++) {
+      const ssize_t len = this->transport_read_(buf, sizeof(buf));
+      if (len > 0)
+        continue;  // Late packets for a session that is ending
+      if (len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        break;
+      ESP_LOGD(TAG, "Broker closed the connection after DISCONNECT");
+      this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+      return;
+    }
+  }
+  if (App.get_loop_component_start_time() - this->state_start_ >= CLOSE_TIMEOUT_MS) {
+    ESP_LOGW(TAG, "Broker did not close the connection after DISCONNECT; closing it");
     this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
   }
 }
@@ -112,6 +202,14 @@ void MQTTBackendXR806::loop_closing_() {
 void MQTTBackendXR806::close_(MQTTClientDisconnectReason reason) {
   // A closing connection was reported when it began to close
   const bool was_open = this->state_ != State::STATE_DISCONNECTED && this->state_ != State::STATE_CLOSING;
+#ifdef USE_MQTT_TLS
+  if (this->tls_ != nullptr && this->tls_->active) {
+    if (this->socket_ != nullptr && this->state_ != State::STATE_TLS_HANDSHAKE)
+      mbedtls_ssl_close_notify(&this->tls_->ssl);  // Best effort; the socket is closed right after
+    this->tls_->active = false;
+    this->tls_->inflight_len = 0;
+  }
+#endif
   if (this->socket_ != nullptr) {
     this->socket_->close();
     this->socket_.reset();
@@ -164,7 +262,16 @@ void MQTTBackendXR806::check_tcp_() {
     default:
       break;
   }
+#ifdef USE_MQTT_TLS
+  if (this->tls_begin_())
+    return;  // CONNECT follows the handshake
+  if (this->socket_ == nullptr)
+    return;  // TLS could not be set up; already closed and reported
+#endif
+  this->send_connect_();
+}
 
+void MQTTBackendXR806::send_connect_() {
   // CONNECT (section 3.1)
   const size_t client_id_len = string_size(this->client_id_);
   const bool has_will = this->will_topic_ != nullptr && this->will_topic_[0] != '\0';
@@ -244,6 +351,16 @@ void MQTTBackendXR806::loop() {
       }
       this->check_tcp_();
       return;
+#ifdef USE_MQTT_TLS
+    case State::STATE_TLS_HANDSHAKE:
+      if (App.get_loop_component_start_time() - this->state_start_ >= CONNECT_TIMEOUT_MS) {
+        ESP_LOGW(TAG, "TLS handshake timed out");
+        this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+        return;
+      }
+      this->tls_handshake_();
+      return;
+#endif
     case State::STATE_WAIT_CONNACK:
       if (App.get_loop_component_start_time() - this->state_start_ >= CONNECT_TIMEOUT_MS) {
         ESP_LOGW(TAG, "No CONNACK from broker");
@@ -280,12 +397,17 @@ void MQTTBackendXR806::loop() {
 }
 
 void MQTTBackendXR806::read_() {
-  if (!this->rx_more_ && !this->socket_->ready())
+  bool buffered = false;
+#ifdef USE_MQTT_TLS
+  // Decrypted bytes can wait in the TLS session while the socket has nothing new
+  buffered = this->tls_ != nullptr && this->tls_->active && mbedtls_ssl_get_bytes_avail(&this->tls_->ssl) != 0;
+#endif
+  if (!this->rx_more_ && !buffered && !this->socket_->ready())
     return;
   this->rx_more_ = false;
   uint8_t buf[RX_CHUNK_SIZE];
   for (uint8_t i = 0; i < MAX_READS_PER_LOOP; i++) {
-    const ssize_t len = this->socket_->read(buf, sizeof(buf));
+    const ssize_t len = this->transport_read_(buf, sizeof(buf));
     if (len == 0) {
       this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
       return;
@@ -537,6 +659,20 @@ bool MQTTBackendXR806::send_(const struct iovec *iov, int count, bool queue_behi
     total += iov[i].iov_len;
 
   size_t sent = 0;
+#ifdef USE_MQTT_TLS
+  if (this->tls_ != nullptr && this->tls_->active) {
+    // A TLS record is built from one buffer, so the packet is always queued and then flushed
+    if (!this->tx_pending_.empty() && !queue_behind)
+      return false;
+    for (int i = 0; i < count; i++) {
+      const auto *base = static_cast<const uint8_t *>(iov[i].iov_base);
+      this->tx_pending_.insert(this->tx_pending_.end(), base, base + iov[i].iov_len);
+    }
+    this->last_tx_ = App.get_loop_component_start_time();
+    this->flush_();
+    return this->socket_ != nullptr;
+  }
+#endif
   if (this->tx_pending_.empty()) {
     const ssize_t written = this->socket_->writev(iov, count);
     if (written < 0) {
@@ -568,8 +704,8 @@ bool MQTTBackendXR806::send_(const struct iovec *iov, int count, bool queue_behi
 void MQTTBackendXR806::flush_() {
   if (this->tx_pending_.empty())
     return;
-  const ssize_t written = this->socket_->write(this->tx_pending_.data() + this->tx_pending_offset_,
-                                               this->tx_pending_.size() - this->tx_pending_offset_);
+  const ssize_t written = this->transport_write_(this->tx_pending_.data() + this->tx_pending_offset_,
+                                                 this->tx_pending_.size() - this->tx_pending_offset_);
   if (written < 0) {
     if (errno != EAGAIN && errno != EWOULDBLOCK) {
       ESP_LOGW(TAG, "Write failed: errno %d", errno);
@@ -583,6 +719,136 @@ void MQTTBackendXR806::flush_() {
     this->tx_pending_offset_ = 0;
   }
 }
+
+ssize_t MQTTBackendXR806::transport_read_(uint8_t *buf, size_t len) {
+#ifdef USE_MQTT_TLS
+  if (this->tls_ != nullptr && this->tls_->active) {
+    const int ret = mbedtls_ssl_read(&this->tls_->ssl, buf, len);
+    if (ret > 0)
+      return ret;
+    if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
+      return 0;
+    if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+      errno = EAGAIN;
+      return -1;
+    }
+    ESP_LOGW(TAG, "TLS read failed: -0x%04x", static_cast<unsigned>(-ret));
+    errno = EIO;
+    return -1;
+  }
+#endif
+  return this->socket_->read(buf, len);
+}
+
+ssize_t MQTTBackendXR806::transport_write_(const uint8_t *buf, size_t len) {
+#ifdef USE_MQTT_TLS
+  if (this->tls_ != nullptr && this->tls_->active) {
+    auto &tls = *this->tls_;
+    // After WANT_WRITE the record is already encrypted; mbedTLS must be called with the same length again
+    if (tls.inflight_len != 0)
+      len = tls.inflight_len;
+    const int ret = mbedtls_ssl_write(&tls.ssl, buf, len);
+    if (ret >= 0) {
+      tls.inflight_len = 0;
+      return ret;
+    }
+    if (ret == MBEDTLS_ERR_SSL_WANT_WRITE || ret == MBEDTLS_ERR_SSL_WANT_READ) {
+      tls.inflight_len = len;
+      errno = EAGAIN;
+      return -1;
+    }
+    ESP_LOGW(TAG, "TLS write failed: -0x%04x", static_cast<unsigned>(-ret));
+    errno = EIO;
+    return -1;
+  }
+#endif
+  return this->socket_->write(buf, len);
+}
+
+#ifdef USE_MQTT_TLS
+bool MQTTBackendXR806::tls_begin_() {
+  if (this->tls_ == nullptr) {
+    // Parsed once; later connections only reset the session and keep its buffers
+    auto tls = make_unique<TlsSession>();
+    int ret = mbedtls_ssl_config_defaults(&tls->conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM,
+                                          MBEDTLS_SSL_PRESET_DEFAULT);
+    if (ret == 0 && this->ca_certificate_ != nullptr) {
+      ret = mbedtls_x509_crt_parse(&tls->ca, reinterpret_cast<const unsigned char *>(this->ca_certificate_),
+                                   strlen(this->ca_certificate_) + 1);
+      if (ret != 0)
+        log_tls_error("Cannot parse certificate_authority", ret);
+    }
+    if (ret == 0 && this->cl_certificate_ != nullptr) {
+      ret = mbedtls_x509_crt_parse(&tls->own_cert, reinterpret_cast<const unsigned char *>(this->cl_certificate_),
+                                   strlen(this->cl_certificate_) + 1);
+      if (ret == 0) {
+        ret = mbedtls_pk_parse_key(&tls->own_key, reinterpret_cast<const unsigned char *>(this->cl_key_),
+                                   strlen(this->cl_key_) + 1, nullptr, 0);
+      }
+      if (ret == 0)
+        ret = mbedtls_ssl_conf_own_cert(&tls->conf, &tls->own_cert, &tls->own_key);
+      if (ret != 0)
+        log_tls_error("Cannot load the client certificate", ret);
+    }
+    if (ret == 0) {
+      mbedtls_ssl_conf_rng(&tls->conf, tls_random, nullptr);
+      if (this->ca_certificate_ != nullptr) {
+        mbedtls_ssl_conf_authmode(&tls->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+        mbedtls_ssl_conf_ca_chain(&tls->conf, &tls->ca, nullptr);
+        if (this->skip_cert_cn_check_)
+          mbedtls_ssl_conf_verify(&tls->conf, tls_ignore_cn, nullptr);
+      } else {
+        // verify_ssl: false; the configuration requires a CA otherwise
+        mbedtls_ssl_conf_authmode(&tls->conf, MBEDTLS_SSL_VERIFY_NONE);
+      }
+      ret = mbedtls_ssl_setup(&tls->ssl, &tls->conf);
+      if (ret != 0)
+        log_tls_error("TLS setup failed", ret);
+    }
+    if (ret != 0) {
+      this->close_(MQTTClientDisconnectReason::TLS_BAD_FINGERPRINT);
+      return false;
+    }
+    this->tls_ = std::move(tls);
+  } else if (int ret = mbedtls_ssl_session_reset(&this->tls_->ssl); ret != 0) {
+    log_tls_error("TLS reset failed", ret);
+    this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+    return false;
+  }
+  // Server name for SNI and for the certificate name check
+  if (int ret = mbedtls_ssl_set_hostname(&this->tls_->ssl, this->host_); ret != 0) {
+    log_tls_error("TLS host name rejected", ret);
+    this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+    return false;
+  }
+  mbedtls_ssl_set_bio(&this->tls_->ssl, this->socket_.get(), tls_send, tls_recv, nullptr);
+  this->tls_->active = true;
+  this->tls_->inflight_len = 0;
+  this->state_ = State::STATE_TLS_HANDSHAKE;
+  this->state_start_ = App.get_loop_component_start_time();
+  this->tls_handshake_();
+  return true;
+}
+
+void MQTTBackendXR806::tls_handshake_() {
+  const int ret = mbedtls_ssl_handshake(&this->tls_->ssl);
+  if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE)
+    return;
+  if (ret != 0) {
+    const uint32_t flags = mbedtls_ssl_get_verify_result(&this->tls_->ssl);
+    if (ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED) {
+      ESP_LOGW(TAG, "Broker certificate rejected (flags 0x%08" PRIx32 ")", flags);
+      this->close_(MQTTClientDisconnectReason::TLS_BAD_FINGERPRINT);
+    } else {
+      log_tls_error("TLS handshake failed", ret);
+      this->close_(MQTTClientDisconnectReason::TCP_DISCONNECTED);
+    }
+    return;
+  }
+  ESP_LOGD(TAG, "TLS session up: %s", mbedtls_ssl_get_ciphersuite(&this->tls_->ssl));
+  this->send_connect_();
+}
+#endif  // USE_MQTT_TLS
 
 uint16_t MQTTBackendXR806::next_packet_id_() {
   if (++this->last_packet_id_ == 0)

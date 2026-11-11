@@ -463,3 +463,38 @@ def test_standby_wake_pin_rejects_allow_other_uses(
 
     assert read_config({}) is None
     assert "wake_pin PA20 must be dedicated" in capsys.readouterr().out
+
+
+def test_mqtt_tls_with_ca_and_client_certificate(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("mqtt_tls.yaml"))
+
+    assert "USE_MQTT_TLS" in defines()
+    assert {"USE_MQTT_TLS_INSECURE", "USE_MQTT_CERT_BUNDLE"}.isdisjoint(defines())
+    assert "set_ca_certificate(" in generated
+    assert "set_cl_certificate(" in generated
+    assert "set_cl_key(" in generated
+    assert "set_skip_cert_cn_check(true)" in generated
+    assert "set_broker_port(8883)" in generated
+
+
+def test_mqtt_tls_without_verification(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("mqtt_tls_insecure.yaml"))
+
+    assert {"USE_MQTT_TLS", "USE_MQTT_TLS_INSECURE"} <= defines()
+    assert "set_ca_certificate(" not in generated
+
+
+def test_mqtt_tls_requires_a_certificate_authority(
+    component_config_path: Callable[[str], Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    CORE.config_path = component_config_path("mqtt_tls_no_ca.yaml")
+
+    assert read_config({}) is None
+    assert "XR806 has no certificate bundle" in capsys.readouterr().out

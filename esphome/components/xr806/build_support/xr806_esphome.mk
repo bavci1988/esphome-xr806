@@ -89,6 +89,8 @@ XR806_CXXFLAGS := \
     -I$(ROOT_PATH)/project/common/framework \
     -I$(ROOT_PATH)/include/net/lwip-2.1.2 \
     -I$(ROOT_PATH)/include/net/mbedtls-2.16.0 \
+    -I$(ROOT_PATH)/include/net/mbedtls-2.16.0/mbedtls/configs \
+    "-DMBEDTLS_CONFIG_FILE=<config-xr-mini-cliserv.h>" \
     -I$(ROOT_PATH)/include/driver/cmsis \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1 \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1/portable/GCC/ARM_CM33_NTZ \
