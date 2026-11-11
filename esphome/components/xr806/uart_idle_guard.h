@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace esphome::uart {
+namespace esphome::xr806 {
 
 // Hardware-idle quiet interval used before releasing the XR806 PM wakelock.
 // No timestamp from the beginning of TX is allowed to shorten the interval.
@@ -28,4 +28,4 @@ class UARTIdleGuard {
   bool observing_idle_{false};
 };
 
-}  // namespace esphome::uart
+}  // namespace esphome::xr806

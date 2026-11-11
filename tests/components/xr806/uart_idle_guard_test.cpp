@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "esphome/components/uart/uart_idle_guard.h"
+#include "esphome/components/xr806/uart_idle_guard.h"
 
-namespace esphome::uart::testing {
+namespace esphome::xr806::testing {
 
 TEST(UARTIdleGuard, QuietPeriodBeginsOnlyAfterHardwareIdle) {
   UARTIdleGuard guard;
@@ -29,4 +29,4 @@ TEST(UARTIdleGuard, MillisWrapAndZeroTimestamp) {
   EXPECT_TRUE(guard.ready(true, 200, 200));
 }
 
-}  // namespace esphome::uart::testing
+}  // namespace esphome::xr806::testing
