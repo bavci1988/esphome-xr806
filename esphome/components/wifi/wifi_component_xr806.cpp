@@ -202,6 +202,9 @@ bool WiFiComponent::wifi_start_ap_(const WiFiAP &ap) {
   std::memcpy(ssid, ap.ssid_.data(), ap.ssid_.size());
   if (!ap.password_.empty())
     std::memcpy(psk, ap.password_.data(), ap.password_.size());
+  // net_switch_mode(WLAN_MODE_HOSTAP) already started hostapd with the SDK default SSID, and
+  // wlan_ap_enable() fails on a running AP. Stop it first, as the vendor soft AP example does.
+  (void) wlan_ap_disable();
   if (wlan_ap_set(ssid, static_cast<uint8_t>(ap.ssid_.size()), ap.password_.empty() ? nullptr : psk) != 0)
     return false;
   if (ap.has_channel()) {
