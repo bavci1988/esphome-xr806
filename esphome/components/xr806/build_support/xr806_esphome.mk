@@ -203,6 +203,12 @@ $(XR806_FW_DIR)/sys_sdd_40M.bin: $(ROOT_PATH)/bin/xradio_v3/sys_sdd_40M.bin
 $(XR806_AWIH): $(XR806_FW_DIR)/app.bin $(XR806_FW_DIR)/app_xip.bin $(XR806_IMAGE_CFG) $(XR806_FW_DIR)/mkimage $(XR806_FW_DIR)/boot_40M.bin $(XR806_FW_DIR)/wlan_bl.bin $(XR806_FW_DIR)/wlan_fw.bin $(XR806_FW_DIR)/sys_sdd_40M.bin
 >cd $(XR806_FW_DIR) && ./mkimage -c image.cfg -o $(notdir $@)
 
+# snprintf() and friends come from the ROM without '%zu' support; printf_compat.cpp fixes the format first.
+XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/printf_compat.o
+$(XR806_OUTPUT): $(XR806_OBJDIR)/printf_compat.o
+$(XR806_OUTPUT): LD_FLAGS += -Wl,--wrap=snprintf -Wl,--wrap=vsnprintf -Wl,--wrap=sprintf -Wl,--wrap=vsprintf
+$(eval $(call XR806_COMPILE_CPP,printf_compat,$(XR806_SRC)/esphome/components/xr806/printf_compat.cpp))
+
 # Additional GPIO object, independent of existing object-list formatting.
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/gpio.o
 
