@@ -5,6 +5,8 @@
 
 extern "C" {
 #include "driver/chip/hal_uart.h"
+// From the SDK startup code; opens UART2 and routes the SDK's printf to it.
+int stdout_init(void);
 }
 
 namespace esphome::logger {
@@ -26,8 +28,12 @@ void Logger::pre_setup() {
     param.stopBits = UART_STOP_BITS_1;
     param.dataBits = UART_DATA_BITS_8;
     param.isAutoHwFlowCtrl = 0;
-    if (HAL_UART_Init(UART2_ID, &param) == HAL_OK)
+    // Share UART2 with the SDK console, so SDK messages and its fault dump reach the same pins as the log.
+    if (stdout_init() == 0 && HAL_UART_SetConfig(UART2_ID, &param) == HAL_OK) {
       log_uart = HAL_UART_GetInstance(UART2_ID);
+    } else if (HAL_UART_Init(UART2_ID, &param) == HAL_OK) {
+      log_uart = HAL_UART_GetInstance(UART2_ID);
+    }
   }
   global_logger = this;
   ESP_LOGI(TAG, "Log initialized");
