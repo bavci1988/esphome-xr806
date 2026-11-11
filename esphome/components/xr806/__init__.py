@@ -2,8 +2,7 @@
 
 from pathlib import Path
 
-from esphome import final_validate as fv
-from esphome import pins
+from esphome import final_validate as fv, pins
 import esphome.codegen as cg
 from esphome.components.const import CONF_ENABLED
 import esphome.config_validation as cv
