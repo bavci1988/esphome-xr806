@@ -277,4 +277,99 @@ TEST(XR806PreferenceJournal, ClearCommitsEmptyAndErasesOldSlot) {
   ASSERT_TRUE(r.used() == 0);
 }
 
+TEST(XR806PreferenceJournal, SafeModeCounterAndManualMarkerSurviveReboots) {
+  // Mirrors RTC_KEY and ENTER_SAFE_MODE_MAGIC in safe_mode/safe_mode.h.
+  // XR806 deliberately stores this "RTC" preference in flash.
+  constexpr uint32_t safe_mode_key = 233825507UL;
+  constexpr uint32_t manual_marker = 0x5afe5afeUL;
+  FakeFlash flash;
+
+  for (uint32_t boot = 1; boot <= 10; boot++) {
+    Journal j;
+    if (boot == 1) {
+      ASSERT_TRUE(!j.load(flash));
+    } else {
+      ASSERT_TRUE(j.load(flash));
+    }
+    uint32_t previous = 0;
+    if (boot > 1)
+      ASSERT_TRUE(j.get(safe_mode_key, reinterpret_cast<uint8_t *>(&previous), sizeof(previous)));
+    ASSERT_EQ(previous, boot - 1);
+    ASSERT_EQ(j.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&boot), sizeof(boot)), Put::PUT_RESULT_CHANGED);
+    ASSERT_TRUE(j.commit(flash));
+  }
+
+  Journal after_reset;
+  ASSERT_TRUE(after_reset.load(flash));
+  uint32_t count = 0;
+  ASSERT_TRUE(after_reset.get(safe_mode_key, reinterpret_cast<uint8_t *>(&count), sizeof(count)));
+  ASSERT_EQ(count, 10U);
+
+  // The manual safe-mode request uses the same persisted key, not an XR806 RTC region.
+  ASSERT_EQ(after_reset.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&manual_marker), sizeof(manual_marker)),
+            Put::PUT_RESULT_CHANGED);
+  ASSERT_TRUE(after_reset.commit(flash));
+  Journal pending;
+  ASSERT_TRUE(pending.load(flash));
+  ASSERT_TRUE(pending.get(safe_mode_key, reinterpret_cast<uint8_t *>(&count), sizeof(count)));
+  ASSERT_EQ(count, manual_marker);
+
+  // Simulate the success path: zero is staged in RAM and persisted at the next sync.
+  const uint32_t clear = 0;
+  ASSERT_EQ(pending.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&clear), sizeof(clear)),
+            Put::PUT_RESULT_CHANGED);
+  ASSERT_TRUE(pending.commit(flash));
+  Journal successful;
+  ASSERT_TRUE(successful.load(flash));
+  ASSERT_TRUE(successful.get(safe_mode_key, reinterpret_cast<uint8_t *>(&count), sizeof(count)));
+  ASSERT_EQ(count, 0U);
+}
+
+TEST(XR806PreferenceJournal, SafeModeCounterTornWritePreservesLastGoodBootCount) {
+  constexpr uint32_t safe_mode_key = 233825507UL;
+  for (int64_t cut : {0, 4, 15, 17, 23}) {
+    FakeFlash flash;
+    Journal seed;
+    ASSERT_TRUE(!seed.load(flash));
+    const uint32_t previous = 7;
+    ASSERT_EQ(seed.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&previous), sizeof(previous)),
+              Put::PUT_RESULT_CHANGED);
+    ASSERT_TRUE(seed.commit(flash));
+
+    Journal during_reboot;
+    ASSERT_TRUE(during_reboot.load(flash));
+    const uint32_t next = 8;
+    ASSERT_EQ(during_reboot.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&next), sizeof(next)),
+              Put::PUT_RESULT_CHANGED);
+    flash.cut_after = cut;  // Erase + partial write of inactive snapshot.
+    ASSERT_TRUE(!during_reboot.commit(flash));
+
+    Journal after_power_loss;
+    ASSERT_TRUE(after_power_loss.load(flash));
+    uint32_t restored = 0;
+    ASSERT_TRUE(after_power_loss.get(safe_mode_key, reinterpret_cast<uint8_t *>(&restored), sizeof(restored)));
+    ASSERT_EQ(restored, previous);
+  }
+}
+
+TEST(XR806PreferenceJournal, SafeModeCounterFallsBackWhenLatestSnapshotCorrupted) {
+  constexpr uint32_t safe_mode_key = 233825507UL;
+  FakeFlash flash;
+  Journal j;
+  ASSERT_TRUE(!j.load(flash));
+  const uint32_t first = 3;
+  ASSERT_EQ(j.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&first), sizeof(first)), Put::PUT_RESULT_CHANGED);
+  ASSERT_TRUE(j.commit(flash));
+  const uint32_t second = 4;
+  ASSERT_EQ(j.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&second), sizeof(second)), Put::PUT_RESULT_CHANGED);
+  ASSERT_TRUE(j.commit(flash));
+
+  flash.slots[1][Journal::HEADER_SIZE + Journal::RECORD_HEADER_SIZE] ^= 0x01;
+  Journal after_corruption;
+  ASSERT_TRUE(after_corruption.load(flash));
+  uint32_t restored = 0;
+  ASSERT_TRUE(after_corruption.get(safe_mode_key, reinterpret_cast<uint8_t *>(&restored), sizeof(restored)));
+  ASSERT_EQ(restored, first);
+}
+
 }  // namespace esphome::xr806::testing
