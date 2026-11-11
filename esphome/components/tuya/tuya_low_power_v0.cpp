@@ -27,12 +27,9 @@ static constexpr uint32_t LP_NETWORK_STATUS_INTERVAL_ID = 1;
 
 void Tuya::setup_low_power_() {
   this->init_state_ = TuyaInitState::INIT_PRODUCT;
-  // A missing UART parent is a permanent configuration error, not a valid
-  // reason to continue startup without RX-loss tracking.
   if (this->parent_ == nullptr) {
-    ESP_LOGE(LP_TAG, "Low-power MCU UART parent is missing");
     this->init_failed_ = true;
-    this->mark_failed();
+    this->mark_failed(LOG_STR("MCU UART missing"));
     return;
   }
   this->lp_uart_rx_errors_.reset(this->parent_->get_rx_error_count());
@@ -89,7 +86,11 @@ bool Tuya::check_low_power_uart_rx_errors_() {
   this->lp_v0_.command_timeout();
   this->lp_wire_.transport_fault();  // Do not replay an ambiguous CMD09/ACK.
   this->expected_response_.reset();
-  this->command_queue_.clear();
+  if (!this->command_queue_.empty()) {
+    ESP_LOGW(LP_TAG, "Discarded %u queued MCU commands after UART RX loss",
+             static_cast<unsigned>(this->command_queue_.size()));
+    this->command_queue_.clear();
+  }
   this->lp_network_status_ = 0xFF;
   this->invalidate_low_power_mode_epoch_();
   // The direct CMD01 retry is permitted while the wire is quarantined;

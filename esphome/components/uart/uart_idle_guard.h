@@ -20,7 +20,7 @@ class UARTIdleGuard {
       this->observing_idle_ = true;
       return false;
     }
-    return static_cast<uint32_t>(now_ms - this->idle_since_ms_) >= guard_ms;
+    return now_ms - this->idle_since_ms_ >= guard_ms;
   }
 
  private:

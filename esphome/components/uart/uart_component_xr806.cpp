@@ -315,7 +315,7 @@ void XR806UARTComponent::update_uart_idle_() {
   // The previous activity-start timestamp could expire while a long TX was still on the wire.
   const bool hardware_idle = this->rx_count_ == 0 && !HAL_UART_IsRxReady(this->uart_) && this->tx_hardware_idle_() &&
                              (this->uart_->STATUS & UART_BUSY_BIT) == 0;
-  const bool idle = this->idle_guard_.ready(hardware_idle, millis(), UART_IDLE_GUARD_MS);
+  const bool idle = this->idle_guard_.ready(hardware_idle, App.get_loop_component_start_time(), UART_IDLE_GUARD_MS);
 
   if (idle && this->uart_pm_wakelock_held_) {
     if (pm_wake_unlock(&this->uart_pm_wakelock_) != 0) {
