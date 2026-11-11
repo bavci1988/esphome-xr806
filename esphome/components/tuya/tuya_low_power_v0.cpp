@@ -27,8 +27,15 @@ static constexpr uint32_t LP_NETWORK_STATUS_INTERVAL_ID = 1;
 
 void Tuya::setup_low_power_() {
   this->init_state_ = TuyaInitState::INIT_PRODUCT;
-  if (this->parent_ != nullptr)
-    this->lp_uart_rx_errors_.reset(this->parent_->get_rx_error_count());
+  // A missing UART parent is a permanent configuration error, not a valid
+  // reason to continue startup without RX-loss tracking.
+  if (this->parent_ == nullptr) {
+    ESP_LOGE(LP_TAG, "Low-power MCU UART parent is missing");
+    this->init_failed_ = true;
+    this->mark_failed();
+    return;
+  }
+  this->lp_uart_rx_errors_.reset(this->parent_->get_rx_error_count());
   if (this->mcu_wake_pin_ != nullptr) {
     this->mcu_wake_pin_->setup();
     this->mcu_wake_pin_->digital_write(false);  // Inactive logical level.
