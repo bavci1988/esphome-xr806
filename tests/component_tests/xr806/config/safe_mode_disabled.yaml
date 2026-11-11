@@ -1,0 +1,12 @@
+# Deliberate negative test: disabling safe mode is not recommended for deployment.
+esphome:
+  name: xr806-no-safe-mode
+xr806:
+  board: wxu
+wifi:
+  ssid: TEST-NETWORK-NO-HARDWARE
+  password: TestOnlyPassword123
+ota:
+  - platform: esphome
+safe_mode:
+  disabled: true
