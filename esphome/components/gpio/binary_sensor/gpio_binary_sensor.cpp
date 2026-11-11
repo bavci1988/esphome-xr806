@@ -53,8 +53,17 @@ void GPIOBinarySensor::setup() {
   if (this->store_.use_interrupt_) {
     auto *internal_pin = static_cast<InternalGPIOPin *>(this->pin_);
     this->store_.setup(internal_pin, this);
-    this->publish_initial_state(this->store_.get_state());
-    return;
+#ifdef USE_XR806
+    // XR806 HAL can reject IRQ registration. Do not leave the sensor frozen with no IRQ callback.
+    if (!internal_pin->interrupt_attached()) {
+      ESP_LOGW(TAG, "GPIO interrupt registration failed; falling back to polling");
+      this->store_.use_interrupt_ = false;
+    }
+#endif
+    if (this->store_.use_interrupt_) {
+      this->publish_initial_state(this->store_.get_state());
+      return;
+    }
   }
 #endif
   this->pin_->setup();

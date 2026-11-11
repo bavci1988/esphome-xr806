@@ -399,3 +399,56 @@ def test_gpio_accepts_input_and_output() -> None:
 
     mode = {"input": True, "output": True, "pullup": False, "pulldown": False}
     assert validate_gpio_mode(mode) == mode
+
+
+@pytest.mark.parametrize("standby_type", ["standby", "standby_trial"])
+@pytest.mark.parametrize("gpio_pin", ["PA19", "PA20"])
+def test_standby_wake_pin_is_dedicated(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    standby_type: str,
+    gpio_pin: str,
+) -> None:
+    # The standby HAL configures PA20 directly, so the normal GPIO pin
+    # duplicate-use validation does not detect a second consumer.
+    standby_fields = (
+        "    enabled: true\n    wake_pin: PA20\n    wake_edge: falling\n"
+        if standby_type == "standby"
+        else "    confirm_offline: true\n    wake_after_ms: 1000\n    wake_pin: PA20\n"
+    )
+    config = (
+        "esphome:\n  name: xr806-wake-pin-test\n"
+        "xr806:\n  board: wxu\n  lowpower: true\n"
+        f"  {standby_type}:\n{standby_fields}"
+        "switch:\n  - platform: gpio\n    id: test_switch\n"
+        f"    pin: {gpio_pin}\n"
+    )
+    CORE.config_path = tmp_path / "wake_gpio.yaml"
+    CORE.config_path.write_text(config)
+
+    result = read_config({})
+    if gpio_pin == "PA20":
+        assert result is None
+        assert (
+            f"xr806.{standby_type}.wake_pin PA20 must be dedicated"
+            in capsys.readouterr().out
+        )
+    else:
+        assert result is not None
+
+
+def test_standby_wake_pin_rejects_allow_other_uses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = (
+        "esphome:\n  name: xr806-wake-pin-sharing\n"
+        "xr806:\n  board: wxu\n  lowpower: true\n"
+        "  standby:\n    enabled: true\n    wake_pin: PA20\n    wake_edge: falling\n"
+        "binary_sensor:\n  - platform: gpio\n    id: wake_sensor\n"
+        "    pin:\n      number: PA20\n      allow_other_uses: true\n"
+    )
+    CORE.config_path = tmp_path / "wake_shared.yaml"
+    CORE.config_path.write_text(config)
+
+    assert read_config({}) is None
+    assert "wake_pin PA20 must be dedicated" in capsys.readouterr().out
