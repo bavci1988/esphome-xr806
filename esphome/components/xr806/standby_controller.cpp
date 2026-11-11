@@ -88,7 +88,8 @@ void XR806StandbyController::request_preflight(bool requested) {
 
 bool XR806StandbyController::services_quiesced() const {
   const uint32_t busy = XR806LowPowerPolicy::NETWORK_BUSY | XR806LowPowerPolicy::API_BUSY |
-                        XR806LowPowerPolicy::OTA_BUSY | XR806LowPowerPolicy::MDNS_BUSY | XR806LowPowerPolicy::HTTP_BUSY;
+                        XR806LowPowerPolicy::OTA_BUSY | XR806LowPowerPolicy::MDNS_BUSY |
+                        XR806LowPowerPolicy::HTTP_BUSY | XR806LowPowerPolicy::MQTT_BUSY;
   return this->may_quiesce() && (lowpower_policy().blockers() & busy) == 0;
 }
 
@@ -126,6 +127,8 @@ void XR806StandbyController::setup() {
     p.set_mdns_idle(true);
   if (this->no_http_)
     p.set_http_idle(true);
+  if (this->no_mqtt_)
+    p.set_mqtt_idle(true);
   if (this->external_sync_required_)
     p.require_external_mcu(true);
   this->state_.configure(this->quiet_ms_, this->min_awake_ms_);
@@ -163,7 +166,8 @@ bool XR806StandbyController::may_quiesce() const {
   const uint32_t required =
       (this->no_network_ ? 0u : XR806LowPowerPolicy::NETWORK_BUSY) |
       (this->no_api_ ? 0u : XR806LowPowerPolicy::API_BUSY) | (this->no_ota_ ? 0u : XR806LowPowerPolicy::OTA_BUSY) |
-      (this->no_mdns_ ? 0u : XR806LowPowerPolicy::MDNS_BUSY) | (this->no_http_ ? 0u : XR806LowPowerPolicy::HTTP_BUSY);
+      (this->no_mdns_ ? 0u : XR806LowPowerPolicy::MDNS_BUSY) | (this->no_http_ ? 0u : XR806LowPowerPolicy::HTTP_BUSY) |
+      (this->no_mqtt_ ? 0u : XR806LowPowerPolicy::MQTT_BUSY);
   uint32_t registered = 0;
   for (size_t i = 0; i < this->participant_count_; ++i) {
     registered |= this->participants_[i]->owned_services();
@@ -362,6 +366,8 @@ abort:
       p.set_mdns_idle(false);
     if (!this->no_http_)
       p.set_http_idle(false);
+    if (!this->no_mqtt_)
+      p.set_mqtt_idle(false);
 
     XR806StandbyResume resume{};
     resume.event_bitmap = event;

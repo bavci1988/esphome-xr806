@@ -3,10 +3,23 @@ esphome:
 xr806:
   board: wxu
   lowpower: true
+  wlan:
+    network_suspend: true
   standby:
     enabled: true
+    wake_pin: PA20
+    wake_edge: falling
 wifi:
   ssid: XR806-CI-NO-REAL-NETWORK
   password: test-only-not-secret
+logger:
+  level: DEBUG
 mqtt:
   broker: 192.168.1.10
+  clean_session: false
+  persist_subscriptions: true
+  on_message:
+    - topic: xr806-mqtt-standby/command
+      qos: 1
+      then:
+        - logger.log: Command received
