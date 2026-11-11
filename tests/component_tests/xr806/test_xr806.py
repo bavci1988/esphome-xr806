@@ -274,6 +274,34 @@ def test_mdns_announces_api_web_server_and_prometheus(
     assert counts == {"MDNS_SERVICE_COUNT=3"}
 
 
+def test_mqtt_uses_the_native_backend(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("mqtt.yaml"))
+
+    assert {
+        "USE_MQTT",
+        "USE_MQTT_SESSION_PERSISTENCE",
+        "USE_SOCKET_IPV4_RESOLVE",
+        "USE_SOCKET_IMPL_LWIP_SOCKETS",
+        "USE_JSON",
+    } <= defines()
+    assert "MQTT_MAX_PAYLOAD_SIZE=8192" in {str(define) for define in CORE.defines}
+    assert "mqtt::MQTTClientComponent" in generated
+    assert "mqtt_subscribe::MQTTSubscribeSensor" in generated
+
+
+def test_mqtt_rejects_standby(
+    component_config_path: Callable[[str], Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    CORE.config_path = component_config_path("mqtt_standby.yaml")
+
+    assert read_config({}) is None
+    assert "xr806.standby cannot be combined with mqtt" in capsys.readouterr().out
+
+
 def test_gpio_pins(
     generate_main: Callable[[str | Path], str],
     component_config_path: Callable[[str], Path],

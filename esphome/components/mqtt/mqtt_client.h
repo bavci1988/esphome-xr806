@@ -22,6 +22,8 @@
 #include "mqtt_backend_esp8266.h"
 #elif defined(USE_LIBRETINY)
 #include "mqtt_backend_libretiny.h"
+#elif defined(USE_XR806)
+#include "mqtt_backend_xr806.h"
 #endif
 #if defined(USE_MQTT_SESSION_PERSISTENCE) && !defined(USE_ESP32)
 #include "mqtt_subscription_fingerprint.h"
@@ -430,6 +432,8 @@ class MQTTClientComponent final : public Component {
   MQTTBackendESP8266 mqtt_backend_;
 #elif defined(USE_LIBRETINY)
   MQTTBackendLibreTiny mqtt_backend_;
+#elif defined(USE_XR806)
+  MQTTBackendXR806 mqtt_backend_;
 #endif
 
   MQTTClientState state_{MQTT_CLIENT_DISABLED};
