@@ -54,6 +54,9 @@ static std::atomic<bool> s_scan_failed{false};
 static std::atomic<bool> s_connect_failed{false};
 // Main loop only.
 static bool s_observer_attached = false;
+// False when the vendor platform_init() could not start the WLAN core. Opening a netif then
+// calls into net80211 without a driver attached and faults, so every WLAN call is skipped.
+static bool s_wlan_ready = false;
 static bool s_sta_enabled = false;
 #ifdef USE_WIFI_AP
 static bool s_ap_mode = false;
@@ -105,6 +108,8 @@ static bool leave_ap_mode() {
 #endif
 
 static bool sta_enable() {
+  if (!s_wlan_ready)
+    return false;
   if (s_sta_enabled)
     return true;
 #ifdef USE_WIFI_AP
@@ -118,6 +123,11 @@ static bool sta_enable() {
 }
 
 void WiFiComponent::wifi_pre_setup_() {
+  s_wlan_ready = wlan_netif_get(WLAN_MODE_NONE) != nullptr;
+  if (!s_wlan_ready) {
+    this->mark_failed(LOG_STR("WLAN core did not start at boot"));
+    return;
+  }
   if (!s_observer_attached) {
     observer_base *observer =
         sys_callback_observer_create(CTRL_MSG_TYPE_NETWORK, NET_CTRL_MSG_ALL, network_event_cb, nullptr);
@@ -132,6 +142,8 @@ void WiFiComponent::wifi_pre_setup_() {
 }
 
 bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
+  if (!s_wlan_ready)
+    return false;
   if (sta.has_value()) {
     if (sta.value())
       return sta_enable();
@@ -175,6 +187,8 @@ bool WiFiComponent::wifi_ap_ip_config_(const optional<ManualIP> &manual_ip) {
 }
 
 bool WiFiComponent::wifi_start_ap_(const WiFiAP &ap) {
+  if (!s_wlan_ready)
+    return false;
   if (!this->wifi_mode_(false, true))
     return false;
 
@@ -257,6 +271,8 @@ bool WiFiComponent::wifi_apply_hostname_() {
 }
 
 bool WiFiComponent::wifi_sta_connect_(const WiFiAP &ap) {
+  if (!s_wlan_ready)
+    return false;
 #ifdef USE_WIFI_MANUAL_IP
   if (!this->wifi_sta_ip_config_(ap.get_manual_ip()))
     return false;
@@ -295,6 +311,8 @@ WiFiSTAConnectStatus WiFiComponent::wifi_sta_connect_status_() const {
 }
 
 bool WiFiComponent::wifi_scan_start_(bool passive) {
+  if (!s_wlan_ready)
+    return false;
   {
     ScanResultsLock lock(this);
     this->scan_result_.clear();
