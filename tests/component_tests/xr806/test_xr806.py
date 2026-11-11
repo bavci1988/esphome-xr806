@@ -337,14 +337,25 @@ def test_mqtt_uses_the_native_backend(
     assert "mqtt_subscribe::MQTTSubscribeSensor" in generated
 
 
-def test_mqtt_rejects_standby(
+def test_mqtt_with_standby_registers_its_participant(
+    generate_main: Callable[[str | Path], str],
     component_config_path: Callable[[str], Path],
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    CORE.config_path = component_config_path("mqtt_standby.yaml")
+    generated = generate_main(component_config_path("mqtt_standby.yaml"))
 
-    assert read_config({}) is None
-    assert "xr806.standby cannot be combined with mqtt" in capsys.readouterr().out
+    assert {"USE_MQTT", "USE_XR806_STANDBY_CONTROLLER"} <= defines()
+    assert "xr806::XR806MQTTStandby" in generated
+    assert "set_no_mqtt(false)" in generated
+
+
+def test_standby_without_mqtt_needs_no_mqtt_owner(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("http_request_standby.yaml"))
+
+    assert "set_no_mqtt(true)" in generated
+    assert "XR806MQTTStandby" not in generated
 
 
 def test_gpio_pins(

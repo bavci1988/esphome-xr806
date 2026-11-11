@@ -56,8 +56,15 @@ class MQTTBackendXR806 final : public MQTTBackend {
     this->on_publish_.add(std::move(callback));
   }
 
+  MQTTBackendXR806();
+
+  /// True while the broker socket is open, including a disconnect that is still sending its last bytes.
+  /// Standby must not switch the radio off under it.
+  static bool any_open();
+
   bool connected() const final { return this->state_ == State::STATE_CONNECTED; }
   void connect() final;
+  /// Sends what is still queued and a DISCONNECT, so the broker does not publish the will, then closes.
   void disconnect() final;
   bool subscribe(const char *topic, uint8_t qos) final;
   bool can_subscribe() const final { return this->tx_pending_.empty(); }
@@ -76,6 +83,7 @@ class MQTTBackendXR806 final : public MQTTBackend {
     STATE_TCP_CONNECTING,
     STATE_WAIT_CONNACK,
     STATE_CONNECTED,
+    STATE_CLOSING,  ///< Disconnect reported; the queued bytes and the DISCONNECT are still being sent
   };
   /// Where the parser is inside the packet that is being received.
   enum class RxState : uint8_t {
@@ -92,6 +100,7 @@ class MQTTBackendXR806 final : public MQTTBackend {
   void check_tcp_();
   /// Closes the socket; reports reason to the disconnect callbacks when a connection was open or being opened.
   void close_(MQTTClientDisconnectReason reason);
+  void loop_closing_();
   void read_();
   /// Feeds received bytes to the parser; returns false when the connection was closed.
   bool parse_(const uint8_t *data, size_t len);
