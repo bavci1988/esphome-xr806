@@ -296,12 +296,12 @@ class Tuya final : public Component,
 
 #ifdef USE_TUYA_LOW_POWER_V0
 // Explicit DP106 refresh for automation; no unsolicited boot refresh.
-class TuyaRefreshAction : public Action<> {
+template<typename... Ts> class TuyaRefreshAction : public Action<Ts...> {
  public:
   explicit TuyaRefreshAction(Tuya *parent) : parent_(parent) {}
 
  protected:
-  void play() override { (void) this->parent_->request_low_power_refresh(); }
+  void play(const Ts &...x) override { (void) this->parent_->request_low_power_refresh(); }
 
   Tuya *parent_;
 };
