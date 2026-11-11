@@ -292,8 +292,9 @@ TEST(XR806PreferenceJournal, SafeModeCounterAndManualMarkerSurviveReboots) {
       ASSERT_TRUE(j.load(flash));
     }
     uint32_t previous = 0;
-    if (boot > 1)
+    if (boot > 1) {
       ASSERT_TRUE(j.get(safe_mode_key, reinterpret_cast<uint8_t *>(&previous), sizeof(previous)));
+    }
     ASSERT_EQ(previous, boot - 1);
     ASSERT_EQ(j.put(safe_mode_key, reinterpret_cast<const uint8_t *>(&boot), sizeof(boot)), Put::PUT_RESULT_CHANGED);
     ASSERT_TRUE(j.commit(flash));
