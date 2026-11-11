@@ -1,0 +1,24 @@
+# Code-generation fixture only; never flash these test credentials to a live TRV16.
+esphome:
+  name: xr806-safe-mode
+xr806:
+  board: wxu
+wifi:
+  ssid: TEST-NETWORK-NO-HARDWARE
+  password: TestOnlyPassword123
+api:
+logger:
+  baud_rate: 115200
+ota:
+  - platform: esphome
+safe_mode:
+  storage: flash
+  num_attempts: 4
+  boot_is_good_after: 30s
+  reboot_timeout: 2min
+  on_safe_mode:
+    then:
+      - logger.log: 'WXU recovery mode'
+button:
+  - platform: safe_mode
+    name: "Restart in recovery"
