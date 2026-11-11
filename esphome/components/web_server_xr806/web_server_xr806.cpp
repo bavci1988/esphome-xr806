@@ -541,8 +541,8 @@ void AsyncWebServer::process_(Client &c) {
   if (c.output.empty()) {
     const auto &r = *c.response;
     char start[128];
-    std::snprintf(start, sizeof(start), "HTTP/1.1 %d %s\r\nContent-Length: %zu\r\nConnection: close\r\n", r.status(),
-                  reason_phrase(r.status()), r.get_content_size());
+    std::snprintf(start, sizeof(start), "HTTP/1.1 %d %s\r\nContent-Length: %u\r\nConnection: close\r\n", r.status(),
+                  reason_phrase(r.status()), static_cast<unsigned int>(r.get_content_size()));
     c.output = start;
     if (!r.content_type().empty()) {
       c.output += "Content-Type: " + r.content_type() + "\r\n";
@@ -689,7 +689,10 @@ void AsyncEventSource::queue_to_session_(Session &session, const char *message, 
   frame.append(message, len);
   frame += "\n\n";
   char prefix[24];
-  std::snprintf(prefix, sizeof(prefix), "%zx\r\n", frame.size());
+  // XR806's ROM/newlib printf backend does not support the C99 size_t 'z'
+  // length modifier: "%zx" is emitted as "zx" (curl sees 0x7A), breaking
+  // chunked SSE. On this 32-bit target size_t fits in unsigned int.
+  std::snprintf(prefix, sizeof(prefix), "%x\r\n", static_cast<unsigned int>(frame.size()));
   const size_t extra = std::strlen(prefix) + frame.size() + 2;
   // Bounded queue: slow browsers are disconnected instead of consuming
   // unbounded SRAM or stalling the MCU UART and main application loop.
