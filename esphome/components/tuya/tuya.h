@@ -20,6 +20,7 @@
 #include "tuya_low_power_product_retry.h"
 #include "tuya_low_power_standby_state.h"
 #include "tuya_low_power_wire_transactions.h"
+#include "tuya_low_power_uart_errors.h"
 
 #ifdef USE_XR806_STANDBY_CONTROLLER
 #include "esphome/components/xr806/standby_controller.h"
@@ -191,6 +192,7 @@ class Tuya final : public Component,
   // Entry points called from the standard Tuya code paths in tuya.cpp.
   void setup_low_power_();
   void loop_low_power_();
+  bool check_low_power_uart_rx_errors_();
   void dump_low_power_config_();
   void on_low_power_rx_byte_();
   void preempt_low_power_sleep_();
@@ -250,6 +252,7 @@ class Tuya final : public Component,
   bool trv16_pb04_active_high_{false};
 #endif
   TuyaLowPowerAutoBaud lp_autobaud_{};
+  TuyaLowPowerUartErrors lp_uart_rx_errors_{};
   TuyaLowPowerV0Session lp_v0_{};
   TuyaLowPowerProductInfo lp_product_{};
   // Bounded CMD01 JSON copy for diagnostics, no extra heap allocation.
