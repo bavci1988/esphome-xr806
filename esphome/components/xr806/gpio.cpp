@@ -55,6 +55,9 @@ static ESPHOME_ALWAYS_INLINE inline void write_level(uint8_t pin, bool level) {
 ISRInternalGPIOPin XR806GPIOPin::to_isr() const { return ISRInternalGPIOPin(this); }
 
 void XR806GPIOPin::attach_interrupt_(void (*func)(void *), void *arg, gpio::InterruptType type) const {
+  this->interrupt_attached_ = false;
+  if (func == nullptr)
+    return;
   GPIO_IrqEvent event;
   switch (type) {
     case gpio::INTERRUPT_RISING_EDGE:
@@ -86,19 +89,25 @@ void XR806GPIOPin::attach_interrupt_(void (*func)(void *), void *arg, gpio::Inte
   if (HAL_GPIO_EnableIRQ(gpio_port(this->pin_), gpio_pin(this->pin_), &irq) != HAL_OK) {
     configure(this->pin_, flags_to_mode(this->flags_), this->flags_);
     ESP_LOGE(TAG, "Cannot attach interrupt to pin %u", this->pin_);
+    return;
   }
+  this->interrupt_attached_ = true;
 }
 
 void XR806GPIOPin::detach_interrupt() const {
   HAL_GPIO_DisableIRQ(gpio_port(this->pin_), gpio_pin(this->pin_));
+  this->interrupt_attached_ = false;
   configure(this->pin_, flags_to_mode(this->flags_), this->flags_);
 }
 
-void XR806GPIOPin::pin_mode(gpio::Flags flags) { configure(this->pin_, flags_to_mode(flags), flags); }
+void XR806GPIOPin::pin_mode(gpio::Flags flags) {
+  this->flags_ = flags;
+  configure(this->pin_, flags_to_mode(flags), flags);
+}
 
 size_t XR806GPIOPin::dump_summary(char *buffer, size_t len) const {
-  return buf_append_printf(buffer, len, 0, "P%c%u", this->pin_ >= 32 ? 'B' : 'A',
-                           static_cast<unsigned>(this->pin_ & 0x1F));
+  return buf_append_printf(buffer, len, 0, "P%c%u%s", this->pin_ >= 32 ? 'B' : 'A',
+                           static_cast<unsigned>(this->pin_ & 0x1F), this->inverted_ ? " (inverted)" : "");
 }
 
 bool XR806GPIOPin::digital_read() { return read_level(this->pin_) != this->inverted_; }
@@ -126,8 +135,10 @@ void IRAM_ATTR ISRInternalGPIOPin::clear_interrupt() {
 }
 
 void IRAM_ATTR ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
-  const uint8_t pin = static_cast<XR806GPIOPin *>(this->arg_)->get_pin();
-  configure(pin, flags_to_mode(flags), flags);
+  auto *pin = static_cast<XR806GPIOPin *>(this->arg_);
+  // Share the current mode with normal-context clients, including IRQ detach/restore.
+  pin->set_flags(flags);
+  configure(pin->get_pin(), flags_to_mode(flags), flags);
 }
 
 }  // namespace esphome
