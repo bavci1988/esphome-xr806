@@ -193,6 +193,7 @@ class Tuya final : public Component,
   void setup_low_power_();
   void loop_low_power_();
   bool check_low_power_uart_rx_errors_();
+  uint32_t low_power_uart_rx_error_count_() const;
   void dump_low_power_config_();
   void on_low_power_rx_byte_();
   void preempt_low_power_sleep_();
