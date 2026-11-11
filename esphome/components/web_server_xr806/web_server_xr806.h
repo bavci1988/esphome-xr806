@@ -246,6 +246,8 @@ class AsyncEventSource : public AsyncWebHandler {
     size_t sent{0};
     uint32_t last_progress{0};
     std::unique_ptr<web_server::ListEntitiesIterator> entities_iterator;
+    // Set where the socket is dropped without a log line (queue_to_session_ also runs from the log callback).
+    bool overflowed{false};
   };
   void queue_to_session_(Session &session, const char *message, size_t len, const char *event, uint32_t id,
                          uint32_t reconnect);

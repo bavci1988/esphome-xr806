@@ -653,6 +653,8 @@ void AsyncEventSource::handleRequest(AsyncWebServerRequest *req) {
   auto config = this->web_server_->get_config_json();
   this->queue_to_session_(this->sessions_.back(), config.c_str(), config.size(), "ping",
                           App.get_loop_component_start_time(), 30000);
+  ESP_LOGD(TAG, "Event stream opened (%u open), config %u bytes", static_cast<unsigned>(this->sessions_.size()),
+           static_cast<unsigned>(config.size()));
 #ifdef USE_WEBSERVER_SORTING
   for (const auto &group : this->web_server_->sorting_groups_) {
     json::JsonBuilder builder;
@@ -695,6 +697,7 @@ void AsyncEventSource::queue_to_session_(Session &session, const char *message, 
   // unbounded SRAM or stalling the MCU UART and main application loop.
   if (extra > 8192 || session.pending.size() > 8192 - extra) {
     session.socket.reset();
+    session.overflowed = true;
     return;
   }
   session.pending += prefix;
@@ -749,6 +752,8 @@ bool AsyncEventSource::loop() {
         continue;
     }
     if (now - session.last_progress > 20000) {
+      ESP_LOGW(TAG, "Event stream closed: no progress for 20 s (%u bytes pending)",
+               static_cast<unsigned>(session.pending.size() - session.sent));
       session.socket.reset();
       continue;
     }
@@ -758,8 +763,11 @@ bool AsyncEventSource::loop() {
     const ssize_t n =
         session.socket->send(session.pending.data() + session.sent, std::min<size_t>(1024, pending), MSG_DONTWAIT);
     if (n < 0) {
-      if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+      const int err = errno;
+      if (err != EAGAIN && err != EWOULDBLOCK && err != EINTR) {
+        ESP_LOGW(TAG, "Event stream closed: send failed, errno %d", err);
         session.socket.reset();
+      }
       continue;
     }
     if (n > 0) {
@@ -770,6 +778,10 @@ bool AsyncEventSource::loop() {
         session.sent = 0;
       }
     }
+  }
+  for (const auto &session : this->sessions_) {
+    if (session.overflowed)
+      ESP_LOGW(TAG, "Event stream closed: send queue over 8 KiB");
   }
   this->sessions_.erase(std::remove_if(this->sessions_.begin(), this->sessions_.end(),
                                        [](const Session &s) { return s.socket == nullptr; }),
