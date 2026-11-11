@@ -11,7 +11,7 @@ class XR806GPIOPin final : public GPIOPin {
  public:
   void set_pin(uint8_t pin) { this->pin_ = pin; }
   void set_inverted(bool inverted) { this->inverted_ = inverted; }
-  void set_flags(gpio::Flags flags) { this->flags_ = flags; }
+  ESPHOME_ALWAYS_INLINE void set_flags(gpio::Flags flags) { this->flags_ = flags; }
 
   void setup() override { this->pin_mode(this->flags_); }
   void pin_mode(gpio::Flags flags) override;
@@ -24,9 +24,9 @@ class XR806GPIOPin final : public GPIOPin {
     this->attach_interrupt_(reinterpret_cast<void (*)(void *)>(func), arg, type);
   }
   ISRInternalGPIOPin to_isr() const;
-  uint8_t get_pin() const { return this->pin_; }
+  ESPHOME_ALWAYS_INLINE uint8_t get_pin() const { return this->pin_; }
   gpio::Flags get_flags() const override { return this->flags_; }
-  bool is_inverted() const { return this->inverted_; }
+  ESPHOME_ALWAYS_INLINE bool is_inverted() const { return this->inverted_; }
   bool is_internal() override { return true; }
 
  protected:
