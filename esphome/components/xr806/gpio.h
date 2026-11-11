@@ -19,6 +19,7 @@ class XR806GPIOPin final : public GPIOPin {
   void digital_write(bool value) override;
   size_t dump_summary(char *buffer, size_t len) const override;
   void detach_interrupt() const;
+  bool interrupt_attached() const { return this->interrupt_attached_; }
   template<typename T> void attach_interrupt(void (*func)(T *), T *arg, gpio::InterruptType type) const {
     this->attach_interrupt_(reinterpret_cast<void (*)(void *)>(func), arg, type);
   }
@@ -34,6 +35,7 @@ class XR806GPIOPin final : public GPIOPin {
   uint8_t pin_{};
   bool inverted_{};
   gpio::Flags flags_{};
+  mutable bool interrupt_attached_{false};
 };
 
 }  // namespace esphome::xr806
