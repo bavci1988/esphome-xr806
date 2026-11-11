@@ -37,24 +37,31 @@ void XR806MQTTStandby::standby_preflight(bool requested) {
     this->restore_();
     return;
   }
-  if (!this->may_quiesce())
-    return;
   auto *client = mqtt::global_mqtt_client;
-  if (client == nullptr)
-    return;  // Fail closed: no client, no idle vote
+  if (!this->may_quiesce() || client == nullptr) {
+    lowpower_policy().set_mqtt_idle(false);  // Fail closed: no client, no idle vote
+    return;
+  }
   if (!this->parked_) {
     this->reenable_ = !client->is_disabled();
     this->parked_ = true;
     if (this->reenable_)
       client->disable();
   }
-  // Idle only once the DISCONNECT and anything queued before it have left and the socket is closed
-  if (mqtt::MQTTBackendXR806::any_open())
-    return;
-  lowpower_policy().set_mqtt_idle(true);
+  // Re-checked on every pass: an automation that enables the client again during the preflight is new work and
+  // vetoes this attempt; it is not switched off again
+  lowpower_policy().set_mqtt_idle(this->quiet_(client));
 }
 
-bool XR806MQTTStandby::prepare_for_standby() { return this->parked_ && !mqtt::MQTTBackendXR806::any_open(); }
+bool XR806MQTTStandby::quiet_(const mqtt::MQTTClientComponent *client) const {
+  // Idle only once the broker has closed the connection after the DISCONNECT, or the timeout ran out
+  return this->parked_ && client->is_disabled() && !mqtt::MQTTBackendXR806::any_open();
+}
+
+bool XR806MQTTStandby::prepare_for_standby() {
+  auto *client = mqtt::global_mqtt_client;
+  return client != nullptr && this->quiet_(client);
+}
 
 void XR806MQTTStandby::restore_() {
   if (!this->parked_)
