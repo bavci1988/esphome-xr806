@@ -80,6 +80,7 @@ from esphome.const import (
     PLATFORM_ESP8266,
     PLATFORM_LN882X,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
     Framework,
     PlatformFramework,
 )
@@ -101,6 +102,8 @@ DOMAIN = "mqtt"
 def AUTO_LOAD():
     if CORE.is_esp8266 or CORE.is_libretiny:
         return ["async_tcp", "json"]
+    if CORE.is_xr806:
+        return ["json", "socket"]
     return ["json"]
 
 
@@ -413,6 +416,7 @@ CONFIG_SCHEMA = cv.All(
                 bk72xx=16384,
                 rtl87xx=16384,
                 ln882x=16384,
+                xr806=8192,
             ): cv.All(cv.validate_bytes, cv.int_range(min=512, max=1048576)),
             cv.SplitDefault(CONF_IDF_SEND_ASYNC, esp32=False): cv.All(
                 cv.boolean, cv.only_on_esp32
@@ -488,6 +492,7 @@ CONFIG_SCHEMA = cv.All(
             PLATFORM_ESP8266,
             PLATFORM_LN882X,
             PLATFORM_RTL87XX,
+            PLATFORM_XR806,
         ]
     ),
     _consume_mqtt_sockets,
@@ -671,6 +676,10 @@ async def to_code(config):
             include_builtin_idf_component("mqtt")
         # esp-mqtt links transport_ssl.c (esp_tls) even for plain MQTT
         request_tls()
+
+    if CORE.is_xr806:
+        # The XR806 backend resolves the broker with the shared IPv4 lookup
+        socket.require_ipv4_resolve()
 
     cg.add_define("USE_MQTT")
     cg.add_define("MQTT_MAX_PAYLOAD_SIZE", config[CONF_MAX_PAYLOAD_SIZE])
@@ -952,6 +961,7 @@ _platform_filter = filter_source_files_from_platform(
             PlatformFramework.ESP32_ARDUINO,
             PlatformFramework.ESP32_IDF,
         },
+        "mqtt_backend_xr806.cpp": {PlatformFramework.XR806_XRADIO},
     }
 )
 
