@@ -116,11 +116,6 @@ class UARTComponent {
   // Hardware UARTs always return true. USB-backed UARTs override to reflect actual connection state.
   virtual bool is_connected() { return true; }
 
-  // Monotonic RX corruption/loss counter, when supported. A non-zero change
-  // tells framed protocols to discard in-flight state and resynchronize.
-  // Default UART backends do not expose hardware error telemetry.
-  virtual uint32_t get_rx_error_count() const { return 0; }
-
   // Sets the maximum time to wait for TX to drain during flush().
   // Only meaningful on ESP32 (IDF). Other platforms ignore this value.
   // @param flush_timeout_ms Timeout in milliseconds; 0 means wait indefinitely.

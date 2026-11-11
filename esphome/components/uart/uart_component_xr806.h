@@ -40,7 +40,9 @@ class XR806UARTComponent final : public UARTComponent, public Component {
 
   /// False after a TX timeout or a failed reconfiguration; the fault is not cleared.
   bool is_connected() override { return this->initialized_ && !this->tx_fault_; }
-  uint32_t get_rx_error_count() const override { return this->rx_dropped_ + this->rx_line_errors_; }
+  /// Monotonic count of dropped RX bytes and RX line errors. A change tells a framed
+  /// protocol to discard its in-flight state and resynchronize.
+  uint32_t get_rx_error_count() const { return this->rx_dropped_ + this->rx_line_errors_; }
 
   void write_array(const uint8_t *data, size_t len) override;
   bool peek_byte(uint8_t *data) override;

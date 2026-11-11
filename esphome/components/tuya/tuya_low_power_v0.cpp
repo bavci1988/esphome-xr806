@@ -15,6 +15,9 @@
 #ifdef USE_XR806_LOWPOWER
 #include "esphome/components/xr806/lowpower_policy.h"
 #endif
+#ifdef USE_XR806
+#include "esphome/components/uart/uart_component_xr806.h"
+#endif
 
 namespace esphome::tuya {
 
@@ -32,7 +35,7 @@ void Tuya::setup_low_power_() {
     this->mark_failed(LOG_STR("MCU UART missing"));
     return;
   }
-  this->lp_uart_rx_errors_.reset(this->parent_->get_rx_error_count());
+  this->lp_uart_rx_errors_.reset(this->low_power_uart_rx_error_count_());
   if (this->mcu_wake_pin_ != nullptr) {
     this->mcu_wake_pin_->setup();
     this->mcu_wake_pin_->digital_write(false);  // Inactive logical level.
@@ -69,10 +72,20 @@ void Tuya::setup_low_power_() {
   this->set_interval(LP_NETWORK_STATUS_INTERVAL_ID, 1000, [this] { this->send_low_power_network_(); });
 }
 
+// Only the XR806 UART backend reports RX loss. It is the only UART backend on XR806,
+// so the cast is safe; other platforms report no errors.
+uint32_t Tuya::low_power_uart_rx_error_count_() const {
+#ifdef USE_XR806
+  return static_cast<const uart::XR806UARTComponent *>(this->parent_)->get_rx_error_count();
+#else
+  return 0;
+#endif
+}
+
 bool Tuya::check_low_power_uart_rx_errors_() {
   if (this->parent_ == nullptr)
     return false;
-  const uint32_t count = this->parent_->get_rx_error_count();
+  const uint32_t count = this->low_power_uart_rx_error_count_();
   if (!this->lp_uart_rx_errors_.observe(count, this->auto_baud_ && this->lp_autobaud_.searching()))
     return false;
 
@@ -406,7 +419,7 @@ bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
   const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
   return this->lp_v0_.ready() && this->lp_wire_.idle() && this->lp_sleep_window_.standby_mode_stable() &&
          !this->lp_product_retry_.active() && guard_elapsed && baud_locked && this->parent_ != nullptr &&
-         this->parent_->is_connected() && this->lp_uart_rx_errors_.unchanged(this->parent_->get_rx_error_count()) &&
+         this->parent_->is_connected() && this->lp_uart_rx_errors_.unchanged(this->low_power_uart_rx_error_count_()) &&
          !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
          !this->expected_response_.has_value() && (in_cmd38_handler || this->rx_message_.empty());
 }
