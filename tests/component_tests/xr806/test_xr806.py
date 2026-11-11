@@ -108,6 +108,51 @@ def test_uart_rejects_pins_other_than_uart0(
     assert message in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("addition", "message"),
+    [
+        ("  rx_buffer_size: 0\n", None),
+        ("  rx_buffer_size: 4097\n", "XR806 UART RX buffer must be 1..4096 bytes"),
+    ],
+)
+def test_uart_rejects_invalid_rx_buffer(
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    addition: str,
+    message: str,
+) -> None:
+    config = component_config_path("uart.yaml").read_text()
+    CORE.config_path = tmp_path / "uart.yaml"
+    CORE.config_path.write_text(config.replace("  rx_buffer_size: 512\n", addition))
+
+    assert read_config({}) is None
+    output = capsys.readouterr().out
+    if message is not None:
+        assert message in output
+
+
+def test_uart_rejects_duplicate_uart0(
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = component_config_path("uart.yaml").read_text()
+    CORE.config_path = tmp_path / "uart.yaml"
+    start = config.index("uart:\n")
+    # Deliberately omit the interval action: this test exercises bus ownership.
+    config = (
+        config[:start]
+        + "uart:\n"
+        + "  - id: uart_bus\n    tx_pin: PB0\n    baud_rate: 9600\n"
+        + "  - id: duplicate_uart\n    rx_pin: PB1\n    baud_rate: 9600\n"
+    )
+    CORE.config_path.write_text(config)
+
+    assert read_config({}) is None
+    assert "XR806 exposes only one UART0 bus" in capsys.readouterr().out
+
+
 def test_debug_uses_standard_entities(
     generate_main: Callable[[str | Path], str],
     component_config_path: Callable[[str], Path],

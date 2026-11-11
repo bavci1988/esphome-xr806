@@ -90,16 +90,16 @@ void XR806UARTComponent::setup() {
 void XR806UARTComponent::load_settings(bool dump_config) {
   if (!this->initialized_)
     return;  // setup() applies the settings.
-  if (this->flush() != UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
-    ESP_LOGE(TAG, "UART0 settings not applied: TX did not complete");
-    return;
-  }
 #ifdef USE_XR806_LOWPOWER
-  // Hold the PM wakelock before the UART clock divider changes.
+  // Hold the native PM wakelock throughout TX drain and clock reconfiguration.
   this->note_uart_activity_();
   if (this->tx_fault_)
     return;
 #endif
+  if (this->flush() != UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
+    ESP_LOGE(TAG, "UART0 settings not applied: TX did not complete");
+    return;
+  }
   const UART_InitParam param = this->make_init_param_();
   if (HAL_UART_SetConfig(UART_PORT, &param) != HAL_OK) {
     this->set_tx_fault_();
@@ -143,8 +143,12 @@ void XR806UARTComponent::set_tx_fault_() {
 
 // Reading the line status register clears its error bits, so every read goes through here.
 void XR806UARTComponent::check_line_status_() {
-  if ((this->uart_->LINE_STATUS & LINE_ERROR_BITS) != 0)
+  if ((this->uart_->LINE_STATUS & LINE_ERROR_BITS) != 0) {
     ++this->rx_line_errors_;
+#ifdef USE_XR806_LOWPOWER
+    this->note_uart_activity_();  // Corruption/noise is UART activity, even with an empty RX FIFO.
+#endif
+  }
 }
 
 // HAL_UART_IsTxEmpty() checks only the TX FIFO. The transmitter-empty bit also covers
@@ -153,8 +157,12 @@ bool XR806UARTComponent::tx_hardware_idle_() {
   if (!HAL_UART_IsTxEmpty(this->uart_))
     return false;
   const uint32_t line_status = this->uart_->LINE_STATUS;
-  if ((line_status & LINE_ERROR_BITS) != 0)
+  if ((line_status & LINE_ERROR_BITS) != 0) {
     ++this->rx_line_errors_;
+#ifdef USE_XR806_LOWPOWER
+    this->note_uart_activity_();
+#endif
+  }
   return (line_status & UART_TX_EMPTY_BIT) != 0;
 }
 
@@ -292,7 +300,7 @@ void XR806UARTComponent::note_uart_activity_() {
     this->uart_pm_wakelock_held_ = true;
   }
   esphome::xr806::lowpower_policy().set_uart_idle(false);
-  this->last_uart_activity_ms_ = App.get_loop_component_start_time();
+  this->idle_guard_.reset();
 }
 
 void XR806UARTComponent::update_uart_idle_() {
@@ -302,9 +310,12 @@ void XR806UARTComponent::update_uart_idle_() {
     return;
   }
 
-  const uint32_t elapsed = App.get_loop_component_start_time() - this->last_uart_activity_ms_;
-  const bool idle = this->rx_count_ == 0 && !HAL_UART_IsRxReady(this->uart_) && this->tx_hardware_idle_() &&
-                    (this->uart_->STATUS & UART_BUSY_BIT) == 0 && elapsed >= UART_IDLE_GUARD_MS;
+  // Start the 200-ms guard only after the last bit has left the UART,
+  // the RX queue is drained and the peripheral reports not busy.
+  // The previous activity-start timestamp could expire while a long TX was still on the wire.
+  const bool hardware_idle = this->rx_count_ == 0 && !HAL_UART_IsRxReady(this->uart_) && this->tx_hardware_idle_() &&
+                             (this->uart_->STATUS & UART_BUSY_BIT) == 0;
+  const bool idle = this->idle_guard_.ready(hardware_idle, millis(), UART_IDLE_GUARD_MS);
 
   if (idle && this->uart_pm_wakelock_held_) {
     if (pm_wake_unlock(&this->uart_pm_wakelock_) != 0) {
