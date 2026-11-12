@@ -31,7 +31,6 @@ CONF_WLAN = "wlan"
 CONF_NETWORK_SUSPEND = "network_suspend"
 CONF_DTIM = "dtim"
 CONF_LISTEN_INTERVAL = "listen_interval"
-CONF_STANDBY_TRIAL = "standby_trial"
 CONF_STANDBY = "standby"
 CONF_OTA_GUARD_ID = "ota_guard_id"
 CONF_OTA_DIAGNOSTIC_READONLY = "ota_diagnostic_readonly"
@@ -41,16 +40,13 @@ CONF_MQTT_STANDBY_ID = "mqtt_standby_id"
 CONF_QUIET_TIME = "quiet_time"
 CONF_MIN_AWAKE_TIME = "min_awake_time"
 CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
-CONF_ENTRY_AFTER = "entry_after"
 CONF_WAKE_AFTER = "wake_after"
 CONF_WAKE_PIN = "wake_pin"
 CONF_WAKE_EDGE = "wake_edge"
-CONF_RESUME_MARKER_PB05 = "resume_marker_pb05"
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
 XR806WiFiStandby = xr806_ns.class_("XR806WiFiStandby", cg.Component)
 XR806APIStandby = xr806_ns.class_("XR806APIStandby", cg.Component)
-XR806StandbyTrial = xr806_ns.class_("XR806StandbyTrial", cg.Component)
 XR806StandbyController = xr806_ns.class_("XR806StandbyController", cg.Component)
 XR806OTAStandbyGuard = xr806_ns.class_("XR806OTAStandbyGuard", cg.Component)
 XR806HTTPStandby = xr806_ns.class_("XR806HTTPStandby", cg.Component)
@@ -89,35 +85,6 @@ def validate_wake_pin(value: object) -> int:
             + ", ".join(_wake_pin_name(gpio) for gpio in _WAKE_GPIOS)
         )
     return number
-
-
-# standby_trial is an OFFLINE, bounded one-shot for an isolated WXU test board.
-# Exposed PA wake pins only; PA21..23 are reserved for UART2/boot.
-STANDBY_TRIAL_SCHEMA = cv.Schema(
-    {
-        cv.GenerateID(): cv.declare_id(XR806StandbyTrial),
-        cv.Required("confirm_offline"): cv.boolean,
-        cv.Optional(CONF_ENTRY_AFTER, default="10s"): cv.All(
-            cv.positive_time_period_milliseconds,
-            cv.Range(
-                min=cv.TimePeriod(milliseconds=1000),
-                max=cv.TimePeriod(milliseconds=60000),
-            ),
-        ),
-        cv.Required(CONF_WAKE_AFTER): cv.All(
-            cv.positive_time_period_milliseconds,
-            cv.Range(
-                min=cv.TimePeriod(milliseconds=100),
-                max=cv.TimePeriod(milliseconds=5000),
-            ),
-        ),
-        cv.Optional(CONF_WAKE_PIN): validate_wake_pin,
-        cv.Optional(CONF_WAKE_EDGE, default="falling"): cv.one_of(
-            "falling", "rising", lower=True
-        ),
-        cv.Optional(CONF_RESUME_MARKER_PB05, default=False): cv.boolean,
-    }
-).extend(cv.COMPONENT_SCHEMA)
 
 
 # Production standby coordinator: deliberately does NOT implement any
@@ -175,21 +142,6 @@ def _update_core_data(config: ConfigType) -> None:
             raise cv.Invalid("xr806.standby requires xr806.lowpower: true")
         if not config[CONF_STANDBY][CONF_ENABLED]:
             raise cv.Invalid("Remove xr806.standby when disabled")
-        if CONF_STANDBY_TRIAL in config:
-            raise cv.Invalid("Choose standby or standby_trial, not both")
-    if CONF_STANDBY_TRIAL in config:
-        trial = config[CONF_STANDBY_TRIAL]
-        if not config["lowpower"]:
-            raise cv.Invalid("xr806.standby_trial requires xr806.lowpower: true")
-        if not trial["confirm_offline"]:
-            raise cv.Invalid("xr806.standby_trial requires confirm_offline: true")
-        # PB05 is in the WXU board's conservative Flash/XIP reservation.
-        # No electrical pin-ownership proof exists for the live TRV16.
-        if trial[CONF_RESUME_MARKER_PB05]:
-            raise cv.Invalid(
-                "resume_marker_pb05 is unsafe on the current WXU pin map; "
-                "use timer/current measurements instead"
-            )
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = DOMAIN
     CORE.data[KEY_CORE][KEY_TARGET_FRAMEWORK] = Framework.XRADIO
     # Version of the pinned XRadio SDK (include/version.h), for require_framework_version().
@@ -199,7 +151,6 @@ def _update_core_data(config: ConfigType) -> None:
 
 # The first versions of these options took a whole number of milliseconds.
 _OLD_MS_KEYS = {
-    CONF_ENTRY_AFTER: "entry_after_ms",
     CONF_WAKE_AFTER: "wake_after_ms",
     CONF_QUIET_TIME: "quiet_ms",
     CONF_MIN_AWAKE_TIME: "min_awake_ms",
@@ -235,10 +186,6 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional("lowpower", default=False): cv.boolean,
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
             cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
-            cv.Optional(CONF_STANDBY_TRIAL): cv.All(
-                *_renamed_ms_keys(CONF_ENTRY_AFTER, CONF_WAKE_AFTER),
-                STANDBY_TRIAL_SCHEMA,
-            ),
             cv.Optional(CONF_STANDBY): cv.All(
                 *_renamed_ms_keys(
                     CONF_WAKE_AFTER, CONF_QUIET_TIME, CONF_MIN_AWAKE_TIME
@@ -282,18 +229,16 @@ def _final_validate_uart(config: ConfigType) -> ConfigType:
 def _final_validate_wake_pin_ownership(config: ConfigType) -> ConfigType:
     # The PM HAL configures wake_pin directly, so ESPHome's duplicate-pin check cannot see it,
     # and allow_other_uses on another user does not make sharing safe.
-    for standby_type in (CONF_STANDBY, CONF_STANDBY_TRIAL):
-        standby = config.get(standby_type)
-        if standby is None or CONF_WAKE_PIN not in standby:
-            continue
-        gpio_number = standby[CONF_WAKE_PIN]
-        wake_pin = _wake_pin_name(gpio_number)
-        if pins.PIN_SCHEMA_REGISTRY.get_count(DOMAIN, DOMAIN, gpio_number):
-            raise cv.Invalid(
-                f"xr806.{standby_type}.wake_pin {wake_pin} must be dedicated: "
-                "another component already uses this GPIO",
-                path=[standby_type, CONF_WAKE_PIN],
-            )
+    standby = config.get(CONF_STANDBY)
+    if standby is None or CONF_WAKE_PIN not in standby:
+        return config
+    gpio_number = standby[CONF_WAKE_PIN]
+    if pins.PIN_SCHEMA_REGISTRY.get_count(DOMAIN, DOMAIN, gpio_number):
+        raise cv.Invalid(
+            f"xr806.standby.wake_pin {_wake_pin_name(gpio_number)} must be dedicated: "
+            "another component already uses this GPIO",
+            path=[CONF_STANDBY, CONF_WAKE_PIN],
+        )
     return config
 
 
@@ -391,39 +336,6 @@ async def to_code(config: ConfigType) -> None:
             )
             await cg.register_component(ota_guard, cfg)
 
-    if CONF_STANDBY_TRIAL in config:
-        forbidden = (
-            "wifi",
-            "api",
-            "ota",
-            "mqtt",
-            "mdns",
-            "network",
-            "web_server",
-            "uart",
-            "logger",
-            "captive_portal",
-            "improv_serial",
-        )
-        present = [domain for domain in forbidden if domain in CORE.config]
-        if present:
-            raise cv.Invalid(
-                "The offline standby_trial forbids active transports: "
-                + ", ".join(present)
-            )
-        trial = config[CONF_STANDBY_TRIAL]
-        cg.add_define("USE_XR806_STANDBY_TRIAL")
-        cg.add_global(
-            cg.RawStatement('#include "esphome/components/xr806/standby_trial.h"')
-        )
-        standby = cg.new_Pvariable(trial["id"])
-        cg.add(standby.set_entry_delay_ms(trial[CONF_ENTRY_AFTER].total_milliseconds))
-        cg.add(standby.set_wake_after_ms(trial[CONF_WAKE_AFTER].total_milliseconds))
-        if CONF_WAKE_PIN in trial:
-            cg.add(standby.set_wake_pin(trial[CONF_WAKE_PIN]))
-        cg.add(standby.set_wake_falling(trial[CONF_WAKE_EDGE] == "falling"))
-        cg.add(standby.set_resume_marker_pb05(trial[CONF_RESUME_MARKER_PB05]))
-        await cg.register_component(standby, trial)
     cg.add_define("USE_XR806")
     # XR806 uses ordinary addressable memory, not Arduino PROGMEM.
     cg.add_define("PROGMEM")

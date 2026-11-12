@@ -356,11 +356,6 @@ XR806_CXXFLAGS += -MMD -MP
 # GCC writes one .d file alongside each compiled .o file.
 -include $(XR806_ESPHOME_OBJECTS:.o=.d)
 
-# Builds to an empty object unless explicitly enabled in xr806.standby_trial.
-XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_standby_trial.o
-$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_standby_trial.o
-$(eval $(call XR806_COMPILE_CPP,xr_standby_trial,$(XR806_SRC)/esphome/components/xr806/standby_trial.cpp))
--include $(XR806_OBJDIR)/xr_standby_trial.d
 
 # Protocol-neutral production standby coordinator, inert without YAML opt-in.
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_standby_controller.o

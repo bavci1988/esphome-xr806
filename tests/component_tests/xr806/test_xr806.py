@@ -412,25 +412,18 @@ def test_gpio_accepts_input_and_output() -> None:
     assert validate_gpio_mode(mode) == mode
 
 
-@pytest.mark.parametrize("standby_type", ["standby", "standby_trial"])
 @pytest.mark.parametrize("gpio_pin", ["PA19", "PA20"])
 def test_standby_wake_pin_is_dedicated(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    standby_type: str,
     gpio_pin: str,
 ) -> None:
     # The standby HAL configures PA20 directly, so the normal GPIO pin
     # duplicate-use validation does not detect a second consumer.
-    standby_fields = (
-        "    enabled: true\n    wake_pin: PA20\n    wake_edge: falling\n"
-        if standby_type == "standby"
-        else "    confirm_offline: true\n    wake_after: 1000ms\n    wake_pin: PA20\n"
-    )
     config = (
         "esphome:\n  name: xr806-wake-pin-test\n"
         "xr806:\n  board: wxu\n  lowpower: true\n"
-        f"  {standby_type}:\n{standby_fields}"
+        "  standby:\n    enabled: true\n    wake_pin: PA20\n    wake_edge: falling\n"
         "switch:\n  - platform: gpio\n    id: test_switch\n"
         f"    pin: {gpio_pin}\n"
     )
@@ -441,8 +434,7 @@ def test_standby_wake_pin_is_dedicated(
     if gpio_pin == "PA20":
         assert result is None
         assert (
-            f"xr806.{standby_type}.wake_pin PA20 must be dedicated"
-            in capsys.readouterr().out
+            "xr806.standby.wake_pin PA20 must be dedicated" in capsys.readouterr().out
         )
     else:
         assert result is not None
