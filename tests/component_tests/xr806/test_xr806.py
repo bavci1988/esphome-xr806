@@ -547,3 +547,15 @@ def test_standby_wake_pin_must_be_a_wake_input(
         "wake_pin must be one of PA11, PA12, PA13, PA19, PA20"
         in capsys.readouterr().out
     )
+
+
+@pytest.mark.parametrize(("pin", "valid"), [("PB4", True), ("PB5", False)])
+def test_flash_pins_stay_reserved_except_pb4(pin: str, valid: bool) -> None:
+    from esphome.components.xr806.gpio import validate_gpio_pin
+    import esphome.config_validation as cv
+
+    if valid:
+        assert validate_gpio_pin(pin) == 36
+    else:
+        with pytest.raises(cv.Invalid, match="Flash/XIP"):
+            validate_gpio_pin(pin)

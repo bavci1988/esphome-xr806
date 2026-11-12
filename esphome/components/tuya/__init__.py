@@ -4,7 +4,7 @@ from esphome.components import time, uart
 from esphome.config import iter_ids
 import esphome.config_validation as cv
 from esphome.const import CONF_PROTOCOL, CONF_SENSOR_DATAPOINT, CONF_TIME_ID
-from esphome.core import CORE
+from esphome.core import CORE as CORE
 from esphome.cpp_generator import MockObj
 from esphome.types import ConfigType
 
@@ -19,8 +19,7 @@ CONF_STATUS_PIN = "status_pin"
 CONF_FORCE_TIME_SYNC = "force_time_sync"
 CONF_AUTO_BAUD = "auto_baud"
 CONF_MCU_WAKE_PIN = "mcu_wake_pin"
-CONF_TRV16_MCU_WAKE_PB04 = "trv16_mcu_wake_pb04"
-CONF_TRV16_PB04_CONFIRMED = "trv16_pb04_confirmed"
+CONF_PRODUCT_ID = "product_id"
 
 tuya_ns = cg.esphome_ns.namespace("tuya")
 TuyaDatapointType = tuya_ns.enum("TuyaDatapointType", is_class=True)
@@ -72,51 +71,14 @@ def _validate_time_options(config: ConfigType) -> ConfigType:
             "status_pin is unsupported for low_power_v0; wake is configured separately",
             path=[CONF_STATUS_PIN],
         )
-    if CONF_MCU_WAKE_PIN in config:
-        if config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER_V0:
-            raise cv.Invalid(
-                "mcu_wake_pin requires protocol: low_power_v0", path=[CONF_MCU_WAKE_PIN]
-            )
-        if CORE.target_platform == "xr806":
-            raise cv.Invalid(
-                "XR806 TRV16 MCU wake is physically PB04 (WXU pad 2), not an "
-                "arbitrary GPIO. PB04 pinmux/Flash ownership and pulse polarity "
-                "are not yet verified; disable mcu_wake_pin until a dedicated "
-                "hardware-safe PB04 implementation is validated.",
-                path=[CONF_MCU_WAKE_PIN],
-            )
-    if CONF_TRV16_MCU_WAKE_PB04 in config:
-        if (
-            config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER_V0
-            or CORE.target_platform != "xr806"
-        ):
-            raise cv.Invalid(
-                "trv16_mcu_wake_pb04 requires XR806 and protocol: low_power_v0",
-                path=[CONF_TRV16_MCU_WAKE_PB04],
-            )
-        if not config[CONF_TRV16_PB04_CONFIRMED]:
-            raise cv.Invalid(
-                "PB04 may be used by SPI Flash. Explicit physical pin-ownership "
-                "and wake-polarity verification is required before enabling "
-                "trv16_mcu_wake_pb04.",
-                path=[CONF_TRV16_PB04_CONFIRMED],
-            )
-    elif config[CONF_TRV16_PB04_CONFIRMED]:
+    for key in (CONF_MCU_WAKE_PIN, CONF_PRODUCT_ID):
+        if key in config and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER_V0:
+            raise cv.Invalid(f"{key} requires protocol: low_power_v0", path=[key])
+    if config[CONF_AUTO_BAUD] and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER_V0:
         raise cv.Invalid(
-            "trv16_pb04_confirmed must not be set without trv16_mcu_wake_pb04",
-            path=[CONF_TRV16_PB04_CONFIRMED],
+            "auto_baud is only supported with protocol: low_power_v0",
+            path=[CONF_AUTO_BAUD],
         )
-    if config[CONF_AUTO_BAUD]:
-        if config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER_V0:
-            raise cv.Invalid(
-                "auto_baud is only supported with protocol: low_power_v0",
-                path=[CONF_AUTO_BAUD],
-            )
-        if CORE.target_platform != "xr806":
-            raise cv.Invalid(
-                "auto_baud currently requires the XR806 UART0 runtime baud backend",
-                path=[CONF_AUTO_BAUD],
-            )
     return config
 
 
@@ -129,10 +91,9 @@ CONFIG_SCHEMA = cv.All(
             ),
             cv.Optional(CONF_AUTO_BAUD, default=False): cv.boolean,
             cv.Optional(CONF_MCU_WAKE_PIN): pins.gpio_output_pin_schema,
-            cv.Optional(CONF_TRV16_MCU_WAKE_PB04): cv.one_of(
-                "active_high", "active_low", lower=True
+            cv.Optional(CONF_PRODUCT_ID): cv.All(
+                cv.string_strict, cv.Length(min=1, max=48)
             ),
-            cv.Optional(CONF_TRV16_PB04_CONFIRMED, default=False): cv.boolean,
             cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
             cv.Optional(CONF_FORCE_TIME_SYNC, default=False): cv.boolean,
             cv.Optional(CONF_IGNORE_MCU_UPDATE_ON_DATAPOINTS): cv.ensure_list(
@@ -163,8 +124,7 @@ async def to_code(config):
         cg.add(var.set_protocol(TuyaProtocol.LOW_POWER_V0))
         cg.add(var.set_auto_baud(config[CONF_AUTO_BAUD]))
         await cg.add_pin(var.set_mcu_wake_pin, config.get(CONF_MCU_WAKE_PIN))
-        if (pb04 := config.get(CONF_TRV16_MCU_WAKE_PB04)) is not None:
-            cg.add(var.set_trv16_pb04_wake(pb04 == "active_high"))
+        cg.add_optional(var.set_product_id, config.get(CONF_PRODUCT_ID))
     if (time_id := config.get(CONF_TIME_ID)) is not None:
         await cg.add_variable(var.set_time_id, time_id)
         if config[CONF_FORCE_TIME_SYNC]:

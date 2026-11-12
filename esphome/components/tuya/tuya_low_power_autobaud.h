@@ -59,7 +59,7 @@ class TuyaLowPowerAutoBaud {
     const size_t payload_len = (static_cast<size_t>(frame[4]) << 8) | frame[5];
     if (payload_len > 512 || frame_len != payload_len + 7)
       return false;
-    // TRV16 product information is JSON. Do not lock to an empty/stray ACK.
+    // Product information is JSON. Do not lock to an empty/stray ACK.
     if (payload_len < 2 || frame[6] != '{' || frame[6 + payload_len - 1] != '}')
       return false;
     uint8_t checksum = 0;

@@ -100,8 +100,21 @@ void XR806GPIOPin::detach_interrupt() const {
   configure(this->pin_, flags_to_mode(this->flags_), this->flags_);
 }
 
+// PB4 sits among the flash pins. It is free on the WXU module, but never take it from a peripheral.
+static constexpr uint8_t PB4 = 32 + 4;
+
 void XR806GPIOPin::pin_mode(gpio::Flags flags) {
   this->flags_ = flags;
+  if (this->pin_ == PB4) {
+    GPIO_InitParam current{};
+    HAL_GPIO_GetConfig(GPIO_PORT_B, GPIO_PIN_4, &current);
+    if (current.mode != GPIOx_Pn_F0_INPUT && current.mode != GPIOx_Pn_F1_OUTPUT &&
+        current.mode != GPIOx_Pn_F7_DISABLE) {
+      ESP_LOGE(TAG, "PB4 is in use by another peripheral (function %u); left unchanged",
+               static_cast<unsigned>(current.mode));
+      return;
+    }
+  }
   configure(this->pin_, flags_to_mode(flags), flags);
 }
 

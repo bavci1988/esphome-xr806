@@ -36,7 +36,8 @@ _RESERVED = {
     ("A", 23): "Boot/test mode",
     ("B", 14): "UART1 TX",
     ("B", 15): "UART1 RX",
-    **{("B", pin): "Flash/XIP" for pin in range(2, 8)},
+    # PB4 (WXU pad 2) is free: the original WXU firmware drives it as the MCU wake output.
+    **{("B", pin): "Flash/XIP" for pin in (2, 3, 5, 6, 7)},
 }
 
 _AVAILABLE = frozenset(WXU_GPIO_PADS.values())

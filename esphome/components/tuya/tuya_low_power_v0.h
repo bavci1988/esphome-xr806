@@ -1,6 +1,6 @@
 #pragma once
 
-// MCU transaction bookkeeping, testable on the host without ESPHome/XR806.
+// MCU transaction bookkeeping, testable on the host without ESPHome or a platform.
 // Command 09 ACK and command 05 state reports are distinct events.
 #include <array>
 #include <cstddef>

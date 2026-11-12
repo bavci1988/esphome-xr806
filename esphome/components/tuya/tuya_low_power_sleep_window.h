@@ -1,7 +1,7 @@
 #pragma once
 
-// HC32 TRV16 DP101/102 payload validation and MCU-owned sleep-mode epoch.
-// This never chooses XR806 PM mode: only a fresh validated CMD01 may supply
+// HC32 MCU DP101/102 payload validation and MCU-owned sleep-mode epoch.
+// This never chooses the platform power mode: only a fresh validated CMD01 may supply
 // the MCU's 'sm' (standby/hibernation) selection.
 #include <cstddef>
 #include <cstdint>

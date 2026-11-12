@@ -4,7 +4,7 @@
 
 namespace esphome::tuya {
 
-// Tracks monotonic UART RX error telemetry without coupling Tuya to an XR806
+// Tracks monotonic UART RX error telemetry without coupling Tuya to a specific
 // implementation class. Wrong-baud noise while probing is not an MCU fault.
 class TuyaLowPowerUartErrors {
  public:

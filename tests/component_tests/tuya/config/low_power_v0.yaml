@@ -27,6 +27,7 @@ tuya:
   uart_id: trv16_uart
   protocol: low_power_v0
   auto_baud: true
+  product_id: ihedujbuli6hsx9b
 
 climate:
   - platform: tuya

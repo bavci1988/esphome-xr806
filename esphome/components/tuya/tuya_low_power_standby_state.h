@@ -4,7 +4,7 @@
 
 namespace esphome::tuya {
 
-// Pure MCU-protocol state. The XR806 platform never interprets CMD12/38 or
+// Pure MCU-protocol state. The platform never interprets CMD12/38 or
 // the HC32's 'sm' product field. All transitions are host-testable.
 class TuyaLowPowerStandbyState {
  public:

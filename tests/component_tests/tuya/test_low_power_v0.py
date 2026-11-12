@@ -21,7 +21,7 @@ def defines() -> set[str]:
         "low_power_v0.yaml",
         "low_power_v0_network_suspend.yaml",
         "low_power_v0_ota.yaml",
-        "low_power_v0_pb04_confirmed.yaml",
+        "low_power_v0_wake_pin.yaml",
     ],
 )
 def test_low_power_v0_generates(
@@ -33,12 +33,22 @@ def test_low_power_v0_generates(
 
     assert "USE_TUYA_LOW_POWER_V0" in defines()
     assert "xr806::XR806StandbyController" in main_cpp
+    assert "xr806::XR806TuyaLowPowerHost(" in main_cpp
+
+
+def test_low_power_v0_product_id(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    main_cpp = generate_main(component_config_path("low_power_v0.yaml"))
+
+    assert 'set_product_id("ihedujbuli6hsx9b")' in main_cpp
 
 
 @pytest.mark.parametrize(
     ("fixture", "message"),
     [
-        ("low_power_v0_pb04_unconfirmed.yaml", "Explicit physical pin-ownership"),
+        ("low_power_v0_pb04.yaml", "[trv16_mcu_wake_pb04] is an invalid option"),
         ("low_power_v0_network_suspend_no_standby.yaml", "requires xr806.standby"),
         (
             "refresh_standard_protocol.yaml",
@@ -56,3 +66,15 @@ def test_low_power_v0_rejected(
 
     assert read_config({}) is None
     assert message in capsys.readouterr().out
+
+
+def test_low_power_v0_wake_pin_pb4(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    # The original WXU firmware drives PB4 (WXU pad 2) as an active-low MCU wake output.
+    main_cpp = generate_main(component_config_path("low_power_v0_wake_pin.yaml"))
+
+    assert "set_mcu_wake_pin(" in main_cpp
+    assert "set_pin(36)" in main_cpp
+    assert "set_inverted(true)" in main_cpp

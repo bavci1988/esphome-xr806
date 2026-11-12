@@ -9,6 +9,8 @@ import esphome.config_validation as cv
 from esphome.const import (
     CONF_BOARD,
     CONF_ID,
+    CONF_PROTOCOL,
+    CONF_UART_ID,
     KEY_CORE,
     KEY_FRAMEWORK_VERSION,
     KEY_TARGET_FRAMEWORK,
@@ -16,7 +18,7 @@ from esphome.const import (
     Framework,
     ThreadModel,
 )
-from esphome.core import CORE, EsphomeError
+from esphome.core import CORE, ID, EsphomeError
 from esphome.types import ConfigType
 
 CODEOWNERS = ["@bavci1988"]
@@ -37,6 +39,7 @@ CONF_OTA_DIAGNOSTIC_READONLY = "ota_diagnostic_readonly"
 CONF_API_STANDBY_ID = "api_standby_id"
 CONF_HTTP_STANDBY_ID = "http_standby_id"
 CONF_MQTT_STANDBY_ID = "mqtt_standby_id"
+CONF_TUYA_HOST_ID = "tuya_host_id"
 CONF_QUIET_TIME = "quiet_time"
 CONF_MIN_AWAKE_TIME = "min_awake_time"
 CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
@@ -51,6 +54,7 @@ XR806StandbyController = xr806_ns.class_("XR806StandbyController", cg.Component)
 XR806OTAStandbyGuard = xr806_ns.class_("XR806OTAStandbyGuard", cg.Component)
 XR806HTTPStandby = xr806_ns.class_("XR806HTTPStandby", cg.Component)
 XR806MQTTStandby = xr806_ns.class_("XR806MQTTStandby", cg.Component)
+XR806TuyaLowPowerHost = xr806_ns.class_("XR806TuyaLowPowerHost", cg.Component)
 
 
 # Radio settings for the standard wifi: component. DTIM and the listen interval
@@ -184,6 +188,7 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.Optional("lowpower", default=False): cv.boolean,
+            cv.GenerateID(CONF_TUYA_HOST_ID): cv.declare_id(XR806TuyaLowPowerHost),
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
             cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
             cv.Optional(CONF_STANDBY): cv.All(
@@ -246,6 +251,17 @@ FINAL_VALIDATE_SCHEMA = cv.All(
     _final_validate_uart,
     _final_validate_wake_pin_ownership,
 )
+
+
+async def _tuya_low_power_host(host_id: ID, tuya_config: ConfigType) -> None:
+    """Connect a Tuya hub running low_power_v0 to XR806 power management."""
+    tuya = await cg.get_variable(tuya_config[CONF_ID])
+    uart = await cg.get_variable(tuya_config[CONF_UART_ID])
+    cg.add_global(
+        cg.RawStatement('#include "esphome/components/xr806/tuya_low_power_host.h"')
+    )
+    host = cg.new_Pvariable(host_id, tuya, uart)
+    await cg.register_component(host, {})
 
 
 async def to_code(config: ConfigType) -> None:
@@ -356,6 +372,10 @@ async def to_code(config: ConfigType) -> None:
             )
             standby_wlan = cg.new_Pvariable(wlan[CONF_ID], wlan[CONF_NETWORK_SUSPEND])
             await cg.register_component(standby_wlan, {})
+
+    tuya_config = CORE.config.get("tuya")
+    if tuya_config and tuya_config.get(CONF_PROTOCOL) == "low_power_v0":
+        await _tuya_low_power_host(config[CONF_TUYA_HOST_ID], tuya_config)
 
 
 def compiler_build_flags(build_flags: set[str]) -> list[str]:

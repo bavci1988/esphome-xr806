@@ -27,9 +27,9 @@ tuya:
   uart_id: trv16_uart
   protocol: low_power_v0
   auto_baud: true
-  # CI/codegen ONLY. Never use on the sole live TRV16 without scope proof.
-  trv16_mcu_wake_pb04: active_high
-  trv16_pb04_confirmed: true
+  mcu_wake_pin:
+    number: PB4
+    inverted: true
 
 climate:
   - platform: tuya

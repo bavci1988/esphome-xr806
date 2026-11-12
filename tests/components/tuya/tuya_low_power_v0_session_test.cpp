@@ -133,19 +133,21 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
     state.observe_dp(dp, 1, &dp, 1);
   EXPECT_TRUE(state.ready());
 
-  // The verified TRV16 product controls wake pins and standby-vs-hibernation.
+  // The product info names the wake pins and standby-vs-hibernation; product_id restricts the PID.
   using esphome::tuya::TuyaLowPowerProductInfo;
   TuyaLowPowerProductInfo info;
   const std::string product_json = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":1})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(product_json.data()), product_json.size()));
-  EXPECT_TRUE(info.is_verified_trv16());
+  EXPECT_TRUE(info.matches("ihedujbuli6hsx9b"));
+  EXPECT_TRUE(info.matches(""));
   EXPECT_TRUE(info.wake_gpio == 20 && info.mcu_wake_gpio == 28 && info.sleep_mode == 1);
   const std::string hib_json = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":0})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(hib_json.data()), hib_json.size()));
-  EXPECT_TRUE(info.is_verified_trv16() && info.sleep_mode == 0);
+  EXPECT_TRUE(info.matches("ihedujbuli6hsx9b") && info.sleep_mode == 0);
   const std::string wrong_pid = R"({"p":"another_product","v":"1.3.1","wk":20,"mwk":28,"sm":1})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(wrong_pid.data()), wrong_pid.size()));
-  EXPECT_FALSE(info.is_verified_trv16());
+  EXPECT_FALSE(info.matches("ihedujbuli6hsx9b"));
+  EXPECT_TRUE(info.matches(""));
   const std::string missing_pin = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"sm":1})";
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(missing_pin.data()), missing_pin.size()));
   EXPECT_FALSE(info.parsed);

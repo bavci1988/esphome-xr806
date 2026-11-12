@@ -21,13 +21,7 @@
 #include "tuya_low_power_standby_state.h"
 #include "tuya_low_power_wire_transactions.h"
 #include "tuya_low_power_uart_errors.h"
-
-#ifdef USE_XR806_STANDBY_CONTROLLER
-#include "esphome/components/xr806/standby_controller.h"
-#endif
-#ifdef USE_XR806
-#include "esphome/components/xr806/guarded_wake_output.h"
-#endif
+#include "tuya_low_power_host.h"
 #endif  // USE_TUYA_LOW_POWER_V0
 
 #ifdef USE_TIME
@@ -117,13 +111,7 @@ struct TuyaCommand {
   std::vector<uint8_t> payload;
 };
 
-class Tuya final : public Component,
-                   public uart::UARTDevice
-#if defined(USE_TUYA_LOW_POWER_V0) && defined(USE_XR806_STANDBY_CONTROLLER)
-    ,
-                   public xr806::XR806StandbyParticipant
-#endif
-{
+class Tuya final : public Component, public uart::UARTDevice {
  public:
   float get_setup_priority() const override { return setup_priority::LATE; }
   void setup() override;
@@ -139,22 +127,17 @@ class Tuya final : public Component,
 #ifdef USE_TUYA_LOW_POWER_V0
   void set_protocol(TuyaProtocol protocol) { this->protocol_ = protocol; }
   void set_auto_baud(bool auto_baud) { this->auto_baud_ = auto_baud; }
-  void set_mcu_wake_pin(InternalGPIOPin *pin) { this->mcu_wake_pin_ = pin; }
-#ifdef USE_XR806
-  void set_trv16_pb04_wake(bool active_high) {
-    this->trv16_pb04_requested_ = true;
-    this->trv16_pb04_active_high_ = active_high;
-  }
-#endif
+  void set_mcu_wake_pin(GPIOPin *pin) { this->mcu_wake_pin_ = pin; }
+  /// Only an MCU that reports this product ID (CMD01 "p") is accepted; empty accepts any.
+  void set_product_id(const char *product_id) { this->product_id_ = product_id; }
+  void set_low_power_host(TuyaLowPowerHost *host) { this->lp_host_ = host; }
   bool request_low_power_refresh();
-  // Called by an actual XR806 PM bridge (not by CMD38 alone).
+  // Called by the platform's power management bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
-#ifdef USE_XR806_STANDBY_CONTROLLER
-  bool owns_uart() const override { return true; }
-  bool prepare_for_standby() override;
-  void standby_cancelled() override;
-  void standby_resumed(const xr806::XR806StandbyResume &event) override;
-#endif
+  /// Standby steps, called by the platform's power management bridge.
+  bool low_power_prepare_for_standby();
+  void low_power_standby_cancelled();
+  void low_power_standby_resumed(bool expected_source, bool wake_gpio);
 #endif  // USE_TUYA_LOW_POWER_V0
   void set_string_datapoint_value(uint8_t datapoint_id, const std::string &value);
   void set_string_datapoint_value(uint8_t datapoint_id, const char *value);
@@ -246,12 +229,9 @@ class Tuya final : public Component,
 #ifdef USE_TUYA_LOW_POWER_V0
   TuyaProtocol protocol_{TuyaProtocol::STANDARD};
   bool auto_baud_{false};
-  InternalGPIOPin *mcu_wake_pin_{nullptr};
-#ifdef USE_XR806
-  xr806::XR806GuardedWakePB04 trv16_pb04_{};
-  bool trv16_pb04_requested_{false};
-  bool trv16_pb04_active_high_{false};
-#endif
+  GPIOPin *mcu_wake_pin_{nullptr};
+  TuyaLowPowerHost *lp_host_{nullptr};
+  const char *product_id_{""};
   TuyaLowPowerAutoBaud lp_autobaud_{};
   TuyaLowPowerUartErrors lp_uart_rx_errors_{};
   TuyaLowPowerV0Session lp_v0_{};
@@ -270,7 +250,6 @@ class Tuya final : public Component,
   bool lp_cmd38_pending_{false};
   uint32_t lp_cmd38_deadline_ms_{0};
   uint32_t lp_cmd38_cooldown_until_{0};
-  bool lp_bridge_registered_{false};
   uint8_t lp_network_status_{0xFF};
 #endif  // USE_TUYA_LOW_POWER_V0
   TuyaInitState init_state_ = TuyaInitState::INIT_HEARTBEAT;

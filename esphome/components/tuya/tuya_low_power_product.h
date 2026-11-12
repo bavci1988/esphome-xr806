@@ -1,7 +1,7 @@
 #pragma once
 
 // Strict, bounded extraction of the product metadata used by the original
-// TRV16 WXU/HC32 initialization. No JSON library or platform dependency.
+// low-power MCU initialization. No JSON library or platform dependency.
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -42,7 +42,7 @@ struct TuyaLowPowerProductInfo {
     const size_t begin = i;
     while (i < s.size() && s[i] != '"') {
       if (s[i] == '\\' || static_cast<unsigned char>(s[i]) < 32)
-        return false;  // No escape sequences in the verified TRV16 fields.
+        return false;  // No escape sequences in the product fields.
       ++i;
     }
     if (i >= s.size() || i == begin || i - begin > 48)
@@ -77,9 +77,8 @@ struct TuyaLowPowerProductInfo {
     return parsed;
   }
 
-  bool is_verified_trv16() const {
-    return parsed && pid == "ihedujbuli6hsx9b" && wake_gpio == 20 && mcu_wake_gpio == 28;
-  }
+  /// True if parsed and the product ID equals expected_pid; an empty expected_pid accepts any product.
+  bool matches(const char *expected_pid) const { return parsed && (expected_pid[0] == '\0' || pid == expected_pid); }
 };
 
 }  // namespace esphome::tuya
