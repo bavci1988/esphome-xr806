@@ -49,6 +49,10 @@
 #include "esphome/components/wifi/wifi_component.h"
 #endif
 
+#if defined(USE_XR806) && defined(USE_CAPTIVE_PORTAL)
+#include "esphome/components/captive_portal/captive_portal.h"
+#endif
+
 #ifdef USE_WEBSERVER_LOCAL
 #if USE_WEBSERVER_VERSION == 2
 #include "server_index_v2.h"
@@ -2241,8 +2245,15 @@ bool WebServer::canHandle(AsyncWebServerRequest *request) const {
   const auto method = request->method();
 
   // Static URL checks - use ESPHOME_F to keep strings in flash on ESP8266
-  if (url == ESPHOME_F("/"))
+  if (url == ESPHOME_F("/")) {
+#if defined(USE_XR806) && defined(USE_CAPTIVE_PORTAL)
+    // The portal registers its handler when the AP starts, after this one, so it would never get
+    // "/" on a fallback AP. While it runs, the portal page owns "/".
+    if (captive_portal::global_captive_portal != nullptr && captive_portal::global_captive_portal->is_active())
+      return false;
+#endif
     return true;
+  }
 #if !defined(USE_ESP32) && defined(USE_ARDUINO)
   if (url == ESPHOME_F("/events"))
     return true;
