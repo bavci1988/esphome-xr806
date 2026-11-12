@@ -374,10 +374,12 @@ void WiFiComponent::wifi_scan_done_callback_() {
   const bool needs_full = this->needs_full_scan_results_();
   char ssid[SSID_BUFFER_SIZE];
   auto copy_ssid = [&ssid](const wlan_sta_ap_t &ap) -> size_t {
-    const size_t len = std::min<size_t>(ap.ssid.ssid_len, SSID_BUFFER_SIZE - 1);
-    std::memcpy(ssid, ap.ssid.ssid, len);
-    ssid[len] = '\0';
-    return len;
+    const size_t raw_len = std::min<size_t>(ap.ssid.ssid_len, SSID_BUFFER_SIZE - 1);
+    std::memcpy(ssid, ap.ssid.ssid, raw_len);
+    ssid[raw_len] = '\0';
+    // Some hidden networks send their SSID as zero bytes of full length; end at the first zero so
+    // they count as hidden instead of listing as a name of unprintable characters.
+    return std::strlen(ssid);
   };
   size_t count = 0;
   for (size_t i = 0; i < num; i++) {
