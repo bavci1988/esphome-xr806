@@ -56,6 +56,11 @@ $(XR806_OUTPUT): $(XR806_SDK_OBJECTS) $(XR806_ESPHOME_MAIN) $(XR806_ESPHOME_OBJE
 >    $(XR806_ESPHOME_OBJECTS) \
 >    $(LIBRARIES)
 
+# Weakened copy of the WLAN PHY library from the SDK project Makefile.
+ifdef TRV16_PHY_LIB
+$(XR806_OUTPUT): $(TRV16_PHY_LIB)
+endif
+
 # Compile ESPHome C++20 sources using the YAML-generated configuration.
 
 XR806_SRC ?= $(error XR806_SRC must be provided by ESPHome)
