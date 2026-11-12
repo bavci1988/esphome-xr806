@@ -508,6 +508,10 @@ bool WiFiComponent::wifi_loop_() {
     s_power_save_retry.record(now, ok);
     if (!ok) {
       ESP_LOGW(TAG, "Cannot apply WLAN power save; will retry");
+    } else if (s_power_save_requested) {
+      ESP_LOGD(TAG, "WLAN power save on (DTIM %u, listen interval %u)", WLAN_DTIM, WLAN_LISTEN_INTERVAL);
+    } else {
+      ESP_LOGD(TAG, "WLAN power save off");
     }
 #ifdef USE_WIFI_POWER_SAVE_LISTENERS
     if (ok) {
