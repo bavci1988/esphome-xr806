@@ -7,6 +7,7 @@ extern void setup();
 extern void loop();
 
 #include "esphome/core/defines.h"
+#include "esphome/core/hal.h"
 #ifdef USE_XR806_OTA_RUNTIME_PROBE
 #include "ota_vendor_sdk_snapshot.h"
 #include "esphome/core/log.h"
@@ -51,6 +52,9 @@ extern "C" void xr806_esphome_run(void) {
   }
 #endif
 
+  // The SDK feeds the watchdog from an OS timer, which keeps running when the main loop
+  // hangs. From now on loop() feeds it, so a hang resets the chip after the 16 s timeout.
+  xr806_wdt_take_over();
   while (true) {
     loop();
   }

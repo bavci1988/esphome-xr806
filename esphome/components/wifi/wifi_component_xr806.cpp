@@ -67,6 +67,7 @@ static bool s_connect_requested = false;
 static bool s_sta_was_connected = false;
 static bool s_power_save_requested = false;
 static xr806::XR806WiFiPowerSaveRetry s_power_save_retry;
+static bool apply_power_save_now(bool enable);
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 static void network_event_cb(uint32_t event, uint32_t /*data*/, void * /*arg*/) {
@@ -156,6 +157,11 @@ bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
   if (ap.has_value()) {
     if (ap.value()) {
       if (!s_ap_mode) {
+        // Station power save (DTIM skipping) must not carry over into AP mode, where clients
+        // expect every beacon. It is applied again after the next station connection.
+        if (s_power_save_retry.applied())
+          (void) apply_power_save_now(false);
+        s_power_save_retry.reset();
         if (s_sta_enabled && wlan_sta_disable() != 0)
           return false;
         s_sta_enabled = false;

@@ -16,6 +16,8 @@ extern "C" uint64_t xr806_micros64(void);
 extern "C" void xr806_delay(uint32_t ms);
 extern "C" void xr806_delay_us(uint32_t us);
 extern "C" void xr806_wdt_feed(void);
+// From here on only the main loop feeds the watchdog; the SDK timer stops.
+extern "C" void xr806_wdt_take_over(void);
 extern "C" void xr806_reboot(void);
 extern "C" uint32_t xr806_cpu_freq_hz(void);
 
