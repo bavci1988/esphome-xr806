@@ -559,3 +559,50 @@ def test_flash_pins_stay_reserved_except_pb4(pin: str, valid: bool) -> None:
     else:
         with pytest.raises(cv.Invalid, match="Flash/XIP"):
             validate_gpio_pin(pin)
+
+
+def test_stay_connected_standby(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("stay_connected_standby.yaml"))
+
+    assert "USE_XR806_STANDBY_CONTROLLER" in defines()
+    assert "set_stay_connected(true)" in generated
+    assert "set_wake_after_ms(600000)" in generated
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        (
+            "    stay_connected: true\n",
+            "    stay_connected: true\n    network_suspend: true\n",
+            "xr806.wlan.stay_connected and network_suspend exclude each other",
+        ),
+        (
+            "  power_save_mode: light\n",
+            "  power_save_mode: none\n",
+            "xr806.wlan.stay_connected requires wifi power_save_mode light or high",
+        ),
+        (
+            "    wake_after: 10min\n",
+            "    wake_after: 13h\n",
+            "wake_after",
+        ),
+    ],
+)
+def test_stay_connected_rejects_invalid_configs(
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    old: str,
+    new: str,
+    message: str,
+) -> None:
+    config = component_config_path("stay_connected_standby.yaml").read_text()
+    CORE.config_path = tmp_path / "stay_connected_standby.yaml"
+    CORE.config_path.write_text(config.replace(old, new))
+
+    assert read_config({}) is None
+    assert message in capsys.readouterr().out

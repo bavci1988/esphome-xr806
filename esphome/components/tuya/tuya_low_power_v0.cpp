@@ -6,6 +6,7 @@
 #include <cstring>
 #include <utility>
 
+#include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
 
@@ -221,6 +222,13 @@ bool Tuya::begin_low_power_command_(const TuyaCommand &command) {
 
 void Tuya::send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType datapoint_type,
                                      const std::vector<uint8_t> &data) {
+  if (this->lp_standby_.requested() && this->lp_v0_.ready() && this->lp_wire_.idle() && this->lp_host_ != nullptr &&
+      this->lp_host_->standby_keeps_network()) {
+    // A write from the network while the MCU sleeps under its standby consent: wake the MCU,
+    // end the consent (CMD12/00), then send the write as usual.
+    this->pulse_mcu_wake_();
+    this->cancel_low_power_standby_();
+  }
   if (!this->lp_v0_.ready() || !this->lp_wire_.idle() || this->lp_standby_.requested()) {
     ESP_LOGW(LP_TAG, "Refusing DP%u write before MCU synchronization or while another transaction owns UART",
              static_cast<unsigned>(datapoint_id));
@@ -249,6 +257,15 @@ void Tuya::send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType dat
   buffer.insert(buffer.end(), data.begin(), data.end());
   // The HC32 low-power firmware expects DP writes as CMD09, not CMD06.
   this->send_command_(TuyaCommand{.cmd = static_cast<TuyaCommandType>(0x09), .payload = buffer});
+}
+
+void Tuya::pulse_mcu_wake_() {
+  if (this->mcu_wake_pin_ == nullptr)
+    return;
+  // Same 10 ms pulse the product query uses before CMD01.
+  this->mcu_wake_pin_->digital_write(true);
+  delay(10);
+  this->mcu_wake_pin_->digital_write(false);
 }
 
 void Tuya::send_low_power_product_query_(bool direct_probe) {
@@ -489,7 +506,14 @@ void Tuya::low_power_standby_cancelled() {
 }
 
 void Tuya::low_power_standby_resumed(bool expected_source, bool wake_gpio) {
-  const auto action = this->lp_standby_.resumed(expected_source, wake_gpio);
+  const bool keep = this->lp_host_ != nullptr && this->lp_host_->standby_keeps_network();
+  const auto action = this->lp_standby_.resumed(expected_source, wake_gpio, keep);
+  if (action == TuyaLowPowerStandbyState::ResumeAction::KEEP_CONSENT) {
+    // The MCU did not wake us and still sleeps: no CMD12/00, no wake guard, sleep again once idle.
+    this->lp_host_->request_standby(true);
+    this->update_low_power_sleep_lock_();
+    return;
+  }
   this->lp_wake_guard_until_ = millis() + 5000;
   // A retained GPIO wake may receive CMD12/00 only if we previously sent
   // CMD12/01. Timer-only wake must not impersonate the original GPIO path.

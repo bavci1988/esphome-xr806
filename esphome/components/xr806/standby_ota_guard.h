@@ -61,7 +61,13 @@ class XR806OTAStandbyGuard final : public Component,
   // The native ESPHome OTA socket has no verified suspend lifecycle yet.
   // Only HTTP-only OTA may quiesce, and only after its shared HTTP listener
   // has stopped accepting and all clients/flash writers have drained.
-  bool may_quiesce() const override { return http_only_ && !active_ && !committed_; }
+  // With stay_connected the native OTA listener stays open, and a connecting client wakes both
+  // the chip and the OTA loop, so only a running or committed update keeps the chip awake.
+  bool may_quiesce() const override {
+    auto *controller = standby_controller();
+    const bool listener_may_stay = controller != nullptr && controller->stay_connected();
+    return (http_only_ || listener_may_stay) && !active_ && !committed_;
+  }
   void standby_preflight(bool requested) override {
     bool ready = requested && this->may_quiesce() && !ota::XR806OTABackend::flash_busy() &&
                  !(lowpower_policy().blockers() & XR806LowPowerPolicy::HTTP_BUSY);

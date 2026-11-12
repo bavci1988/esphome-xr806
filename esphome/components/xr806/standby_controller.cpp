@@ -140,6 +140,8 @@ void XR806StandbyController::dump_config() {
   ESP_LOGCONFIG(TAG, "  Trigger: explicit application request only");
   ESP_LOGCONFIG(TAG, "  Timer: %u ms; quiet: %u ms; min awake: %u ms", static_cast<unsigned>(this->wake_after_ms_),
                 static_cast<unsigned>(this->quiet_ms_), static_cast<unsigned>(this->min_awake_ms_));
+  ESP_LOGCONFIG(TAG, "  Network during standby: %s",
+                this->stay_connected_ ? LOG_STR_LITERAL("stays connected") : LOG_STR_LITERAL("parked"));
   ESP_LOGCONFIG(TAG, "  External sync: %s; required UART participant: %s",
                 this->external_sync_required_ ? LOG_STR_LITERAL("yes") : LOG_STR_LITERAL("no"),
                 this->require_uart_participant_ ? LOG_STR_LITERAL("yes") : LOG_STR_LITERAL("no"));
@@ -189,7 +191,9 @@ void XR806StandbyController::loop() {
     ESP_LOGW(TAG, "MCU CMD38 service preflight expired without confirmed drain");
     this->request_preflight(false);
   }
-  if (p.standby_requested() && static_cast<uint32_t>(millis() - this->request_since_ms_) > PREFLIGHT_TIMEOUT_MS) {
+  // With the link kept up no service is parked while a request waits, so a long wait costs nothing.
+  if (!this->stay_connected_ && p.standby_requested() &&
+      static_cast<uint32_t>(millis() - this->request_since_ms_) > PREFLIGHT_TIMEOUT_MS) {
     ESP_LOGW(TAG, "Suspend preflight timed out; releasing service owners and refusing PM entry");
     this->request_standby(false);
     this->state_.postpone();
@@ -348,7 +352,7 @@ abort:
     this->cancel_prepared_(prepared);
     this->state_.finished(millis(), false);
   } else {
-    const bool expected = XR806StandbyCoordinatorState::expected_wake(result, event, wake_io);
+    const bool expected = XR806StandbyCoordinatorState::expected_wake(result, event, wake_io, this->stay_connected_);
     this->state_.finished(millis(), expected);
     // Every participant must assess the wake/abort independently.
     // In particular the MCU decides whether to send CMD12/00.
@@ -375,10 +379,16 @@ abort:
     resume.expected_source = expected;
     resume.wake_timer = (event & XR806StandbyCoordinatorState::WAKE_TIMER) != 0;
     resume.wake_gpio = wake_io >= 0 && (event & (1u << wake_io)) != 0;
+    resume.wake_wlan = (event & XR806StandbyCoordinatorState::WAKE_WLAN) != 0;
     for (size_t i = 0; i < this->participant_count_; ++i)
       this->participants_[i]->standby_resumed(resume);
-    ESP_LOGI(TAG, "Standby PM return=%d event=0x%08lx expected=%d; hardware current not verified", result,
-             static_cast<unsigned long>(event), static_cast<int>(expected));
+    // With the link kept up every received packet ends a standby; keep those wakes out of the INFO log.
+    if (expected && this->stay_connected_) {
+      ESP_LOGD(TAG, "Standby PM return=%d event=0x%08lx", result, static_cast<unsigned long>(event));
+    } else {
+      ESP_LOGI(TAG, "Standby PM return=%d event=0x%08lx expected=%d; hardware current not verified", result,
+               static_cast<unsigned long>(event), static_cast<int>(expected));
+    }
   }
 
   if (this->state_.disabled()) {

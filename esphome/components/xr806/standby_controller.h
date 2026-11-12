@@ -17,6 +17,8 @@ struct XR806StandbyResume {
   bool expected_source{false};
   bool wake_gpio{false};
   bool wake_timer{false};
+  // Received network data woke the chip; only possible while the WLAN link stays up.
+  bool wake_wlan{false};
 };
 
 // A participant owns its own transactions, IRQ setup and UART TX completion.
@@ -57,12 +59,16 @@ class XR806StandbyController final : public Component {
   void set_no_mqtt(bool value) { no_mqtt_ = value; }
   void set_external_sync_required(bool value) { external_sync_required_ = value; }
   void set_require_uart_participant(bool value) { require_uart_participant_ = value; }
+  // The WLAN link, the API connections and the listeners stay up during standby, and
+  // received network data wakes the chip.
+  void set_stay_connected(bool value) { stay_connected_ = value; }
 
   // Read-only platform capabilities; protocol participants validate their
   // own MCU product-info fields against these hardware settings.
   bool has_wake_pin() const { return this->has_wake_pin_; }
   uint8_t wake_pin() const { return this->wake_pin_; }
   bool requires_external_sync() const { return this->external_sync_required_; }
+  bool stay_connected() const { return this->stay_connected_; }
 
   bool may_quiesce() const;
   bool services_quiesced() const;
@@ -105,6 +111,7 @@ class XR806StandbyController final : public Component {
   bool no_mqtt_{false};
   bool external_sync_required_{false};
   bool require_uart_participant_{false};
+  bool stay_connected_{false};
   bool busy_{false};
   uint32_t request_since_ms_{0};
   uint32_t preflight_since_ms_{0};

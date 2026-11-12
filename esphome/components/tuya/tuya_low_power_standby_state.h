@@ -8,7 +8,7 @@ namespace esphome::tuya {
 // the HC32's 'sm' product field. All transitions are host-testable.
 class TuyaLowPowerStandbyState {
  public:
-  enum class ResumeAction : uint8_t { NONE, SEND_CMD12_WAKE, REQUIRE_RESYNC };
+  enum class ResumeAction : uint8_t { NONE, SEND_CMD12_WAKE, REQUIRE_RESYNC, KEEP_CONSENT };
 
   bool accept_request(bool standby_mode, bool mcu_idle, bool uart_healthy, bool other_owners_idle) {
     if (requested_ || notified_ || recovery_required_ || !standby_mode || !mcu_idle || !uart_healthy ||
@@ -51,7 +51,14 @@ class TuyaLowPowerStandbyState {
     return compensate;
   }
 
-  ResumeAction resumed(bool expected_wake, bool gpio_wake) {
+  // keep_consent: the module itself woke (timer or received network data) while the MCU
+  // still sleeps. The MCU's consent and the sent CMD12/01 stay valid, so the module may sleep
+  // again without a new CMD38; any MCU traffic or a write ends the consent as before.
+  ResumeAction resumed(bool expected_wake, bool gpio_wake, bool keep_consent = false) {
+    if (notified_ && expected_wake && !gpio_wake && keep_consent && !recovery_required_) {
+      deferred_ = false;
+      return ResumeAction::KEEP_CONSENT;
+    }
     const bool had_notification = notified_;
     requested_ = false;
     notified_ = false;

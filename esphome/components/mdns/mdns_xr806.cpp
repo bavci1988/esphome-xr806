@@ -101,29 +101,33 @@ void refresh_mdns(void *context) {
   if (!state->configured)
     return;
 #ifdef USE_XR806_STANDBY_CONTROLLER
-  const uint32_t requested_epoch = state->suspend_epoch.epoch();
-  if (state->suspend_epoch.requested()) {
-    // The lwIP thread owns the actual responder. A callback from an older
-    // suspend epoch must never publish an idle vote for a newer request.
-    remove_netif(state);
-    if (!state->suspend_epoch.current(requested_epoch)) {
-      state->suspended.store(false, std::memory_order_release);
-      xr806::lowpower_policy().set_mdns_idle(false);
+  // With stay_connected the responder keeps running and its participant owns the vote alone.
+  auto *controller = xr806::standby_controller();
+  if (controller == nullptr || !controller->stay_connected()) {
+    const uint32_t requested_epoch = state->suspend_epoch.epoch();
+    if (state->suspend_epoch.requested()) {
+      // The lwIP thread owns the actual responder. A callback from an older
+      // suspend epoch must never publish an idle vote for a newer request.
+      remove_netif(state);
+      if (!state->suspend_epoch.current(requested_epoch)) {
+        state->suspended.store(false, std::memory_order_release);
+        xr806::lowpower_policy().set_mdns_idle(false);
+        return;
+      }
+      state->suspended.store(true, std::memory_order_release);
+      xr806::lowpower_policy().set_mdns_idle(true);
+      // A cancelling producer can race exactly between the check and vote.
+      // Recheck AFTER publishing; it will either restore BUSY here or its
+      // own preflight(false) will publish BUSY after this callback.
+      if (!state->suspend_epoch.current(requested_epoch)) {
+        state->suspended.store(false, std::memory_order_release);
+        xr806::lowpower_policy().set_mdns_idle(false);
+      }
       return;
     }
-    state->suspended.store(true, std::memory_order_release);
-    xr806::lowpower_policy().set_mdns_idle(true);
-    // A cancelling producer can race exactly between the check and vote.
-    // Recheck AFTER publishing; it will either restore BUSY here or its
-    // own preflight(false) will publish BUSY after this callback.
-    if (!state->suspend_epoch.current(requested_epoch)) {
-      state->suspended.store(false, std::memory_order_release);
-      xr806::lowpower_policy().set_mdns_idle(false);
-    }
-    return;
+    state->suspended.store(false, std::memory_order_release);
+    xr806::lowpower_policy().set_mdns_idle(false);
   }
-  state->suspended.store(false, std::memory_order_release);
-  xr806::lowpower_policy().set_mdns_idle(false);
 #endif
 
   if (!state->initialized) {
@@ -254,6 +258,11 @@ class XR806MDNSStandby final : public xr806::XR806StandbyParticipant {
     auto &state = backend();
     if (!state.configured)
       return;
+    if (stay_connected()) {
+      // The responder keeps answering; received queries wake the chip like any other packet.
+      xr806::lowpower_policy().set_mdns_idle(requested);
+      return;
+    }
     if (state.suspend_epoch.requested() == requested)
       return;
     if (!requested) {
@@ -266,10 +275,18 @@ class XR806MDNSStandby final : public xr806::XR806StandbyParticipant {
   }
   uint32_t owned_services() const override { return xr806::XR806LowPowerPolicy::MDNS_BUSY; }
   bool prepare_for_standby() override {
+    if (stay_connected())
+      return true;
     return backend().suspend_epoch.requested() && backend().suspended.load(std::memory_order_acquire);
   }
   void standby_cancelled() override { this->standby_preflight(false); }
   void standby_resumed(const xr806::XR806StandbyResume & /*event*/) override { this->standby_preflight(false); }
+
+ private:
+  static bool stay_connected() {
+    auto *controller = xr806::standby_controller();
+    return controller != nullptr && controller->stay_connected();
+  }
 };
 
 XR806MDNSStandby &mdns_standby() {

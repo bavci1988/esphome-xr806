@@ -381,6 +381,14 @@ class APIConnection final : public APIServerConnectionBase {
   bool send_buffer(ProtoWriteBuffer buffer, uint16_t message_type);
 
   const char *get_name() const { return this->helper_->get_client_name(); }
+#ifdef USE_XR806
+  /// Nothing to read, nothing waiting to be written and no state update batched, so the
+  /// connection may stay open while the CPU sleeps until the next packet arrives.
+  bool is_idle() const {
+    return !this->flags_.remove && this->helper_->can_write_without_blocking() && !this->helper_->is_socket_ready() &&
+           !this->flags_.may_have_remaining_data && this->deferred_batch_.empty();
+  }
+#endif
   /// Get peer name (IP address) into caller-provided buffer, returns buf for convenience
   const char *get_peername_to(std::span<char, socket::SOCKADDR_STR_LEN> buf) const {
     return this->helper_->get_peername_to(buf);

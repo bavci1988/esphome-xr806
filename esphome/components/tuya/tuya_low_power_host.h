@@ -37,6 +37,9 @@ class TuyaLowPowerHost {
   virtual bool standby_requested() const = 0;
   /// Whether the platform is taking the network down on purpose for a standby.
   virtual bool network_quiescing() const = 0;
+  /// Whether the network stays connected during standby, so a timer or a received packet
+  /// can wake the module while the MCU still sleeps.
+  virtual bool standby_keeps_network() const { return false; }
 
  protected:
   ~TuyaLowPowerHost() = default;

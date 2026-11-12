@@ -1,0 +1,22 @@
+esphome:
+  name: xr806-stay-connected-standby
+xr806:
+  board: wxu
+  lowpower: true
+  wlan:
+    dtim: 3
+    stay_connected: true
+  standby:
+    enabled: true
+    wake_pin: PA20
+    wake_edge: falling
+    wake_after: 10min
+wifi:
+  ssid: TEST-NETWORK-NO-HARDWARE
+  password: TestOnlyPassword123
+  power_save_mode: light
+api:
+ota:
+  - platform: esphome
+mdns:
+web_server:

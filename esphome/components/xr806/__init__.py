@@ -31,6 +31,7 @@ OTA_IMAGE_NAME = "firmware.ota.bin"
 
 CONF_WLAN = "wlan"
 CONF_NETWORK_SUSPEND = "network_suspend"
+CONF_STAY_CONNECTED = "stay_connected"
 CONF_DTIM = "dtim"
 CONF_LISTEN_INTERVAL = "listen_interval"
 CONF_STANDBY = "standby"
@@ -65,6 +66,8 @@ XR806_WLAN_SCHEMA = cv.Schema(
         cv.Optional(CONF_DTIM, default=1): cv.int_range(min=1, max=30),
         cv.Optional(CONF_LISTEN_INTERVAL, default=0): cv.int_range(min=0, max=30),
         cv.Optional(CONF_NETWORK_SUSPEND, default=False): cv.boolean,
+        # Standby keeps the station connected; received data and the wake timer wake the chip.
+        cv.Optional(CONF_STAY_CONNECTED, default=False): cv.boolean,
     }
 )
 
@@ -103,11 +106,12 @@ STANDBY_SCHEMA = cv.Schema(
         cv.GenerateID(CONF_HTTP_STANDBY_ID): cv.declare_id(XR806HTTPStandby),
         cv.GenerateID(CONF_MQTT_STANDBY_ID): cv.declare_id(XR806MQTTStandby),
         cv.Required(CONF_ENABLED): cv.boolean,
+        # The hardware timer reaches about 18.6 hours.
         cv.Optional(CONF_WAKE_AFTER, default="3s"): cv.All(
             cv.positive_time_period_milliseconds,
             cv.Range(
                 min=cv.TimePeriod(milliseconds=500),
-                max=cv.TimePeriod(milliseconds=60000),
+                max=cv.TimePeriod(hours=12),
             ),
         ),
         cv.Optional(CONF_QUIET_TIME, default="250ms"): cv.All(
@@ -136,6 +140,17 @@ def _update_core_data(config: ConfigType) -> None:
         raise cv.Invalid(
             "xr806.wlan.network_suspend requires xr806.standby and full PM gating"
         )
+    if config[CONF_WLAN][CONF_STAY_CONNECTED]:
+        if CONF_STANDBY not in config:
+            raise cv.Invalid(
+                "xr806.wlan.stay_connected requires xr806.standby",
+                path=[CONF_WLAN, CONF_STAY_CONNECTED],
+            )
+        if config[CONF_WLAN][CONF_NETWORK_SUSPEND]:
+            raise cv.Invalid(
+                "xr806.wlan.stay_connected and network_suspend exclude each other",
+                path=[CONF_WLAN, CONF_STAY_CONNECTED],
+            )
     if CONF_STANDBY in config:
         standby_cfg = config[CONF_STANDBY]
         if (CONF_WAKE_PIN in standby_cfg) != (CONF_WAKE_EDGE in standby_cfg):
@@ -247,9 +262,28 @@ def _final_validate_wake_pin_ownership(config: ConfigType) -> ConfigType:
     return config
 
 
+def _final_validate_stay_connected(config: ConfigType) -> ConfigType:
+    # Only a radio in power save mode stays associated while the CPU sleeps.
+    if not config[CONF_WLAN][CONF_STAY_CONNECTED]:
+        return config
+    wifi_config = fv.full_config.get().get("wifi")
+    if wifi_config is None:
+        raise cv.Invalid(
+            "xr806.wlan.stay_connected requires wifi",
+            path=[CONF_WLAN, CONF_STAY_CONNECTED],
+        )
+    if str(wifi_config.get("power_save_mode", "NONE")).upper() == "NONE":
+        raise cv.Invalid(
+            "xr806.wlan.stay_connected requires wifi power_save_mode light or high",
+            path=[CONF_WLAN, CONF_STAY_CONNECTED],
+        )
+    return config
+
+
 FINAL_VALIDATE_SCHEMA = cv.All(
     _final_validate_uart,
     _final_validate_wake_pin_ownership,
+    _final_validate_stay_connected,
 )
 
 
@@ -305,6 +339,7 @@ async def to_code(config: ConfigType) -> None:
             cg.add_define("USE_XR806_STANDBY_HTTP_CLIENT")
         cg.add(controller.set_external_sync_required(cfg[CONF_REQUIRE_EXTERNAL_SYNC]))
         cg.add(controller.set_require_uart_participant("uart" in CORE.config))
+        cg.add(controller.set_stay_connected(config[CONF_WLAN][CONF_STAY_CONNECTED]))
         await cg.register_component(controller, cfg)
         if has_http:
             # Dedicated HTTP + SSE socket owner holds a physical PM wakelock,
@@ -370,7 +405,9 @@ async def to_code(config: ConfigType) -> None:
             cg.add_global(
                 cg.RawStatement('#include "esphome/components/xr806/wifi_standby.h"')
             )
-            standby_wlan = cg.new_Pvariable(wlan[CONF_ID], wlan[CONF_NETWORK_SUSPEND])
+            standby_wlan = cg.new_Pvariable(
+                wlan[CONF_ID], wlan[CONF_NETWORK_SUSPEND], wlan[CONF_STAY_CONNECTED]
+            )
             await cg.register_component(standby_wlan, {})
 
     tuya_config = CORE.config.get("tuya")

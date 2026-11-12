@@ -58,4 +58,41 @@ TEST(TuyaLowPowerStandbyState, ResumeActions) {
   EXPECT_TRUE(empty.resumed(true, true) == Action::NONE);
 }
 
+TEST(TuyaLowPowerStandbyState, KeepConsentWhileNetworkStaysConnected) {
+  using State = esphome::tuya::TuyaLowPowerStandbyState;
+  using Action = State::ResumeAction;
+
+  State s;
+  EXPECT_TRUE(s.accept_request(true, true, true, true));
+  s.notification_sent();
+  (void) s.cancelled();
+  EXPECT_TRUE(s.ready_for_pm());
+
+  // Timer or received network data: the MCU still sleeps, sleep again without a new CMD38.
+  EXPECT_TRUE(s.resumed(true, false, true) == Action::KEEP_CONSENT);
+  EXPECT_TRUE(s.requested() && s.notified() && s.ready_for_pm());
+  EXPECT_FALSE(s.recovery_required());
+  EXPECT_TRUE(s.resumed(true, false, true) == Action::KEEP_CONSENT);
+
+  // The MCU's own wake still ends the consent with CMD12/00.
+  EXPECT_TRUE(s.resumed(true, true, true) == Action::SEND_CMD12_WAKE);
+  EXPECT_FALSE(s.requested());
+
+  // An unexpected wake still requires a full resync, even with the network kept up.
+  EXPECT_TRUE(s.accept_request(true, true, true, true));
+  s.notification_sent();
+  (void) s.cancelled();
+  EXPECT_TRUE(s.resumed(false, false, true) == Action::REQUIRE_RESYNC);
+  EXPECT_TRUE(s.recovery_required());
+
+  // A write from the network ends the consent and needs CMD12/00 as compensation.
+  s.reset_on_mcu_boot();
+  EXPECT_TRUE(s.accept_request(true, true, true, true));
+  s.notification_sent();
+  (void) s.cancelled();
+  EXPECT_TRUE(s.resumed(true, false, true) == Action::KEEP_CONSENT);
+  EXPECT_TRUE(s.force_cancel());
+  EXPECT_FALSE(s.requested());
+}
+
 }  // namespace esphome::tuya::testing

@@ -9,6 +9,7 @@ namespace esphome::xr806 {
 class XR806StandbyCoordinatorState {
  public:
   static constexpr uint32_t WAKE_TIMER = 1u << 16;
+  static constexpr uint32_t WAKE_WLAN = 1u << 17;
   static constexpr uint32_t WAKE_SOFTWARE = 1u << 27;
   static constexpr uint32_t WAKE_INTERNAL = 0xf0000000u;
   static constexpr uint8_t MAX_FAILURES = 3;
@@ -66,11 +67,12 @@ class XR806StandbyCoordinatorState {
 
   // A successful PM return plus a timer/GPIO event is software evidence,
   // not proof that the hardware spent time in PM_MODE_STANDBY.
-  static bool expected_wake(int pm_return, uint32_t events, int wake_io) {
+  // wlan_wake: the WLAN link stayed up, so received network data is an expected source.
+  static bool expected_wake(int pm_return, uint32_t events, int wake_io, bool wlan_wake = false) {
     if (pm_return != 0 || (events & (WAKE_SOFTWARE | WAKE_INTERNAL)) != 0)
       return false;
 
-    uint32_t expected = WAKE_TIMER;
+    uint32_t expected = WAKE_TIMER | (wlan_wake ? WAKE_WLAN : 0u);
     if (wake_io >= 0 && wake_io < 14)
       expected |= (1u << wake_io);
     return (events & expected) != 0;

@@ -75,6 +75,12 @@ bool XR806HTTPStandby::may_quiesce() const {
 void XR806HTTPStandby::restore_() {
   if (!this->parked_) {
     this->cancel_restore_retry_();
+    // With stay_connected the listener stays open and only the wakelock was let go.
+    if (!this->lock_held_) {
+      lowpower_policy().set_http_idle(false);
+      if (!this->claim_lock_())
+        this->status_set_warning();
+    }
     return;
   }
   // Claim the policy blocker before touching sockets or the PM wakelock, so a failed
@@ -117,6 +123,24 @@ void XR806HTTPStandby::standby_preflight(bool requested) {
   if (base == nullptr || base->get_server() == nullptr)
     return;  // Fail closed until the shared server actually exists.
   auto *server = base->get_server();
+  auto *controller = standby_controller();
+  if (controller != nullptr && controller->stay_connected()) {
+    // The listener stays open: a new request wakes the chip, and an open request or event
+    // stream keeps it awake.
+    if (server->has_active_connections()) {
+      this->restore_();
+      return;
+    }
+    if (lock_held_) {
+      if (pm_wake_unlock(&lock_) != 0) {
+        ESP_LOGE(TAG, "HTTP PM wakelock release failed");
+        return;
+      }
+      lock_held_ = false;
+    }
+    lowpower_policy().set_http_idle(true);
+    return;
+  }
   if (!parked_) {
     // Stop new requests, but do not kill an accepted upload or live SSE.
     server->stop_accepting();
@@ -136,8 +160,10 @@ void XR806HTTPStandby::standby_preflight(bool requested) {
 
 bool XR806HTTPStandby::prepare_for_standby() {
   auto *base = web_server_base::global_web_server_base;
-  return parked_ && !lock_held_ && !this->has_captive_dns_() && base != nullptr && base->get_server() != nullptr &&
-         !base->get_server()->has_active_connections();
+  auto *controller = standby_controller();
+  const bool listener_ready = parked_ || (controller != nullptr && controller->stay_connected());
+  return listener_ready && !lock_held_ && !this->has_captive_dns_() && base != nullptr &&
+         base->get_server() != nullptr && !base->get_server()->has_active_connections();
 }
 
 void XR806HTTPStandby::standby_cancelled() { this->restore_(); }

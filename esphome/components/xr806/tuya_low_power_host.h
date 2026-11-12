@@ -106,6 +106,10 @@ class XR806TuyaLowPowerHost final : public Component,
     if (auto *controller = standby_controller(); controller != nullptr)
       controller->request_standby(requested);
   }
+  bool standby_keeps_network() const override {
+    auto *controller = standby_controller();
+    return controller != nullptr && controller->stay_connected();
+  }
 
   // XR806StandbyParticipant: the MCU UART owner.
   bool owns_uart() const override { return true; }

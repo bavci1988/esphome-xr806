@@ -15,7 +15,8 @@ extern "C" {
 namespace esphome::xr806 {
 
 /// Owns HTTP/SSE sockets and their native PM wakelock during guarded standby.
-/// No listener or outstanding HTTP transaction may survive an accepted sleep.
+/// No listener or outstanding HTTP transaction may survive an accepted sleep, except that
+/// with stay_connected the listener stays open while no request is in progress.
 class XR806HTTPStandby final : public Component, public XR806StandbyParticipant {
  public:
   void setup() override;

@@ -13,7 +13,9 @@ namespace esphome::xr806 {
 ///
 /// The API votes idle only while standby is being prepared and no client is
 /// connected. A client that connects later flips the vote back to busy, which aborts
-/// the attempt; once the WLAN link is parked no new client can arrive.
+/// the attempt; once the WLAN link is parked no new client can arrive. With
+/// stay_connected the clients stay connected and the vote is idle while none of
+/// them has data to read or write.
 class XR806APIStandby final : public Component, public XR806StandbyParticipant {
  public:
   void setup() override;
@@ -24,11 +26,13 @@ class XR806APIStandby final : public Component, public XR806StandbyParticipant {
   void standby_preflight(bool requested) override;
   bool may_quiesce() const override;
   uint32_t owned_services() const override { return XR806LowPowerPolicy::API_BUSY; }
-  bool prepare_for_standby() override { return this->may_quiesce(); }
+  bool prepare_for_standby() override;
   void standby_cancelled() override;
   void standby_resumed(const XR806StandbyResume & /*event*/) override { this->standby_cancelled(); }
 
  protected:
+  bool clients_idle_() const;
+
   bool shutting_down_{false};
 };
 

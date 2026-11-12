@@ -30,13 +30,29 @@ bool XR806APIStandby::may_quiesce() const {
   // Dial-out can start network work without an inbound connection.
   return false;
 #else
-  return !this->shutting_down_ && !api::global_api_server->is_connected();
+  if (this->shutting_down_)
+    return false;
+  // With the link kept up a connected client stays connected; its next packet wakes the chip.
+  auto *controller = standby_controller();
+  if (controller != nullptr && controller->stay_connected())
+    return true;
+  return !api::global_api_server->is_connected();
 #endif
 }
 
-void XR806APIStandby::standby_preflight(bool requested) {
-  lowpower_policy().set_api_idle(requested && this->may_quiesce());
+bool XR806APIStandby::clients_idle_() const {
+  for (const auto &client : api::global_api_server->active_clients()) {
+    if (!client->is_idle())
+      return false;
+  }
+  return true;
 }
+
+void XR806APIStandby::standby_preflight(bool requested) {
+  lowpower_policy().set_api_idle(requested && this->may_quiesce() && this->clients_idle_());
+}
+
+bool XR806APIStandby::prepare_for_standby() { return this->may_quiesce() && this->clients_idle_(); }
 
 void XR806APIStandby::standby_cancelled() { lowpower_policy().set_api_idle(false); }
 

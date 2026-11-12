@@ -32,8 +32,9 @@ void XR806WiFiStandby::setup() {
 void XR806WiFiStandby::dump_config() {
   ESP_LOGCONFIG(TAG,
                 "XR806 WLAN standby:\n"
-                "  Network suspend: %s",
-                YESNO(this->network_suspend_));
+                "  Network suspend: %s\n"
+                "  Stay connected: %s",
+                YESNO(this->network_suspend_), YESNO(this->stay_connected_));
 }
 
 bool XR806WiFiStandby::claim_lock_() {
@@ -61,9 +62,47 @@ void XR806WiFiStandby::restore_network_() {
   wifi::global_wifi_component->enable();
 }
 
+void XR806WiFiStandby::resume_() {
+  if (!this->stay_connected_) {
+    this->restore_network_();
+    return;
+  }
+  // Busy before the wakelock comes back, so no other path sees an idle link it is about to use.
+  lowpower_policy().set_network_idle(false);
+  if (!this->claim_lock_()) {
+    ESP_LOGE(TAG, "Cannot reacquire WLAN PM wakelock");
+    this->status_set_error();
+  }
+}
+
+void XR806WiFiStandby::stay_connected_preflight_() {
+  auto &policy = lowpower_policy();
+  // Only a connected station can be woken by its access point; scanning, connecting and the
+  // setup access point keep the CPU awake.
+  const auto snapshot = read_xr806_network_snapshot(wlan_netif_get(WLAN_MODE_STA));
+  if (!wifi::global_wifi_component->is_connected() || !snapshot.ready()) {
+    policy.set_network_idle(false);
+    if (!this->claim_lock_())
+      this->status_set_error();
+    return;
+  }
+  if (this->lock_held_) {
+    if (pm_wake_unlock(&this->lock_) != 0) {
+      ESP_LOGE(TAG, "WLAN PM wakelock release failed; standby refused");
+      return;
+    }
+    this->lock_held_ = false;
+  }
+  policy.set_network_idle(true);
+}
+
 void XR806WiFiStandby::standby_preflight(bool requested) {
   if (!requested) {
-    this->restore_network_();
+    this->resume_();
+    return;
+  }
+  if (this->stay_connected_) {
+    this->stay_connected_preflight_();
     return;
   }
   if (!this->network_suspend_ || this->parked_)
@@ -93,7 +132,11 @@ void XR806WiFiStandby::standby_preflight(bool requested) {
   policy.set_network_idle(true);
 }
 
-bool XR806WiFiStandby::prepare_for_standby() { return this->network_suspend_ && this->parked_ && !this->lock_held_; }
+bool XR806WiFiStandby::prepare_for_standby() {
+  if (this->stay_connected_)
+    return !this->lock_held_ && wifi::global_wifi_component->is_connected();
+  return this->network_suspend_ && this->parked_ && !this->lock_held_;
+}
 
 }  // namespace esphome::xr806
 

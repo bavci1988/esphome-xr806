@@ -192,6 +192,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   void update_low_power_sleep_lock_();
   void poll_low_power_autobaud_();
   void send_low_power_product_query_(bool direct_probe);
+  void pulse_mcu_wake_();
   void process_low_power_queue_();
   void poll_low_power_product_recovery_();
   void invalidate_low_power_mode_epoch_();
