@@ -90,7 +90,16 @@ static void network_event_cb(uint32_t event, uint32_t /*data*/, void * /*arg*/) 
 
 static struct netif *sta_netif() { return wlan_netif_get(WLAN_MODE_STA); }
 
-static bool sta_ready() { return xr806::read_xr806_network_snapshot(sta_netif()).ready(); }
+static bool sta_ready() {
+#ifdef USE_WIFI_AP
+  // The radio runs either the AP or the station. While it is an AP there is no station to ask,
+  // and querying the station state on every loop pass while clients associate preceded WLAN
+  // firmware faults ("[FW-DBG] DbgId = 21") that hung the chip.
+  if (s_ap_mode)
+    return false;
+#endif
+  return xr806::read_xr806_network_snapshot(sta_netif()).ready();
+}
 
 #ifdef USE_WIFI_AP
 // XR806 uses a single radio and netif, so the AP must be fully stopped before the station starts.
