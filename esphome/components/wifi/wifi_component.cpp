@@ -502,6 +502,13 @@ bool WiFiComponent::needs_full_scan_results_() const {
   if (captive_portal::global_captive_portal != nullptr && captive_portal::global_captive_portal->is_active()) {
     return true;
   }
+#ifdef USE_WIFI_AP_EXCLUSIVE
+  // An exclusive radio does not scan while the AP runs, so the portal can only list what the station
+  // saw before. Keep every network from those scans while there is no connection.
+  if (captive_portal::global_captive_portal != nullptr && !this->is_connected()) {
+    return true;
+  }
+#endif
 #endif
 
 #ifdef USE_IMPROV_SERIAL
