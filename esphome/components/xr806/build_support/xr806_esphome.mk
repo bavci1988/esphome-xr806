@@ -302,6 +302,21 @@ endif
 
 
 
+# Fast select: the lwIP event callback wakes the main loop and the OTA listener
+# (see esphome/core/lwip_fast_select.c). It is C and needs the lwIP private headers.
+ifneq ($(filter -DUSE_LWIP_FAST_SELECT,$(XR806_EXTRA_CXXFLAGS)),)
+XR806_FAST_SELECT_OBJ := $(XR806_OBJDIR)/xr_lwip_fast_select.o
+XR806_ESPHOME_OBJECTS += $(XR806_FAST_SELECT_OBJ)
+$(XR806_OUTPUT): $(XR806_FAST_SELECT_OBJ)
+$(XR806_FAST_SELECT_OBJ): $(XR806_SRC)/esphome/core/lwip_fast_select.c $(XR806_DEPS)
+>@mkdir -p $(@D)
+>$(CC) $(CC_FLAGS) $(CC_SYMBOLS) $(INCLUDE_PATHS) $(filter -D%,$(XR806_EXTRA_CXXFLAGS)) \
+>    -I$(XR806_SRC) -include $(XR806_DEFINES) -MMD -MP -c $< -o $@
+-include $(XR806_FAST_SELECT_OBJ:.o=.d)
+endif
+
+
+
 # Flash-backed preferences manager (FDCM journal in two reserved sectors).
 
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr806_preferences.o

@@ -24,9 +24,11 @@ bool lwip_fd_readable(int fd) {
 
 }  // namespace esphome::xr806
 
+// With fast select (lwip_fast_select.c) the sockets report readiness and wake the main
+// loop through the lwIP event callback; these are the polling fallback without it.
+#ifndef USE_LWIP_FAST_SELECT
 namespace esphome::socket {
 
-// Transitional implementation: no event-driven FD wake yet.
 bool wake_register_fd(int /*fd*/) { return false; }
 
 void wake_unregister_fd(int /*fd*/) {}
@@ -35,5 +37,6 @@ void wake_unregister_fd(int /*fd*/) {}
 bool socket_ready_fd(int fd, bool /*loop_monitored*/) { return xr806::lwip_fd_readable(fd); }
 
 }  // namespace esphome::socket
+#endif
 
 #endif

@@ -296,10 +296,13 @@ async def to_code(config: ConfigType) -> None:
             zephyr_add_prj_conf(
                 "NET_SOCKETS_POLL_MAX", zephyr_poll_max(get_socket_counts())
             )
-    # ESP32 and LibreTiny both have LwIP >= 2.1.3 with lwip_socket_dbg_get_socket()
-    # and FreeRTOS task notifications — enable fast select to bypass lwip_select().
+    # ESP32 and LibreTiny (LwIP >= 2.1.3) and XR806 (LwIP 2.1.2, which already has
+    # lwip_socket_dbg_get_socket()) all have FreeRTOS task notifications — enable fast
+    # select to bypass lwip_select().
     # Only when not using lwip_tcp, which does not provide select() support.
-    if (CORE.is_esp32 or CORE.is_libretiny) and impl != IMPLEMENTATION_LWIP_TCP:
+    if (
+        CORE.is_esp32 or CORE.is_libretiny or CORE.is_xr806
+    ) and impl != IMPLEMENTATION_LWIP_TCP:
         cg.add_build_flag("-DUSE_LWIP_FAST_SELECT")
 
 
