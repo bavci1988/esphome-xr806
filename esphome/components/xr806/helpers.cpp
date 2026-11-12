@@ -55,22 +55,31 @@ void get_mac_address_raw(uint8_t *mac) {
     return;
 
   constexpr size_t MAC_LEN = 6;
+  // The WLAN netif exists in one mode at a time; in AP mode there is no station netif. The address
+  // does not change at run time, so the first valid one is kept for the modes without a netif.
+  static uint8_t cached[MAC_LEN]{};
+  static bool have_cached = false;
+  if (have_cached) {
+    std::memcpy(mac, cached, MAC_LEN);
+    return;
+  }
   std::memset(mac, 0, MAC_LEN);
 
-  struct netif *nif = wlan_netif_get(WLAN_MODE_STA);
+  struct netif *nif = wlan_netif_get(WLAN_MODE_NONE);
   if (nif == nullptr)
     return;
 
   uint8_t candidate[MAC_LEN]{};
-
-  if (wlan_get_mac_addr(nif, candidate, MAC_LEN) == 0 && mac_address_is_valid(candidate)) {
-    std::memcpy(mac, candidate, MAC_LEN);
-    return;
+  // wlan_get_mac_addr() returns the number of bytes written, not 0, on success.
+  if (wlan_get_mac_addr(nif, candidate, MAC_LEN) != static_cast<int>(MAC_LEN) || !mac_address_is_valid(candidate)) {
+    // Fallback to lwIP interface MAC when the WLAN getter is unavailable.
+    if (nif->hwaddr_len != MAC_LEN || !mac_address_is_valid(nif->hwaddr))
+      return;
+    std::memcpy(candidate, nif->hwaddr, MAC_LEN);
   }
-
-  // Fallback to lwIP interface MAC when the WLAN getter is unavailable.
-  if (nif->hwaddr_len == MAC_LEN && mac_address_is_valid(nif->hwaddr))
-    std::memcpy(mac, nif->hwaddr, MAC_LEN);
+  std::memcpy(cached, candidate, MAC_LEN);
+  have_cached = true;
+  std::memcpy(mac, candidate, MAC_LEN);
 }
 
 }  // namespace esphome
