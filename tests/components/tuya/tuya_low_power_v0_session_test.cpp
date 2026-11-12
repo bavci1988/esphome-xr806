@@ -141,6 +141,16 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   EXPECT_TRUE(info.matches("ihedujbuli6hsx9b"));
   EXPECT_TRUE(info.matches(""));
   EXPECT_TRUE(info.wake_gpio == 20 && info.mcu_wake_gpio == 28 && info.sleep_mode == 1);
+  EXPECT_EQ(info.mcu_wake_pulse_ms, 50u);  // TRV16 reports no mwkpt: the original WXU default
+  const std::string pulse_json = R"({"p":"x","v":"1","wk":20,"mwk":28,"sm":1,"mwkpt":120})";
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(pulse_json.data()), pulse_json.size()));
+  EXPECT_EQ(info.mcu_wake_pulse_ms, 120u);
+  const std::string short_json = R"({"p":"x","v":"1","wk":20,"mwk":28,"sm":1,"mwkpt":2})";
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(short_json.data()), short_json.size()));
+  EXPECT_EQ(info.mcu_wake_pulse_ms, 5u);
+  const std::string long_json = R"({"p":"x","v":"1","wk":20,"mwk":28,"sm":1,"mwkpt":250})";
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(long_json.data()), long_json.size()));
+  EXPECT_EQ(info.mcu_wake_pulse_ms, 200u);
   const std::string hib_json = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":0})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(hib_json.data()), hib_json.size()));
   EXPECT_TRUE(info.matches("ihedujbuli6hsx9b") && info.sleep_mode == 0);

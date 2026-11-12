@@ -6,7 +6,6 @@
 #include <cstring>
 #include <utility>
 
-#include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
 
@@ -224,10 +223,19 @@ void Tuya::send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType dat
                                      const std::vector<uint8_t> &data) {
   if (this->lp_standby_.requested() && this->lp_v0_.ready() && this->lp_wire_.idle() && this->lp_host_ != nullptr &&
       this->lp_host_->standby_keeps_network()) {
-    // A write from the network while the MCU sleeps under its standby consent: wake the MCU,
-    // end the consent (CMD12/00), then send the write as usual.
-    this->pulse_mcu_wake_();
-    this->cancel_low_power_standby_();
+    // A write from the network while the MCU sleeps under its standby consent: end the consent,
+    // wake the MCU, then send CMD12/00 and the write once the wake pulse is over.
+    const bool compensate = this->lp_standby_.force_cancel();
+    this->lp_host_->request_standby(false);
+    this->begin_mcu_wake_pulse_();
+    if (compensate) {
+      if (this->lp_mcu_wake_pulse_active_) {
+        this->lp_awake_notification_pending_ = true;
+      } else {
+        this->send_low_power_awake_notification_();
+      }
+    }
+    this->update_low_power_sleep_lock_();
   }
   if (!this->lp_v0_.ready() || !this->lp_wire_.idle() || this->lp_standby_.requested()) {
     ESP_LOGW(LP_TAG, "Refusing DP%u write before MCU synchronization or while another transaction owns UART",
@@ -259,13 +267,28 @@ void Tuya::send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType dat
   this->send_command_(TuyaCommand{.cmd = static_cast<TuyaCommandType>(0x09), .payload = buffer});
 }
 
-void Tuya::pulse_mcu_wake_() {
-  if (this->mcu_wake_pin_ == nullptr)
+void Tuya::begin_mcu_wake_pulse_() {
+  if (this->mcu_wake_pin_ == nullptr || this->lp_mcu_wake_pulse_active_)
     return;
-  // Same 10 ms pulse the product query uses before CMD01.
   this->mcu_wake_pin_->digital_write(true);
-  delay(10);
+  this->lp_mcu_wake_pulse_until_ = millis() + this->lp_product_.mcu_wake_pulse_ms;
+  this->lp_mcu_wake_pulse_active_ = true;
+}
+
+// Ends a finished wake pulse and sends what waited for it. True while the pulse still runs:
+// nothing may go to the MCU before it has woken.
+bool Tuya::mcu_wake_pulse_running_() {
+  if (!this->lp_mcu_wake_pulse_active_)
+    return false;
+  if (static_cast<int32_t>(millis() - this->lp_mcu_wake_pulse_until_) < 0)
+    return true;
   this->mcu_wake_pin_->digital_write(false);
+  this->lp_mcu_wake_pulse_active_ = false;
+  if (this->lp_awake_notification_pending_) {
+    this->lp_awake_notification_pending_ = false;
+    this->send_low_power_awake_notification_();
+  }
+  return false;
 }
 
 void Tuya::send_low_power_product_query_(bool direct_probe) {
@@ -274,7 +297,7 @@ void Tuya::send_low_power_product_query_(bool direct_probe) {
   // The GPIO configuration supports inverted pins for active-low wiring.
   if (this->mcu_wake_pin_ != nullptr) {
     this->mcu_wake_pin_->digital_write(true);
-    this->set_timeout("tuya_mcu_preprobe_wake", 10, [this, direct_probe]() {
+    this->set_timeout("tuya_mcu_preprobe_wake", this->lp_product_.mcu_wake_pulse_ms, [this, direct_probe]() {
       this->mcu_wake_pin_->digital_write(false);
       if (direct_probe) {
         this->send_low_power_direct_(0x01, {});
@@ -377,8 +400,9 @@ bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
   return this->lp_v0_.ready() && this->lp_wire_.idle() && this->lp_sleep_window_.standby_mode_stable() &&
          !this->lp_product_retry_.active() && guard_elapsed && baud_locked && this->parent_ != nullptr &&
          this->parent_->is_connected() && this->lp_uart_rx_errors_.unchanged(this->low_power_uart_rx_error_count_()) &&
-         !this->lp_standby_.recovery_required() && this->command_queue_.empty() &&
-         !this->expected_response_.has_value() && (in_cmd38_handler || this->rx_message_.empty());
+         !this->lp_standby_.recovery_required() && this->command_queue_.empty() && !this->lp_mcu_wake_pulse_active_ &&
+         !this->lp_awake_notification_pending_ && !this->expected_response_.has_value() &&
+         (in_cmd38_handler || this->rx_message_.empty());
 }
 
 void Tuya::update_low_power_sleep_lock_() {
@@ -530,6 +554,8 @@ void Tuya::process_low_power_queue_() {
   const uint32_t now = millis();
   if (static_cast<uint32_t>(now - this->last_rx_char_timestamp_) > LP_RX_TIMEOUT_MS)
     this->rx_message_.clear();
+  if (this->mcu_wake_pulse_running_())
+    return;
 
   // Standard Tuya's 300 ms retry logic is incompatible with the HC32's
   // delayed CMD05 report. ACK and report have separate timeouts.
