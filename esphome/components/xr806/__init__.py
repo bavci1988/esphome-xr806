@@ -38,11 +38,11 @@ CONF_OTA_DIAGNOSTIC_READONLY = "ota_diagnostic_readonly"
 CONF_API_STANDBY_ID = "api_standby_id"
 CONF_HTTP_STANDBY_ID = "http_standby_id"
 CONF_MQTT_STANDBY_ID = "mqtt_standby_id"
-CONF_QUIET_MS = "quiet_ms"
-CONF_MIN_AWAKE_MS = "min_awake_ms"
+CONF_QUIET_TIME = "quiet_time"
+CONF_MIN_AWAKE_TIME = "min_awake_time"
 CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
-CONF_ENTRY_AFTER_MS = "entry_after_ms"
-CONF_WAKE_AFTER_MS = "wake_after_ms"
+CONF_ENTRY_AFTER = "entry_after"
+CONF_WAKE_AFTER = "wake_after"
 CONF_WAKE_PIN = "wake_pin"
 CONF_WAKE_EDGE = "wake_edge"
 CONF_RESUME_MARKER_PB05 = "resume_marker_pb05"
@@ -69,19 +69,49 @@ XR806_WLAN_SCHEMA = cv.Schema(
 )
 
 
-# Stage 7b is an OFFLINE, bounded one-shot for an isolated WXU test board.
+# PA pins that can wake the chip from standby; PA21..23 are reserved for UART2/boot.
+_WAKE_GPIOS = (11, 12, 13, 19, 20)
+
+
+def _wake_pin_name(number: int) -> str:
+    return f"PA{number}"
+
+
+def validate_wake_pin(value: object) -> int:
+    """A standby wake input, written like any XR806 pin (PA20); the GPIO number."""
+    # The pin parser lives in gpio.py, which imports this module.
+    from .gpio import validate_gpio_pin
+
+    number = validate_gpio_pin(value)
+    if number not in _WAKE_GPIOS:
+        raise cv.Invalid(
+            "wake_pin must be one of "
+            + ", ".join(_wake_pin_name(gpio) for gpio in _WAKE_GPIOS)
+        )
+    return number
+
+
+# standby_trial is an OFFLINE, bounded one-shot for an isolated WXU test board.
 # Exposed PA wake pins only; PA21..23 are reserved for UART2/boot.
 STANDBY_TRIAL_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(XR806StandbyTrial),
         cv.Required("confirm_offline"): cv.boolean,
-        cv.Optional(CONF_ENTRY_AFTER_MS, default=10000): cv.int_range(
-            min=1000, max=60000
+        cv.Optional(CONF_ENTRY_AFTER, default="10s"): cv.All(
+            cv.positive_time_period_milliseconds,
+            cv.Range(
+                min=cv.TimePeriod(milliseconds=1000),
+                max=cv.TimePeriod(milliseconds=60000),
+            ),
         ),
-        cv.Required(CONF_WAKE_AFTER_MS): cv.int_range(min=100, max=5000),
-        cv.Optional(CONF_WAKE_PIN): cv.one_of(
-            "PA11", "PA12", "PA13", "PA19", "PA20", upper=True
+        cv.Required(CONF_WAKE_AFTER): cv.All(
+            cv.positive_time_period_milliseconds,
+            cv.Range(
+                min=cv.TimePeriod(milliseconds=100),
+                max=cv.TimePeriod(milliseconds=5000),
+            ),
         ),
+        cv.Optional(CONF_WAKE_PIN): validate_wake_pin,
         cv.Optional(CONF_WAKE_EDGE, default="falling"): cv.one_of(
             "falling", "rising", lower=True
         ),
@@ -90,7 +120,7 @@ STANDBY_TRIAL_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 
 
-# Stage 7b production-side coordinator: deliberately does NOT implement any
+# Production standby coordinator: deliberately does NOT implement any
 # Tuya/HC32 commands, UART autobaud, or transport-specific idle voting.
 # A firmware with active transports must register lifecycle participants
 # and its owners must actually clear their fail-closed PM blockers.
@@ -102,12 +132,28 @@ STANDBY_SCHEMA = cv.Schema(
         cv.GenerateID(CONF_HTTP_STANDBY_ID): cv.declare_id(XR806HTTPStandby),
         cv.GenerateID(CONF_MQTT_STANDBY_ID): cv.declare_id(XR806MQTTStandby),
         cv.Required(CONF_ENABLED): cv.boolean,
-        cv.Optional(CONF_WAKE_AFTER_MS, default=3000): cv.int_range(min=500, max=60000),
-        cv.Optional(CONF_QUIET_MS, default=250): cv.int_range(min=200, max=30000),
-        cv.Optional(CONF_MIN_AWAKE_MS, default=5000): cv.int_range(min=1000, max=60000),
-        cv.Optional(CONF_WAKE_PIN): cv.one_of(
-            "PA11", "PA12", "PA13", "PA19", "PA20", upper=True
+        cv.Optional(CONF_WAKE_AFTER, default="3s"): cv.All(
+            cv.positive_time_period_milliseconds,
+            cv.Range(
+                min=cv.TimePeriod(milliseconds=500),
+                max=cv.TimePeriod(milliseconds=60000),
+            ),
         ),
+        cv.Optional(CONF_QUIET_TIME, default="250ms"): cv.All(
+            cv.positive_time_period_milliseconds,
+            cv.Range(
+                min=cv.TimePeriod(milliseconds=200),
+                max=cv.TimePeriod(milliseconds=30000),
+            ),
+        ),
+        cv.Optional(CONF_MIN_AWAKE_TIME, default="5s"): cv.All(
+            cv.positive_time_period_milliseconds,
+            cv.Range(
+                min=cv.TimePeriod(milliseconds=1000),
+                max=cv.TimePeriod(milliseconds=60000),
+            ),
+        ),
+        cv.Optional(CONF_WAKE_PIN): validate_wake_pin,
         cv.Optional(CONF_WAKE_EDGE): cv.one_of("falling", "rising", lower=True),
         cv.Optional(CONF_REQUIRE_EXTERNAL_SYNC, default=False): cv.boolean,
     }
@@ -151,14 +197,54 @@ def _update_core_data(config: ConfigType) -> None:
     return config
 
 
+# The first versions of these options took a whole number of milliseconds.
+_OLD_MS_KEYS = {
+    CONF_ENTRY_AFTER: "entry_after_ms",
+    CONF_WAKE_AFTER: "wake_after_ms",
+    CONF_QUIET_TIME: "quiet_ms",
+    CONF_MIN_AWAKE_TIME: "min_awake_ms",
+}
+
+
+def _old_ms_value(old_key: str) -> object:
+    """The old keys took a bare number of milliseconds; give it the unit the new keys need."""
+
+    def validator(config: ConfigType) -> ConfigType:
+        if isinstance(config, dict) and isinstance(config.get(old_key), int):
+            config = {**config, old_key: f"{config[old_key]}ms"}
+        return config
+
+    return validator
+
+
+def _renamed_ms_keys(*keys: str) -> list:
+    """Accept the old millisecond keys under their new names, with a deprecation warning."""
+    validators = []
+    for key in keys:
+        old_key = _OLD_MS_KEYS[key]
+        validators.append(_old_ms_value(old_key))
+        validators.append(
+            cv.rename_key(old_key, key, removed_in="2027.6.0", component="xr806")
+        )
+    return validators
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.Optional("lowpower", default=False): cv.boolean,
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
             cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
-            cv.Optional(CONF_STANDBY_TRIAL): STANDBY_TRIAL_SCHEMA,
-            cv.Optional(CONF_STANDBY): STANDBY_SCHEMA,
+            cv.Optional(CONF_STANDBY_TRIAL): cv.All(
+                *_renamed_ms_keys(CONF_ENTRY_AFTER, CONF_WAKE_AFTER),
+                STANDBY_TRIAL_SCHEMA,
+            ),
+            cv.Optional(CONF_STANDBY): cv.All(
+                *_renamed_ms_keys(
+                    CONF_WAKE_AFTER, CONF_QUIET_TIME, CONF_MIN_AWAKE_TIME
+                ),
+                STANDBY_SCHEMA,
+            ),
             cv.Optional(CONF_OTA_DIAGNOSTIC_READONLY, default=False): cv.boolean,
         }
     ),
@@ -194,15 +280,14 @@ def _final_validate_uart(config: ConfigType) -> ConfigType:
 
 
 def _final_validate_wake_pin_ownership(config: ConfigType) -> ConfigType:
-    # wake_pin is configured directly through the PM HAL, not via a GPIO pin
-    # schema, so ESPHome's normal duplicate-pin checker cannot see this owner.
-    # In particular, allow_other_uses does NOT make a second GPIO consumer safe.
+    # The PM HAL configures wake_pin directly, so ESPHome's duplicate-pin check cannot see it,
+    # and allow_other_uses on another user does not make sharing safe.
     for standby_type in (CONF_STANDBY, CONF_STANDBY_TRIAL):
         standby = config.get(standby_type)
         if standby is None or CONF_WAKE_PIN not in standby:
             continue
-        wake_pin = standby[CONF_WAKE_PIN]
-        gpio_number = int(wake_pin[2:])  # The schema only permits PA wake inputs.
+        gpio_number = standby[CONF_WAKE_PIN]
+        wake_pin = _wake_pin_name(gpio_number)
         if pins.PIN_SCHEMA_REGISTRY.get_count(DOMAIN, DOMAIN, gpio_number):
             raise cv.Invalid(
                 f"xr806.{standby_type}.wake_pin {wake_pin} must be dedicated: "
@@ -234,11 +319,11 @@ async def to_code(config: ConfigType) -> None:
             cg.RawStatement('#include "esphome/components/xr806/standby_controller.h"')
         )
         controller = cg.new_Pvariable(cfg["id"])
-        cg.add(controller.set_wake_after_ms(cfg[CONF_WAKE_AFTER_MS]))
-        cg.add(controller.set_quiet_ms(cfg[CONF_QUIET_MS]))
-        cg.add(controller.set_min_awake_ms(cfg[CONF_MIN_AWAKE_MS]))
+        cg.add(controller.set_wake_after_ms(cfg[CONF_WAKE_AFTER].total_milliseconds))
+        cg.add(controller.set_quiet_ms(cfg[CONF_QUIET_TIME].total_milliseconds))
+        cg.add(controller.set_min_awake_ms(cfg[CONF_MIN_AWAKE_TIME].total_milliseconds))
         if CONF_WAKE_PIN in cfg:
-            cg.add(controller.set_wake_pin(int(cfg[CONF_WAKE_PIN][2:])))
+            cg.add(controller.set_wake_pin(cfg[CONF_WAKE_PIN]))
         cg.add(
             controller.set_wake_falling(cfg.get(CONF_WAKE_EDGE, "falling") == "falling")
         )
@@ -323,7 +408,7 @@ async def to_code(config: ConfigType) -> None:
         present = [domain for domain in forbidden if domain in CORE.config]
         if present:
             raise cv.Invalid(
-                "Stage 7b offline standby_trial forbids active transports: "
+                "The offline standby_trial forbids active transports: "
                 + ", ".join(present)
             )
         trial = config[CONF_STANDBY_TRIAL]
@@ -332,10 +417,10 @@ async def to_code(config: ConfigType) -> None:
             cg.RawStatement('#include "esphome/components/xr806/standby_trial.h"')
         )
         standby = cg.new_Pvariable(trial["id"])
-        cg.add(standby.set_entry_delay_ms(trial[CONF_ENTRY_AFTER_MS]))
-        cg.add(standby.set_wake_after_ms(trial[CONF_WAKE_AFTER_MS]))
+        cg.add(standby.set_entry_delay_ms(trial[CONF_ENTRY_AFTER].total_milliseconds))
+        cg.add(standby.set_wake_after_ms(trial[CONF_WAKE_AFTER].total_milliseconds))
         if CONF_WAKE_PIN in trial:
-            cg.add(standby.set_wake_pin(int(trial[CONF_WAKE_PIN][2:])))
+            cg.add(standby.set_wake_pin(trial[CONF_WAKE_PIN]))
         cg.add(standby.set_wake_falling(trial[CONF_WAKE_EDGE] == "falling"))
         cg.add(standby.set_resume_marker_pb05(trial[CONF_RESUME_MARKER_PB05]))
         await cg.register_component(standby, trial)

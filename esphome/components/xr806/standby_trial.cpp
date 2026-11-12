@@ -1,4 +1,4 @@
-// Stage 7b: real XR806 PM_MODE_STANDBY + timer / optional PA wake-up.
+// Standby trial: real XR806 PM_MODE_STANDBY + timer / optional PA wake-up.
 // Must be explicitly enabled, offline and one-shot; never silently sleep
 // while Native API, MQTT, OTA, mDNS, WLAN or MCU UART may be active.
 #include "esphome/core/defines.h"
@@ -11,10 +11,10 @@ extern "C" {
 }
 
 #if !defined(CONFIG_PM) || !defined(CONFIG_PM_WAKELOCKS) || !defined(CONFIG_STANDBY_RET_SRAM_ALL)
-#error "XR806 Stage 7b requires PM, PM wakelocks and full standby SRAM retention"
+#error "XR806 standby trial requires PM, PM wakelocks and full standby SRAM retention"
 #endif
 #if !defined(CONFIG_CHIP_ARCH_VER) || CONFIG_CHIP_ARCH_VER != 3
-#error "XR806 Stage 7b PA10..PA23 wake-index mapping needs XR806 architecture v3"
+#error "XR806 standby trial PA10..PA23 wake-index mapping needs XR806 architecture v3"
 #endif
 
 #include "standby_trial.h"
@@ -43,7 +43,7 @@ void XR806StandbyTrial::setup() {
     HAL_GPIO_WritePin(GPIO_PORT_B, GPIO_PIN_5, GPIO_PIN_LOW);
   }
   this->state_.arm(millis());
-  ESP_LOGW(TAG, "Stage 7b ONE-SHOT bench trial armed: no WiFi/API/OTA/UART clients");
+  ESP_LOGW(TAG, "ONE-SHOT standby bench trial armed: no WiFi/API/OTA/UART clients");
 }
 
 void XR806StandbyTrial::dump_config() {
@@ -111,7 +111,7 @@ void XR806StandbyTrial::attempt_standby_() {
   }
   p.set_wake_source_ready(true);
   if (!p.can_enter_standby()) {
-    ESP_LOGW(TAG, "Stage 7b standby refused: blockers=0x%08lx", static_cast<unsigned long>(p.blockers()));
+    ESP_LOGW(TAG, "Standby trial refused: blockers=0x%08lx", static_cast<unsigned long>(p.blockers()));
     goto cleanup;
   }
 
@@ -157,7 +157,7 @@ cleanup:
     HAL_PRCM_SetWakeupIOxDebounce(static_cast<uint32_t>(wake_index), 0);
     HAL_GPIO_DeInit(GPIO_PORT_A, static_cast<GPIO_Pin>(this->wake_pin_));
   }
-  ESP_LOGI(TAG, "Stage 7b one-shot completed; automatic re-entry disabled");
+  ESP_LOGI(TAG, "Standby trial one-shot completed; automatic re-entry disabled");
 }
 
 }  // namespace esphome::xr806

@@ -425,7 +425,7 @@ def test_standby_wake_pin_is_dedicated(
     standby_fields = (
         "    enabled: true\n    wake_pin: PA20\n    wake_edge: falling\n"
         if standby_type == "standby"
-        else "    confirm_offline: true\n    wake_after_ms: 1000\n    wake_pin: PA20\n"
+        else "    confirm_offline: true\n    wake_after: 1000ms\n    wake_pin: PA20\n"
     )
     config = (
         "esphome:\n  name: xr806-wake-pin-test\n"
@@ -498,3 +498,60 @@ def test_mqtt_tls_requires_a_certificate_authority(
 
     assert read_config({}) is None
     assert "XR806 has no certificate bundle" in capsys.readouterr().out
+
+
+def test_standby_times_accept_time_periods(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+) -> None:
+    config = component_config_path("native_ota_standby.yaml").read_text()
+    config = config.replace(
+        "    enabled: true\n",
+        "    enabled: true\n    wake_after: 2s\n    quiet_time: 300ms\n    min_awake_time: 1min\n",
+    )
+    path = tmp_path / "standby_times.yaml"
+    path.write_text(config)
+    generated = generate_main(path)
+
+    assert "set_wake_after_ms(2000)" in generated
+    assert "set_quiet_ms(300)" in generated
+    assert "set_min_awake_ms(60000)" in generated
+
+
+def test_standby_old_millisecond_keys_still_work(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = component_config_path("native_ota_standby.yaml").read_text()
+    config = config.replace(
+        "    enabled: true\n",
+        "    enabled: true\n    wake_after_ms: 2500\n    quiet_ms: 400\n",
+    )
+    path = tmp_path / "standby_old_keys.yaml"
+    path.write_text(config)
+    generated = generate_main(path)
+
+    assert "set_wake_after_ms(2500)" in generated
+    assert "set_quiet_ms(400)" in generated
+    assert "'wake_after_ms' is deprecated, use 'wake_after'" in caplog.text
+
+
+def test_standby_wake_pin_must_be_a_wake_input(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = (
+        "esphome:\n  name: xr806-wake-pin-invalid\n"
+        "xr806:\n  board: wxu\n  lowpower: true\n"
+        "  standby:\n    enabled: true\n    wake_pin: PB0\n    wake_edge: falling\n"
+    )
+    CORE.config_path = tmp_path / "wake_invalid.yaml"
+    CORE.config_path.write_text(config)
+
+    assert read_config({}) is None
+    assert (
+        "wake_pin must be one of PA11, PA12, PA13, PA19, PA20"
+        in capsys.readouterr().out
+    )

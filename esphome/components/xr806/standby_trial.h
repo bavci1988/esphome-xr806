@@ -8,7 +8,7 @@
 
 namespace esphome::xr806 {
 
-// Explicit, OFFLINE bench-only Stage 7b path. This is not the production
+// Explicit, OFFLINE bench-only standby trial. This is not the production
 // ESPHome WiFi/API/OTA power scheduler. No MCU type is assumed.
 class XR806StandbyTrial final : public Component {
  public:

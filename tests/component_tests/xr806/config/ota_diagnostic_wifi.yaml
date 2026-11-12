@@ -11,9 +11,9 @@ xr806:
     enabled: true
     wake_pin: PA20
     wake_edge: falling
-    wake_after_ms: 3000
-    quiet_ms: 250
-    min_awake_ms: 5000
+    wake_after: 3000ms
+    quiet_time: 250ms
+    min_awake_time: 5000ms
     require_external_sync: true
 wifi:
   ssid: TEST-NETWORK-NO-HARDWARE

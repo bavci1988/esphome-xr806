@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
+
+from esphome.framework_helpers import install_lock
 
 from .dependencies import ensure_dependency
 
@@ -89,73 +90,67 @@ def prepare_noise_build() -> dict[str, str]:
         raise RuntimeError("libsodium port patches missing")
 
     BUILD_CACHE.mkdir(parents=True, exist_ok=True)
-    with (BUILD_CACHE / ".build.lock").open("a+b") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            work = BUILD_CACHE / digest
-            project = work / "project"
-            build = work / "build"
-            patched = work / "libsodium-patched"
-            project.mkdir(parents=True, exist_ok=True)
-            _patched_sodium(sodium, patched)
+    with install_lock(BUILD_CACHE, ".build"):
+        work = BUILD_CACHE / digest
+        project = work / "project"
+        build = work / "build"
+        patched = work / "libsodium-patched"
+        project.mkdir(parents=True, exist_ok=True)
+        _patched_sodium(sodium, patched)
 
-            toolchain = project / "arm.cmake"
-            toolchain.write_text(
-                "\n".join(
-                    (
-                        "set(CMAKE_SYSTEM_NAME Generic)",
-                        "set(CMAKE_SYSTEM_PROCESSOR arm)",
-                        "set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)",
-                        f'set(CMAKE_C_COMPILER "{cc}")',
-                        f'set(CMAKE_ASM_COMPILER "{cc}")',
-                        f'set(CMAKE_AR "{ar}")',
-                        f'set(CMAKE_RANLIB "{ranlib}")',
-                        f'set(CMAKE_C_FLAGS_INIT "{ARM_FLAGS}")',
-                        f'set(CMAKE_ASM_FLAGS_INIT "{ARM_FLAGS}")',
-                    )
+        toolchain = project / "arm.cmake"
+        toolchain.write_text(
+            "\n".join(
+                (
+                    "set(CMAKE_SYSTEM_NAME Generic)",
+                    "set(CMAKE_SYSTEM_PROCESSOR arm)",
+                    "set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)",
+                    f'set(CMAKE_C_COMPILER "{cc}")',
+                    f'set(CMAKE_ASM_COMPILER "{cc}")',
+                    f'set(CMAKE_AR "{ar}")',
+                    f'set(CMAKE_RANLIB "{ranlib}")',
+                    f'set(CMAKE_C_FLAGS_INIT "{ARM_FLAGS}")',
+                    f'set(CMAKE_ASM_FLAGS_INIT "{ARM_FLAGS}")',
                 )
-                + "\n"
             )
-            (project / "CMakeLists.txt").write_text(CMAKE_PROJECT)
+            + "\n"
+        )
+        (project / "CMakeLists.txt").write_text(CMAKE_PROJECT)
 
-            subprocess.run(
-                [
-                    "cmake",
-                    "-S",
-                    str(project),
-                    "-B",
-                    str(build),
-                    "-DCMAKE_TOOLCHAIN_FILE=" + str(toolchain),
-                    "-DCMAKE_BUILD_TYPE=MinSizeRel",
-                    "-DNOISE_SOURCE=" + str(noise),
-                    "-DSODIUM_SOURCE=" + str(patched),
-                ],
-                check=True,
-            )
-            subprocess.run(
-                ["cmake", "--build", str(build), "--parallel", "4"],
-                check=True,
-            )
+        subprocess.run(
+            [
+                "cmake",
+                "-S",
+                str(project),
+                "-B",
+                str(build),
+                "-DCMAKE_TOOLCHAIN_FILE=" + str(toolchain),
+                "-DCMAKE_BUILD_TYPE=MinSizeRel",
+                "-DNOISE_SOURCE=" + str(noise),
+                "-DSODIUM_SOURCE=" + str(patched),
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["cmake", "--build", str(build), "--parallel", "4"],
+            check=True,
+        )
 
-            archives = {
-                "XR806_NOISE_C_ARCHIVE": build / "noise-c/libnoise_c.a",
-                "XR806_SODIUM_ARCHIVE": build / "sodium/libsodium.a",
-            }
-            for archive in archives.values():
-                if not archive.is_file() or archive.stat().st_size < 256:
-                    raise RuntimeError(f"Missing ARM archive: {archive}")
-                if not _output(ar, "t", str(archive)):
-                    raise RuntimeError(f"Empty ARM archive: {archive}")
+        archives = {
+            "XR806_NOISE_C_ARCHIVE": build / "noise-c/libnoise_c.a",
+            "XR806_SODIUM_ARCHIVE": build / "sodium/libsodium.a",
+        }
+        for archive in archives.values():
+            if not archive.is_file() or archive.stat().st_size < 256:
+                raise RuntimeError(f"Missing ARM archive: {archive}")
+            if not _output(ar, "t", str(archive)):
+                raise RuntimeError(f"Empty ARM archive: {archive}")
 
-            print("[XR806] Noise ARM libraries ready (incremental)", flush=True)
-            return {
-                **{k: str(v) for k, v in archives.items()},
-                "XR806_NOISE_C_INCLUDE": str(noise / "include"),
-                "XR806_NOISE_SRC_INCLUDE": str(noise / "src"),
-                "XR806_SODIUM_INCLUDE": str(
-                    patched / "libsodium/src/libsodium/include"
-                ),
-                "XR806_SODIUM_PORT_INCLUDE": str(patched / "port_include"),
-            }
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        print("[XR806] Noise ARM libraries ready (incremental)", flush=True)
+        return {
+            **{k: str(v) for k, v in archives.items()},
+            "XR806_NOISE_C_INCLUDE": str(noise / "include"),
+            "XR806_NOISE_SRC_INCLUDE": str(noise / "src"),
+            "XR806_SODIUM_INCLUDE": str(patched / "libsodium/src/libsodium/include"),
+            "XR806_SODIUM_PORT_INCLUDE": str(patched / "port_include"),
+        }
