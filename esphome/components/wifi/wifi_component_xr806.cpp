@@ -433,6 +433,17 @@ const char *WiFiComponent::wifi_ssid_to(std::span<char, SSID_BUFFER_SIZE> buffer
 int8_t WiFiComponent::wifi_rssi() {
   if (!this->is_connected_())
     return WIFI_RSSI_DISCONNECTED;
+  // The level in wlan_sta_ap_info() comes from the scan or association and goes stale under
+  // power save (it read -105 dBm next to a -27 dBm link). Ask the firmware for the current
+  // signal, as the vendor CLI does: SNR in 0.5 dB steps plus the noise floor.
+  if (struct netif *nif = sta_netif(); nif != nullptr) {
+    wlan_ext_signal_t signal{};
+    if (wlan_ext_request(nif, WLAN_EXT_CMD_GET_SIGNAL, reinterpret_cast<uint32_t>(&signal)) == 0) {
+      const int level = signal.rssi / 2 + signal.noise;
+      if (level < 0 && level > -110)
+        return static_cast<int8_t>(level);
+    }
+  }
   wlan_sta_ap_t ap{};
   return wlan_sta_ap_info(&ap) == 0 ? static_cast<int8_t>(ap.level) : WIFI_RSSI_DISCONNECTED;
 }
