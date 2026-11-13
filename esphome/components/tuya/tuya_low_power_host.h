@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "esphome/core/gpio.h"
+
 namespace esphome::tuya {
 
 /// What the low_power_v0 protocol needs from the platform that powers the Wi-Fi module.
@@ -40,6 +42,16 @@ class TuyaLowPowerHost {
   /// Whether the network stays connected during standby, so a timer or a received packet
   /// can wake the module while the MCU still sleeps.
   virtual bool standby_keeps_network() const { return false; }
+  /// Maps the wake lines named in the MCU's product info (pin numbers of the module the MCU firmware
+  /// was written for) to this module and uses the wake input where the configuration names none.
+  /// With create_mcu_wake_output, also sets up the output to the MCU's wake line (see mcu_wake_output()).
+  /// Returns the mapped wake input in standby_wake_pin() numbering, or -1 when it cannot be mapped.
+  virtual int configure_wake_lines(int /*wake_gpio*/, int /*mcu_wake_gpio*/, bool /*mcu_wake_active_high*/,
+                                   bool /*create_mcu_wake_output*/) {
+    return -1;
+  }
+  /// The output to the MCU's wake line set up by configure_wake_lines(), or nullptr.
+  virtual GPIOPin *mcu_wake_output() { return nullptr; }
 
  protected:
   ~TuyaLowPowerHost() = default;

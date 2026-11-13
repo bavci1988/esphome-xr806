@@ -14,10 +14,12 @@ struct TuyaLowPowerProductInfo {
   std::string version;
   int wake_gpio{-1};      // wk: logical WXU MCU-to-WXU wake source
   int mcu_wake_gpio{-1};  // mwk: vendor-encoded WXU-to-MCU wake line
-  int sleep_mode{-1};     // sm: 1 standby request, 0 hibernation request
+  int sleep_mode{-1};     // sm: 0 hibernation, 1 standby on the MCU's CMD38, 2 standby offered by the module (0x91)
   // mwkpt: length of the WXU-to-MCU wake pulse. The original WXU firmware uses 50 ms when the MCU
   // does not report it (the TRV16 does not) and limits a reported value to 5..200 ms.
   uint32_t mcu_wake_pulse_ms{50};
+  // mwkp: active level of the wake line to the MCU; the original firmware defaults to low.
+  bool mcu_wake_active_high{false};
   bool parsed{false};
 
   static bool find_key(const std::string &s, const char *key, size_t &value) {
@@ -81,8 +83,11 @@ struct TuyaLowPowerProductInfo {
     if (parsed) {
       (void) get_integer(s, "wk", wake_gpio);
       (void) get_integer(s, "mwk", mcu_wake_gpio);
-      if (get_integer(s, "sm", sleep_mode) && sleep_mode > 1)
+      if (get_integer(s, "sm", sleep_mode) && sleep_mode > 2)
         sleep_mode = -1;
+      int level = 0;
+      if (get_integer(s, "mwkp", level))
+        mcu_wake_active_high = level == 1;
     }
     int pulse_ms = 0;
     if (parsed && get_integer(s, "mwkpt", pulse_ms))

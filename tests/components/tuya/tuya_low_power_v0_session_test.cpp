@@ -168,6 +168,15 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   const std::string long_json = R"({"p":"x","v":"1","wk":20,"mwk":28,"sm":1,"mwkpt":250})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(long_json.data()), long_json.size()));
   EXPECT_EQ(info.mcu_wake_pulse_ms, 200u);
+  // MCU 1.0.9 in the TRV16 (written for a T3-U): the module offers sleep, the wake line idles high.
+  const std::string v3_json = R"({"p":"mdthw0oxat1k9sja","v":"1.0.9","m":1,"n":1,"sm":2,"wk":32,"mwk":16})";
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(v3_json.data()), v3_json.size()));
+  EXPECT_TRUE(info.wake_gpio == 32 && info.mcu_wake_gpio == 16 && info.sleep_mode == 2);
+  EXPECT_FALSE(info.mcu_wake_active_high);
+  const std::string high_json = R"({"p":"x","v":"1","wk":20,"mwk":28,"sm":3,"mwkp":1})";
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(high_json.data()), high_json.size()));
+  EXPECT_TRUE(info.mcu_wake_active_high);
+  EXPECT_EQ(info.sleep_mode, -1);  // Unknown sleep modes are not guessed.
   // Only p and v are required; missing low-power fields stay unset.
   const std::string minimal_json = R"({"p":"abc","v":"2.0.0","m":0})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(minimal_json.data()), minimal_json.size()));
@@ -187,7 +196,7 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   EXPECT_TRUE(info.mcu_wake_gpio == -1 && info.wake_gpio == 20);
   const std::string missing_p = R"({"v":"1.3.1","wk":20,"mwk":28,"sm":1})";
   const std::string missing_v = R"({"p":"ihedujbuli6hsx9b","wk":20,"mwk":28,"sm":1})";
-  const std::string bad_sm = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":2})";
+  const std::string bad_sm = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":7})";
   const std::string typed_p = R"({"p":42,"v":"1.3.1","wk":20,"mwk":28,"sm":1})";
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(missing_p.data()), missing_p.size()));
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(missing_v.data()), missing_v.size()));

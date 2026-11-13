@@ -203,6 +203,11 @@ class Tuya final : public Component, public uart::UARTDevice {
   void poll_low_power_sleep_preflight_();
   void cancel_low_power_preflight_(bool notify_mcu);
   void send_low_power_awake_notification_();
+  void send_low_power_awake_frame_();
+  void configure_low_power_wake_lines_();
+  bool low_power_v3_sleep_supported_() const;
+  void poll_low_power_v3_sleep_();
+  void handle_low_power_v3_sleep_(const uint8_t *data, size_t len);
 #endif  // USE_TUYA_LOW_POWER_V0
   void send_raw_command_(TuyaCommand command);
   void process_command_queue_();
@@ -251,6 +256,12 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool lp_v3_mode_acked_{false};
   // The MCU sent a report nobody asked for: it pushes changes, so the status poll is not needed.
   bool lp_v3_pushes_{false};
+  // sm=2: the module offers sleep with 0x91 after a quiet period, as the original T3-U firmware does.
+  bool lp_v3_offer_pending_{false};
+  uint32_t lp_v3_offer_deadline_ms_{0};
+  uint32_t lp_v3_idle_since_ms_{0};
+  bool lp_wake_lines_configured_{false};
+  int lp_wake_input_{-1};  // wk mapped to this module's GPIO numbering
   uint32_t lp_mode_requery_after_ms_{0};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_mcu_wake_pulse_until_{0};

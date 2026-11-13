@@ -8,6 +8,8 @@
 #include "esphome/components/uart/uart_component_xr806.h"
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
+#include "gpio.h"
+#include "tuya_wake_lines.h"
 #ifdef USE_XR806_LOWPOWER
 #include "lowpower_policy.h"
 #endif
@@ -16,6 +18,8 @@
 #endif
 
 namespace esphome::xr806 {
+
+ESPHOME_LOG_TAG(TUYA_HOST_TAG, "xr806.tuya_host");
 
 /// Connects a Tuya hub running protocol low_power_v0 to XR806 power management:
 /// the MCU decides when the module may sleep, and this bridge carries that to the standby controller.
@@ -53,6 +57,34 @@ class XR806TuyaLowPowerHost final : public Component,
     lowpower_policy().set_mcu_synchronized(synchronized);
 #endif
   }
+  int configure_wake_lines(int wake_gpio, int mcu_wake_gpio, bool mcu_wake_active_high,
+                           bool create_mcu_wake_output) override {
+    const TuyaWakeLines lines = map_tuya_wake_lines(wake_gpio, mcu_wake_gpio);
+    if (create_mcu_wake_output && lines.mcu_wake >= 0 && !this->mcu_wake_created_) {
+      this->mcu_wake_.set_pin(static_cast<uint8_t>(lines.mcu_wake));
+      this->mcu_wake_.set_inverted(!mcu_wake_active_high);
+      this->mcu_wake_.set_flags(gpio::FLAG_OUTPUT);
+      this->mcu_wake_created_ = true;
+      char name[24];
+      this->mcu_wake_.dump_summary(name, sizeof(name));
+      ESP_LOGI(TUYA_HOST_TAG, "MCU wake output from product info: %s", name);
+    }
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    auto *controller = standby_controller();
+    if (controller != nullptr && !controller->has_wake_pin() && lines.wake_input >= 0) {
+      // The MCU pulls its line low to wake the module, as the original firmware expects.
+      controller->set_wake_pin(static_cast<uint8_t>(lines.wake_input));
+      controller->set_wake_falling(true);
+      ESP_LOGI(TUYA_HOST_TAG, "Standby wake input from product info: PA%d", lines.wake_input);
+    }
+#endif
+    if (lines.wake_input < 0)
+      ESP_LOGW(TUYA_HOST_TAG, "MCU wake lines wk=%d mwk=%d have no known pins on this module", wake_gpio,
+               mcu_wake_gpio);
+    return lines.wake_input;
+  }
+  GPIOPin *mcu_wake_output() override { return this->mcu_wake_created_ ? &this->mcu_wake_ : nullptr; }
+
   uint32_t uart_rx_error_count() const override { return this->uart_->get_rx_error_count(); }
   bool ota_busy() const override {
 #ifdef USE_XR806_LOWPOWER
@@ -132,6 +164,8 @@ class XR806TuyaLowPowerHost final : public Component,
  protected:
   tuya::Tuya *tuya_;
   uart::XR806UARTComponent *uart_;
+  XR806GPIOPin mcu_wake_;
+  bool mcu_wake_created_{false};
 #ifdef USE_XR806_STANDBY_CONTROLLER
   bool registered_{false};
 #endif

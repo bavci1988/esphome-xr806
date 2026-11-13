@@ -21,6 +21,17 @@ static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
 // A version-3 MCU (firmware 1.0.9) reports changes made at the device only when asked.
 static constexpr uint32_t LP_V3_STATUS_POLL_MS = 60000;
 static constexpr uint32_t LP_COMMAND_DELAY_MS = 10;
+// sm=2: quiet time before the module offers sleep with 0x91, and how long it waits for the answer.
+// The original T3-U firmware uses the same 5 s.
+static constexpr uint32_t LP_V3_SLEEP_IDLE_MS = 5000;
+static constexpr uint32_t LP_V3_OFFER_TIMEOUT_MS = 1000;
+static constexpr uint8_t LP_V3_SLEEP_CMD = 0x91;
+static constexpr uint8_t LP_V3_SLEEP_OFFER = 0x00;
+static constexpr uint8_t LP_V3_SLEEP_WAKE = 0x01;
+static constexpr uint8_t LP_V3_SLEEP_REQUEST = 0x02;
+// Reply flags to the MCU's own sleep request, as in the original firmware.
+static constexpr uint8_t LP_V3_BUSY_NETWORK = 0x02;
+static constexpr uint8_t LP_V3_BUSY_UPGRADE = 0x04;
 
 // Interval id shared with the standard heartbeat slot in tuya.cpp; a hub runs one protocol only.
 static constexpr uint32_t LP_NETWORK_STATUS_INTERVAL_ID = 1;
@@ -126,6 +137,7 @@ void Tuya::loop_low_power_() {
   this->update_low_power_sleep_lock_();
   this->process_low_power_queue_();
   this->poll_low_power_v3_status_();
+  this->poll_low_power_v3_sleep_();
 }
 
 void Tuya::poll_low_power_v3_status_() {
@@ -151,6 +163,7 @@ void Tuya::dump_low_power_config_() {
 }
 
 void Tuya::on_low_power_rx_byte_() {
+  this->lp_v3_idle_since_ms_ = millis();
   // An incoming byte before CMD38 consent invalidates a pending network
   // preflight. The MCU must see a busy response, not a delayed grant.
   if (this->lp_cmd38_pending_) {
@@ -314,7 +327,7 @@ bool Tuya::mcu_wake_pulse_running_() {
   this->lp_mcu_wake_pulse_active_ = false;
   if (this->lp_awake_notification_pending_) {
     this->lp_awake_notification_pending_ = false;
-    this->send_low_power_awake_notification_();
+    this->send_low_power_awake_frame_();
   }
   return false;
 }
@@ -425,9 +438,11 @@ bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
   // parser callback returns. Only that specific frame can be disregarded.
   const bool guard_elapsed = static_cast<int32_t>(millis() - this->lp_wake_guard_until_) >= 0;
   const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
-  return this->lp_v0_.ready() && this->lp_wire_.idle() && this->lp_sleep_window_.standby_mode_stable() &&
-         !this->lp_product_retry_.active() && guard_elapsed && baud_locked && this->parent_ != nullptr &&
-         this->parent_->is_connected() && this->lp_uart_rx_errors_.unchanged(this->low_power_uart_rx_error_count_()) &&
+  // The DP101/DP102 sleep window exists only on the HC32 firmware (version 0 frames).
+  return this->lp_v0_.ready() && this->lp_wire_.idle() &&
+         (this->lp_v3_ || this->lp_sleep_window_.standby_mode_stable()) && !this->lp_product_retry_.active() &&
+         guard_elapsed && baud_locked && this->parent_ != nullptr && this->parent_->is_connected() &&
+         this->lp_uart_rx_errors_.unchanged(this->low_power_uart_rx_error_count_()) &&
          !this->lp_standby_.recovery_required() && this->command_queue_.empty() && !this->lp_mcu_wake_pulse_active_ &&
          !this->lp_awake_notification_pending_ && !this->expected_response_.has_value() &&
          (in_cmd38_handler || this->rx_message_.empty());
@@ -447,16 +462,136 @@ bool Tuya::request_low_power_refresh() {
 }
 
 void Tuya::send_low_power_awake_notification_() {
-  // This is a Tuya/HC32 command, not a platform wake operation.
+  if (this->lp_v3_ && this->mcu_wake_pin_ != nullptr) {
+    // A version-3 MCU sleeps after its consent and listens to the UART only after a wake pulse.
+    this->begin_mcu_wake_pulse_();
+    if (this->lp_mcu_wake_pulse_active_) {
+      this->lp_awake_notification_pending_ = true;
+      this->lp_wake_guard_until_ = millis() + 5000;
+      this->update_low_power_sleep_lock_();
+      return;
+    }
+  }
+  this->send_low_power_awake_frame_();
+}
+
+void Tuya::send_low_power_awake_frame_() {
+  // This is a Tuya MCU command, not a platform wake operation.
   if (this->parent_ == nullptr || !this->parent_->is_connected()) {
     this->lp_standby_.transport_fault();
   } else {
-    this->send_low_power_direct_(0x12, {0x00});
+    if (this->lp_v3_) {
+      this->send_low_power_direct_(LP_V3_SLEEP_CMD, {LP_V3_SLEEP_WAKE, 0x01});
+      // Read the state again; its report also ends a recovery after a UART fault.
+      this->lp_v3_last_poll_ms_ = millis();
+      this->send_low_power_direct_(0x08, {});
+    } else {
+      this->send_low_power_direct_(0x12, {0x00});
+    }
     if (this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS)
       this->lp_standby_.transport_fault();
   }
   this->lp_wake_guard_until_ = millis() + 5000;
   this->update_low_power_sleep_lock_();
+}
+
+void Tuya::configure_low_power_wake_lines_() {
+  if (this->lp_wake_lines_configured_ || this->lp_host_ == nullptr)
+    return;
+  this->lp_wake_lines_configured_ = true;
+  // The product info names both wake lines, so the configuration does not have to.
+  const bool create_output = this->mcu_wake_pin_ == nullptr;
+  this->lp_wake_input_ =
+      this->lp_host_->configure_wake_lines(this->lp_product_.wake_gpio, this->lp_product_.mcu_wake_gpio,
+                                           this->lp_product_.mcu_wake_active_high, create_output);
+  if (create_output && (this->mcu_wake_pin_ = this->lp_host_->mcu_wake_output()) != nullptr) {
+    this->mcu_wake_pin_->setup();
+    this->mcu_wake_pin_->digital_write(false);
+  }
+}
+
+bool Tuya::low_power_v3_sleep_supported_() const {
+  auto *host = this->lp_host_;
+  return this->lp_v3_ && this->lp_product_.sleep_mode == 2 && host != nullptr && host->standby_supported() &&
+         this->lp_wake_input_ >= 0 && host->standby_wake_pin() == this->lp_wake_input_ &&
+         host->standby_requires_external_sync() && host->standby_may_quiesce();
+}
+
+void Tuya::poll_low_power_v3_sleep_() {
+  if (!this->lp_v3_ || this->lp_product_.sleep_mode != 2)
+    return;
+  const uint32_t now = millis();
+  if (this->lp_v3_offer_pending_) {
+    if (static_cast<int32_t>(now - this->lp_v3_offer_deadline_ms_) >= 0) {
+      this->lp_v3_offer_pending_ = false;
+      this->lp_v3_idle_since_ms_ = now;
+      ESP_LOGD(LP_TAG, "MCU did not answer the sleep offer");
+    }
+    return;
+  }
+  if (this->lp_standby_.requested() || now - this->lp_v3_idle_since_ms_ < LP_V3_SLEEP_IDLE_MS ||
+      !this->low_power_v3_sleep_supported_() || this->lp_host_->ota_busy() || !this->low_power_ready_for_sleep_() ||
+      this->available() != 0)
+    return;
+  ESP_LOGV(LP_TAG, "Offering sleep to the MCU");
+  this->send_low_power_direct_(LP_V3_SLEEP_CMD, {LP_V3_SLEEP_OFFER});
+  this->lp_v3_offer_pending_ = true;
+  this->lp_v3_offer_deadline_ms_ = now + LP_V3_OFFER_TIMEOUT_MS;
+}
+
+void Tuya::handle_low_power_v3_sleep_(const uint8_t *data, size_t len) {
+  if (!this->lp_v3_ || len < 1)
+    return;
+  auto *host = this->lp_host_;
+  switch (data[0]) {
+    case LP_V3_SLEEP_OFFER: {  // The MCU's answer to our offer: 01 = sleep, 00 = stay awake.
+      if (!this->lp_v3_offer_pending_ || len < 2)
+        return;
+      this->lp_v3_offer_pending_ = false;
+      this->lp_v3_idle_since_ms_ = millis();
+      if (data[1] != 0x01)
+        return;
+      if (!this->low_power_v3_sleep_supported_() || host->ota_busy() ||
+          !this->lp_standby_.accept_offer(this->low_power_ready_for_sleep_(true), this->available() == 0, true)) {
+        // The MCU already sleeps and expects the module to sleep too.
+        this->send_low_power_awake_notification_();
+        return;
+      }
+      ESP_LOGD(LP_TAG, "MCU agreed to sleep");
+      host->request_standby(true);
+      this->update_low_power_sleep_lock_();
+      return;
+    }
+    case LP_V3_SLEEP_WAKE:  // The MCU's answer to our wake notice.
+      return;
+    case LP_V3_SLEEP_REQUEST: {  // The MCU asks to sleep; 00 grants it.
+      if (this->lp_standby_.requested()) {
+        this->send_low_power_direct_(LP_V3_SLEEP_CMD, {LP_V3_SLEEP_REQUEST, 0x00});
+        return;
+      }
+      uint8_t flags = 0;
+      if (host != nullptr && host->ota_busy())
+        flags |= LP_V3_BUSY_UPGRADE;
+      if (flags == 0 &&
+          (!this->low_power_v3_sleep_supported_() ||
+           !this->lp_standby_.accept_offer(this->low_power_ready_for_sleep_(true), this->available() == 0, true)))
+        flags |= LP_V3_BUSY_NETWORK;
+      this->send_low_power_direct_(LP_V3_SLEEP_CMD, {LP_V3_SLEEP_REQUEST, flags});
+      if (flags != 0)
+        return;
+      if (this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
+        this->lp_standby_.transport_fault();
+        this->update_low_power_sleep_lock_();
+        return;
+      }
+      ESP_LOGD(LP_TAG, "MCU asked to sleep");
+      host->request_standby(true);
+      this->update_low_power_sleep_lock_();
+      return;
+    }
+    default:
+      return;
+  }
 }
 
 void Tuya::cancel_low_power_preflight_(bool notify_mcu) {
@@ -536,8 +671,9 @@ bool Tuya::notify_low_power_transition(bool sleeping) {
 }
 
 bool Tuya::low_power_prepare_for_standby() {
-  if (this->lp_host_ == nullptr || !this->lp_standby_.requested() || this->lp_product_.sleep_mode != 1 ||
-      !this->low_power_ready_for_sleep_() || this->available() != 0)
+  if (this->lp_host_ == nullptr || !this->lp_standby_.requested() ||
+      (this->lp_product_.sleep_mode != 1 && this->lp_product_.sleep_mode != 2) || !this->low_power_ready_for_sleep_() ||
+      this->available() != 0)
     return false;
   if (this->lp_standby_.needs_notification()) {
     // Deliberately postpone platform PM; CMD12/01 was transmitted first.
@@ -559,7 +695,10 @@ void Tuya::low_power_standby_cancelled() {
 
 void Tuya::low_power_standby_resumed(bool expected_source, bool wake_gpio) {
   const bool keep = this->lp_host_ != nullptr && this->lp_host_->standby_keeps_network();
-  const auto action = this->lp_standby_.resumed(expected_source, wake_gpio, keep);
+  // A version-3 MCU is told about every wake that ends its consent (91 01 01 after a wake pulse),
+  // not only about one it caused itself; its state is then read again.
+  const bool notify_wake = wake_gpio || (this->lp_v3_ && !keep);
+  const auto action = this->lp_standby_.resumed(expected_source, notify_wake, keep);
   if (action == TuyaLowPowerStandbyState::ResumeAction::KEEP_CONSENT) {
     // The MCU did not wake us and still sleeps: no CMD12/00, no wake guard, sleep again once idle.
     this->lp_host_->request_standby(true);
@@ -574,6 +713,9 @@ void Tuya::low_power_standby_resumed(bool expected_source, bool wake_gpio) {
   } else if (action == TuyaLowPowerStandbyState::ResumeAction::REQUIRE_RESYNC) {
     this->lp_v0_.command_timeout();
     ESP_LOGE(LP_TAG, "Unexpected/timer-only MCU resume: withholding CMD12/00 and further standby");
+    // A version-3 MCU sends no boot heartbeat: wake it and read its state to recover.
+    if (this->lp_v3_)
+      this->send_low_power_awake_notification_();
   }
   this->update_low_power_sleep_lock_();
 }
@@ -632,6 +774,7 @@ void Tuya::send_low_power_direct_(uint8_t command, const std::vector<uint8_t> &p
   // ACKs and time replies must not wait behind a pending CMD09 write.
   if (payload.size() > 65535)
     return;
+  this->lp_v3_idle_since_ms_ = millis();
   const uint8_t header[] = {
       0x55, 0xAA, 0x00, command, static_cast<uint8_t>(payload.size() >> 8), static_cast<uint8_t>(payload.size()),
   };
@@ -705,7 +848,7 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
   (void) version;
   // Once CMD38 is provisionally accepted, any new MCU traffic invalidates
   // the quiet interval. Do not race a report burst against CPU standby.
-  if (command != 0x38 && this->lp_standby_.requested())
+  if (command != 0x38 && command != LP_V3_SLEEP_CMD && this->lp_standby_.requested())
     this->cancel_low_power_standby_();
   switch (command) {
     case 0x00:  // First MCU heartbeat after reset is 00; subsequent is 01.
@@ -788,6 +931,7 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       ESP_LOGI(LP_TAG, "MCU PID %s version %s wk=%d mwk=%d sm=%d", this->lp_product_.pid.c_str(),
                this->lp_product_.version.c_str(), this->lp_product_.wake_gpio, this->lp_product_.mcu_wake_gpio,
                this->lp_product_.sleep_mode);
+      this->configure_low_power_wake_lines_();
       this->send_low_power_network_();
       return;
     }
@@ -806,6 +950,10 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       return;
 
     case 0x03:  // ACK of the network state (version-3 MCU).
+      return;
+
+    case LP_V3_SLEEP_CMD:  // Sleep handshake of a version-3 MCU with sm=2.
+      this->handle_low_power_v3_sleep_(data, len);
       return;
 
     case 0x25:  // The original T3-U firmware acknowledges this MCU notice with an empty CMD25.
@@ -831,6 +979,8 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         offset += 4 + size;
       }
       this->handle_datapoints_(data, len);
+      // A version-3 MCU sends no boot heartbeat; a complete report proves the link works again.
+      this->lp_standby_.recovered();
       if (!this->lp_v0_.synchronized()) {
         this->lp_v0_.mark_synchronized();
         this->init_state_ = TuyaInitState::INIT_DONE;
@@ -921,8 +1071,8 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       const bool ota_veto = host != nullptr && host->ota_busy();
       const bool supported = host != nullptr && host->standby_supported() && host->standby_wake_pin() >= 0 &&
                              host->standby_requires_external_sync() &&
-                             host->standby_wake_pin() == this->lp_product_.wake_gpio &&
-                             this->lp_product_.sleep_mode == 1 && host->standby_may_quiesce();
+                             host->standby_wake_pin() == this->lp_wake_input_ && this->lp_product_.sleep_mode == 1 &&
+                             host->standby_may_quiesce();
       const bool transport_ready = this->low_power_ready_for_sleep_(true) && this->available() == 0;
       if (supported && !ota_veto && transport_ready) {
         if (!host->standby_services_quiesced()) {

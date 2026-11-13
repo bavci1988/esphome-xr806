@@ -95,4 +95,25 @@ TEST(TuyaLowPowerStandbyState, KeepConsentWhileNetworkStaysConnected) {
   EXPECT_FALSE(s.requested());
 }
 
+TEST(TuyaLowPowerStandbyState, Version3OfferIsNotifiedConsent) {
+  using State = esphome::tuya::TuyaLowPowerStandbyState;
+  using Action = State::ResumeAction;
+
+  State s;
+  EXPECT_FALSE(s.accept_offer(false, true, true));  // MCU transaction still open
+  EXPECT_TRUE(s.accept_offer(true, true, true));
+  EXPECT_FALSE(s.accept_offer(true, true, true));
+  EXPECT_FALSE(s.needs_notification());  // The 0x91 answer is the whole handshake.
+  EXPECT_TRUE(s.ready_for_pm());
+  EXPECT_EQ(s.resumed(true, true), Action::SEND_CMD12_WAKE);
+
+  EXPECT_TRUE(s.accept_offer(true, true, true));
+  EXPECT_TRUE(s.force_cancel());  // Cancelling tells the sleeping MCU that the module is awake.
+
+  s.transport_fault();
+  EXPECT_FALSE(s.accept_offer(true, true, true));
+  s.recovered();  // A version-3 MCU has no boot heartbeat; a fresh report recovers.
+  EXPECT_TRUE(s.accept_offer(true, true, true));
+}
+
 }  // namespace esphome::tuya::testing

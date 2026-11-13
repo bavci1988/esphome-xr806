@@ -18,6 +18,18 @@ class TuyaLowPowerStandbyState {
     return true;
   }
 
+  // Version-3 MCUs (sm=2) agree to sleep with 0x91: their answer is the whole handshake, and the
+  // MCU sleeps right after it, so the consent counts as notified and the module may enter PM at once.
+  bool accept_offer(bool mcu_idle, bool uart_healthy, bool other_owners_idle) {
+    if (!this->accept_request(true, mcu_idle, uart_healthy, other_owners_idle))
+      return false;
+    notified_ = true;
+    return true;
+  }
+
+  // A version-3 MCU sends no boot heartbeat. A fresh status report after a resync ends the recovery.
+  void recovered() { recovery_required_ = false; }
+
   bool requested() const { return requested_; }
   bool notified() const { return notified_; }
   bool recovery_required() const { return recovery_required_; }
