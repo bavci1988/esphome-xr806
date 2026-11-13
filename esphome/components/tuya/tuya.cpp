@@ -341,6 +341,7 @@ void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buff
         this->initialized_callback_.call();
       }
       this->handle_datapoints_(buffer, len);
+      this->notify_mcu_ready_();
 
       if (command_type == TuyaCommandType::DATAPOINT_REPORT_SYNC) {
         this->send_command_(

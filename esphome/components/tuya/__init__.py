@@ -18,6 +18,7 @@ DOMAIN = "tuya"
 CONF_IGNORE_MCU_UPDATE_ON_DATAPOINTS = "ignore_mcu_update_on_datapoints"
 
 CONF_ON_DATAPOINT_UPDATE = "on_datapoint_update"
+CONF_ON_MCU_READY = "on_mcu_ready"
 CONF_DATAPOINT_TYPE = "datapoint_type"
 CONF_STATUS_PIN = "status_pin"
 CONF_FORCE_TIME_SYNC = "force_time_sync"
@@ -112,6 +113,7 @@ CONFIG_SCHEMA = cv.All(
                 cv.uint8_t
             ),
             cv.Optional(CONF_STATUS_PIN): pins.gpio_output_pin_schema,
+            cv.Optional(CONF_ON_MCU_READY): automation.validate_automation({}),
             cv.Optional(CONF_ON_DATAPOINT_UPDATE): automation.validate_automation(
                 {
                     cv.Required(CONF_SENSOR_DATAPOINT): cv.uint8_t,
@@ -154,6 +156,10 @@ async def to_code(config):
             [(type_, "x")], conf, params=[(TuyaDatapoint, "x")], forward=forward
         )
         cg.add(var.register_listener(conf[CONF_SENSOR_DATAPOINT], callback))
+    for conf in config.get(CONF_ON_MCU_READY, []):
+        await automation.build_callback_automation(
+            var, "add_on_mcu_ready_callback", [], conf
+        )
 
 
 def _validate_refresh_actions(config: ConfigType) -> None:

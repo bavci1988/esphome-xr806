@@ -1045,6 +1045,8 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         }
         ESP_LOGI(LP_TAG, "MCU status synchronized (version-3 MCU)");
       }
+      if (this->lp_v3_pushes_)
+        this->notify_mcu_ready_();
       this->update_low_power_sleep_lock_();
       return;
     }
@@ -1089,6 +1091,9 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         }
         ESP_LOGI(LP_TAG, "MCU status synchronized for current product epoch");
       }
+      // The HC32 takes commands once its full status is in.
+      if (this->lp_v0_.synchronized())
+        this->notify_mcu_ready_();
       this->update_low_power_sleep_lock_();
       return;
     }

@@ -132,11 +132,6 @@ class Tuya final : public Component, public uart::UARTDevice {
   void set_product_id(const char *product_id) { this->product_id_ = product_id; }
   void set_low_power_host(TuyaLowPowerHost *host) { this->lp_host_ = host; }
   bool request_low_power_refresh();
-  /// The MCU reports its changes without being asked (a version-3 MCU after the status poll stops;
-  /// the HC32 once synchronized), so it accepts commands too.
-  bool low_power_mcu_reports_changes() const {
-    return this->lp_v3_ ? this->lp_v3_pushes_ : this->lp_v0_.synchronized();
-  }
   // Called by the platform's power management bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
   /// Standby steps, called by the platform's power management bridge.
@@ -166,8 +161,19 @@ class Tuya final : public Component, public uart::UARTDevice {
   template<typename F> void add_on_initialized_callback(F &&callback) {
     this->initialized_callback_.add(std::forward<F>(callback));
   }
+  /// Called once after boot, when the MCU takes commands: after the initialization of the standard protocol,
+  /// and for protocol low_power once the MCU reports its changes on its own.
+  template<typename F> void add_on_mcu_ready_callback(F &&callback) {
+    this->mcu_ready_callback_.add(std::forward<F>(callback));
+  }
 
  protected:
+  void notify_mcu_ready_() {
+    if (this->mcu_ready_)
+      return;
+    this->mcu_ready_ = true;
+    this->mcu_ready_callback_.call();
+  }
   void register_listener_(uint8_t datapoint_id, Callback<void(const TuyaDatapoint &)> func);
   void handle_char_(uint8_t c);
   void handle_datapoints_(const uint8_t *buffer, size_t len);
@@ -303,6 +309,8 @@ class Tuya final : public Component, public uart::UARTDevice {
   uint8_t wifi_status_ = -1;
   bool product_invalid_{false};
   CallbackManager<void()> initialized_callback_{};
+  CallbackManager<void()> mcu_ready_callback_{};
+  bool mcu_ready_{false};
 };
 
 #ifdef USE_TUYA_LOW_POWER_V0

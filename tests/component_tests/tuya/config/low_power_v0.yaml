@@ -28,6 +28,9 @@ tuya:
   protocol: low_power
   auto_baud: true
   product_id: ihedujbuli6hsx9b
+  on_mcu_ready:
+    - tuya.refresh:
+        tuya_id: trv16_mcu
 
 climate:
   - platform: tuya

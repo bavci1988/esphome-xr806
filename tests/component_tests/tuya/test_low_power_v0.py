@@ -58,6 +58,15 @@ def test_low_power_v0_product_id(
     assert 'set_product_id("ihedujbuli6hsx9b")' in main_cpp
 
 
+def test_on_mcu_ready(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    main_cpp = generate_main(component_config_path("low_power_v0.yaml"))
+
+    assert "add_on_mcu_ready_callback(" in main_cpp
+
+
 @pytest.mark.parametrize(
     ("fixture", "message"),
     [
