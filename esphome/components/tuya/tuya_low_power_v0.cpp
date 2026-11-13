@@ -661,6 +661,13 @@ void Tuya::send_low_power_network_() {
   if (status == this->lp_network_status_)
     return;
   this->lp_network_status_ = status;
+  if (this->lp_v3_ && this->lp_v3_mode_acked_) {
+    // Standard Tuya framing: the network state is CMD03 (the original T3-U firmware sends it on
+    // every change); CMD02 is the working-mode query. The MCU reports changes on its own only
+    // after it was told that the module is online.
+    this->send_low_power_direct_(0x03, {status});
+    return;
+  }
   this->lp_v0_.reset_status();
   if (status == 0x04)
     this->lp_wake_guard_until_ = millis() + (this->lp_product_.sleep_mode == 0 ? 10000 : 5000);
@@ -752,6 +759,7 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       this->lp_product_text_[len] = '\0';
       const bool had_product = this->lp_v0_.has_product();
       this->lp_product_ = std::move(incoming);
+      this->lp_v3_mode_acked_ = false;
       if (this->lp_v3_ != (version == 3)) {
         this->lp_v3_ = version == 3;
         ESP_LOGI(LP_TAG, "MCU frames with protocol version %u: status %s, writes %s", version,
@@ -783,12 +791,23 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
 
     case 0x02:  // Network-state ACK; generic queue handler clears expected CMD.
       if (this->lp_v3_) {
-        // Version-3 MCUs ACK CMD02 without the CMD05 burst of the HC32 firmware 1.3.1;
-        // they report their status as CMD07 when asked with CMD08.
+        // For a version-3 MCU CMD02 is the working-mode query. Then, like the original T3-U
+        // firmware, report the network state (CMD03) and ask for the status (CMD08, answered by CMD07).
+        this->lp_v3_mode_acked_ = true;
+        if (this->lp_network_status_ != 0xFF)
+          this->send_low_power_direct_(0x03, {this->lp_network_status_});
         ESP_LOGD(LP_TAG, "Querying MCU status with CMD08");
         this->lp_v3_last_poll_ms_ = millis();
         this->send_low_power_direct_(0x08, {});
       }
+      return;
+
+    case 0x03:  // ACK of the network state (version-3 MCU).
+      return;
+
+    case 0x25:  // The original T3-U firmware acknowledges this MCU notice with an empty CMD25.
+      if (this->lp_v3_ && len == 0)
+        this->send_low_power_direct_(0x25, {});
       return;
 
     case 0x07: {  // Status report of a version-3 MCU (standard Tuya framing).
