@@ -6,6 +6,7 @@
 #include <cstring>
 #include <utility>
 
+#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
 
@@ -17,6 +18,8 @@ namespace esphome::tuya {
 
 static const char *const LP_TAG = "tuya.low_power_v0";
 static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
+// A version-3 MCU (firmware 1.0.9) reports changes made at the device only when asked.
+static constexpr uint32_t LP_V3_STATUS_POLL_MS = 60000;
 static constexpr uint32_t LP_COMMAND_DELAY_MS = 10;
 
 // Interval id shared with the standard heartbeat slot in tuya.cpp; a hub runs one protocol only.
@@ -122,6 +125,19 @@ void Tuya::loop_low_power_() {
   }
   this->update_low_power_sleep_lock_();
   this->process_low_power_queue_();
+  this->poll_low_power_v3_status_();
+}
+
+void Tuya::poll_low_power_v3_status_() {
+  if (!this->lp_v3_ || !this->lp_v0_.ready() || !this->lp_wire_.idle() || !this->command_queue_.empty() ||
+      !this->rx_message_.empty())
+    return;
+  const uint32_t now = App.get_loop_component_start_time();
+  if (now - this->lp_v3_last_poll_ms_ < LP_V3_STATUS_POLL_MS)
+    return;
+  this->lp_v3_last_poll_ms_ = now;
+  ESP_LOGV(LP_TAG, "Polling MCU status with CMD08");
+  this->send_low_power_direct_(0x08, {});
 }
 
 void Tuya::dump_low_power_config_() {
@@ -770,6 +786,7 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         // Version-3 MCUs ACK CMD02 without the CMD05 burst of the HC32 firmware 1.3.1;
         // they report their status as CMD07 when asked with CMD08.
         ESP_LOGD(LP_TAG, "Querying MCU status with CMD08");
+        this->lp_v3_last_poll_ms_ = millis();
         this->send_low_power_direct_(0x08, {});
       }
       return;

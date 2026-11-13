@@ -194,6 +194,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   void send_low_power_product_query_(bool direct_probe);
   void begin_mcu_wake_pulse_();
   bool mcu_wake_pulse_running_();
+  void poll_low_power_v3_status_();
   void process_low_power_queue_();
   void poll_low_power_product_recovery_();
   void invalidate_low_power_mode_epoch_();
@@ -246,6 +247,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool lp_initialized_callback_called_{false};
   // The MCU frames with protocol version 3: status via CMD08/CMD07, writes via CMD06.
   bool lp_v3_{false};
+  uint32_t lp_v3_last_poll_ms_{0};
   uint32_t lp_mode_requery_after_ms_{0};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_mcu_wake_pulse_until_{0};
