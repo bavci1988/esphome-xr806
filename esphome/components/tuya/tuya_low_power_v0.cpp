@@ -462,6 +462,12 @@ bool Tuya::request_low_power_refresh() {
   if (this->protocol_ != TuyaProtocol::LOW_POWER_V0 || !this->lp_v0_.ready() || !this->lp_wire_.idle() ||
       this->lp_standby_.requested() || this->expected_response_.has_value())
     return false;
+  if (this->lp_v3_) {
+    // A version-3 MCU answers the standard status query; DP106 is the HC32's refresh trigger.
+    this->lp_v3_last_poll_ms_ = millis();
+    this->send_low_power_direct_(0x08, {});
+    return true;
+  }
   this->send_datapoint_command_(106, TuyaDatapointType::BOOLEAN, {0x01});
   return true;
 }
