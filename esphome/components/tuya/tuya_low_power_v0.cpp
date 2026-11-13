@@ -44,6 +44,11 @@ void Tuya::setup_low_power_() {
     return;
   }
   this->lp_uart_rx_errors_.reset(this->low_power_uart_rx_error_count_());
+  if (this->mcu_wake_pin_ == nullptr && this->lp_host_ != nullptr &&
+      (this->mcu_wake_pin_ = this->lp_host_->mcu_wake_output()) != nullptr) {
+    // Learned from an earlier product info: a sleeping MCU answers CMD01 only after a wake pulse.
+    this->lp_mcu_wake_from_host_ = true;
+  }
   if (this->mcu_wake_pin_ != nullptr) {
     this->mcu_wake_pin_->setup();
     this->mcu_wake_pin_->digital_write(false);  // Inactive logical level.
@@ -502,11 +507,12 @@ void Tuya::configure_low_power_wake_lines_() {
     return;
   this->lp_wake_lines_configured_ = true;
   // The product info names both wake lines, so the configuration does not have to.
-  const bool create_output = this->mcu_wake_pin_ == nullptr;
+  const bool create_output = this->mcu_wake_pin_ == nullptr || this->lp_mcu_wake_from_host_;
   this->lp_wake_input_ =
       this->lp_host_->configure_wake_lines(this->lp_product_.wake_gpio, this->lp_product_.mcu_wake_gpio,
                                            this->lp_product_.mcu_wake_active_high, create_output);
   if (create_output && (this->mcu_wake_pin_ = this->lp_host_->mcu_wake_output()) != nullptr) {
+    this->lp_mcu_wake_from_host_ = true;
     this->mcu_wake_pin_->setup();
     this->mcu_wake_pin_->digital_write(false);
   }

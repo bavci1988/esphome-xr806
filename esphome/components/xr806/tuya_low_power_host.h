@@ -7,7 +7,9 @@
 #include "esphome/components/tuya/tuya.h"
 #include "esphome/components/uart/uart_component_xr806.h"
 #include "esphome/core/component.h"
+#include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+#include "esphome/core/preferences.h"
 #include "gpio.h"
 #ifdef USE_OTA
 #include "esphome/components/ota/ota_backend_xr806.h"
@@ -40,6 +42,14 @@ class XR806TuyaLowPowerHost final : public Component,
   }
 
   void setup() override {
+    // The MCU may still sleep after a module restart and answer CMD01 only after a pulse on its wake
+    // line, but that line is named in the product info. Use the one learned before (Tuya sets up later).
+    this->wake_pref_ = global_preferences->make_preference<WakeLinesPref>(fnv1_hash("tuya_mcu_wake_lines"));
+    WakeLinesPref saved{};
+    if (this->wake_pref_.load(&saved) && saved.mcu_wake >= 0) {
+      this->set_mcu_wake_(saved.mcu_wake, saved.active_high != 0);
+      this->saved_ = saved;
+    }
 #ifdef USE_XR806_STANDBY_CONTROLLER
     // The generic standby controller never sends Tuya frames or reads the MCU's sleep mode.
     if (auto *controller = standby_controller(); controller != nullptr) {
@@ -63,14 +73,17 @@ class XR806TuyaLowPowerHost final : public Component,
   int configure_wake_lines(int wake_gpio, int mcu_wake_gpio, bool mcu_wake_active_high,
                            bool create_mcu_wake_output) override {
     const TuyaWakeLines lines = map_tuya_wake_lines(wake_gpio, mcu_wake_gpio);
-    if (create_mcu_wake_output && lines.mcu_wake >= 0 && !this->mcu_wake_created_) {
-      this->mcu_wake_.set_pin(static_cast<uint8_t>(lines.mcu_wake));
-      this->mcu_wake_.set_inverted(!mcu_wake_active_high);
-      this->mcu_wake_.set_flags(gpio::FLAG_OUTPUT);
-      this->mcu_wake_created_ = true;
+    if (create_mcu_wake_output && lines.mcu_wake >= 0) {
+      this->set_mcu_wake_(static_cast<int8_t>(lines.mcu_wake), mcu_wake_active_high);
       char name[24];
       this->mcu_wake_.dump_summary(name, sizeof(name));
       ESP_LOGI(TUYA_HOST_TAG, "MCU wake output from product info: %s", name);
+      const WakeLinesPref current{static_cast<int8_t>(lines.mcu_wake), static_cast<uint8_t>(mcu_wake_active_high)};
+      if (current.mcu_wake != this->saved_.mcu_wake || current.active_high != this->saved_.active_high) {
+        // Written only when the MCU names other lines (another MCU board), not on every start.
+        this->saved_ = current;
+        this->wake_pref_.save(&current);
+      }
     }
 #ifdef USE_XR806_STANDBY_CONTROLLER
     auto *controller = standby_controller();
@@ -176,8 +189,21 @@ class XR806TuyaLowPowerHost final : public Component,
  protected:
   tuya::Tuya *tuya_;
   uart::XR806UARTComponent *uart_;
+  struct WakeLinesPref {
+    int8_t mcu_wake{-1};
+    uint8_t active_high{0};
+  };
+  void set_mcu_wake_(int8_t pin, bool active_high) {
+    this->mcu_wake_.set_pin(static_cast<uint8_t>(pin));
+    this->mcu_wake_.set_inverted(!active_high);
+    this->mcu_wake_.set_flags(gpio::FLAG_OUTPUT);
+    this->mcu_wake_created_ = true;
+  }
+
   XR806GPIOPin mcu_wake_;
   bool mcu_wake_created_{false};
+  ESPPreferenceObject wake_pref_;
+  WakeLinesPref saved_{};
 #ifdef USE_XR806_STANDBY_CONTROLLER
   bool registered_{false};
 #endif

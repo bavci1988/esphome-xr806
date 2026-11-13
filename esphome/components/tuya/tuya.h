@@ -269,7 +269,8 @@ class Tuya final : public Component, public uart::UARTDevice {
   uint32_t lp_v3_offer_deadline_ms_{0};
   uint32_t lp_v3_idle_since_ms_{0};
   bool lp_wake_lines_configured_{false};
-  int lp_wake_input_{-1};  // wk mapped to this module's GPIO numbering
+  bool lp_mcu_wake_from_host_{false};  // The wake output belongs to the host, not to the configuration
+  int lp_wake_input_{-1};              // wk mapped to this module's GPIO numbering
   uint32_t lp_mode_requery_after_ms_{0};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_mcu_wake_pulse_until_{0};
