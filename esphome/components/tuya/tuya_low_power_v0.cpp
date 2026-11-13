@@ -129,8 +129,8 @@ void Tuya::loop_low_power_() {
 }
 
 void Tuya::poll_low_power_v3_status_() {
-  if (!this->lp_v3_ || !this->lp_v0_.ready() || !this->lp_wire_.idle() || !this->command_queue_.empty() ||
-      !this->rx_message_.empty())
+  if (!this->lp_v3_ || this->lp_v3_pushes_ || !this->lp_v0_.ready() || !this->lp_wire_.idle() ||
+      !this->command_queue_.empty() || !this->rx_message_.empty())
     return;
   const uint32_t now = App.get_loop_component_start_time();
   if (now - this->lp_v3_last_poll_ms_ < LP_V3_STATUS_POLL_MS)
@@ -235,6 +235,8 @@ bool Tuya::begin_low_power_command_(const TuyaCommand &command) {
   }
   if (cmd == 0x02 && command.payload.size() == 1 && command.payload[0] == 0x04 && !this->lp_v3_)
     this->lp_v0_.begin_full_status(millis());
+  if (cmd == 0x06 && this->lp_v3_)
+    this->lp_v3_last_poll_ms_ = millis();  // Its CMD07 echo is a reply, not a report of its own.
   if (cmd == 0x09 && command.payload.size() >= 4) {
     const auto &p = command.payload;
     const size_t size = (static_cast<size_t>(p[2]) << 8) | p[3];
@@ -760,6 +762,7 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       const bool had_product = this->lp_v0_.has_product();
       this->lp_product_ = std::move(incoming);
       this->lp_v3_mode_acked_ = false;
+      this->lp_v3_pushes_ = false;
       if (this->lp_v3_ != (version == 3)) {
         this->lp_v3_ = version == 3;
         ESP_LOGI(LP_TAG, "MCU frames with protocol version %u: status %s, writes %s", version,
@@ -813,6 +816,10 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
     case 0x07: {  // Status report of a version-3 MCU (standard Tuya framing).
       if (!this->lp_v3_ || len < 5)
         return;
+      if (!this->lp_v3_pushes_ && this->lp_v0_.synchronized() && millis() - this->lp_v3_last_poll_ms_ > 3000) {
+        this->lp_v3_pushes_ = true;
+        ESP_LOGI(LP_TAG, "MCU reports changes on its own; status polling stopped");
+      }
       size_t offset = 0;
       while (offset + 4 <= len) {
         const size_t size = (static_cast<size_t>(data[offset + 2]) << 8) | data[offset + 3];

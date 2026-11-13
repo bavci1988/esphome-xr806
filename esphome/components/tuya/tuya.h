@@ -249,6 +249,8 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool lp_v3_{false};
   uint32_t lp_v3_last_poll_ms_{0};
   bool lp_v3_mode_acked_{false};
+  // The MCU sent a report nobody asked for: it pushes changes, so the status poll is not needed.
+  bool lp_v3_pushes_{false};
   uint32_t lp_mode_requery_after_ms_{0};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_mcu_wake_pulse_until_{0};
