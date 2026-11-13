@@ -9,6 +9,9 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "gpio.h"
+#ifdef USE_OTA
+#include "esphome/components/ota/ota_backend_xr806.h"
+#endif
 #include "tuya_wake_lines.h"
 #ifdef USE_XR806_LOWPOWER
 #include "lowpower_policy.h"
@@ -93,9 +96,11 @@ class XR806TuyaLowPowerHost final : public Component,
   GPIOPin *mcu_wake_output() override { return this->mcu_wake_created_ ? &this->mcu_wake_ : nullptr; }
 
   uint32_t uart_rx_error_count() const override { return this->uart_->get_rx_error_count(); }
+  // An update that is running or waits for its reboot. The OTA guard's power-management vote is not
+  // used here: it reads busy whenever no standby is being prepared, which would veto every request.
   bool ota_busy() const override {
-#ifdef USE_XR806_LOWPOWER
-    return (lowpower_policy().blockers() & XR806LowPowerPolicy::OTA_BUSY) != 0;
+#ifdef USE_OTA
+    return ota::XR806OTABackend::flash_busy();
 #else
     return false;
 #endif
