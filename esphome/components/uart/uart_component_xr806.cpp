@@ -80,6 +80,8 @@ void XR806UARTComponent::setup() {
     return;
   }
   this->initialized_ = true;
+  // Without the interrupt the loop polls the FIFO, which loses bytes once a frame outgrows it.
+  this->rx_irq_ = HAL_UART_EnableRxCallback(UART_PORT, &XR806UARTComponent::rx_isr_, this) == HAL_OK;
 
 #ifdef USE_XR806_LOWPOWER
   this->uart_pm_wakelock_.name = const_cast<char *>("esphome.uart0");
@@ -106,6 +108,8 @@ void XR806UARTComponent::load_settings(bool dump_config) {
     ESP_LOGE(TAG, "UART0 reconfiguration to %" PRIu32 " baud failed", this->baud_rate_);
     return;
   }
+  if (this->rx_irq_)
+    (void) HAL_UART_EnableRxCallback(UART_PORT, &XR806UARTComponent::rx_isr_, this);
   // Bytes received at the previous settings are meaningless now.
   this->discard_rx_();
   if (dump_config) {
@@ -144,7 +148,7 @@ void XR806UARTComponent::set_tx_fault_() {
 // Reading the line status register clears its error bits, so every read goes through here.
 void XR806UARTComponent::check_line_status_() {
   if ((this->uart_->LINE_STATUS & LINE_ERROR_BITS) != 0) {
-    ++this->rx_line_errors_;
+    __atomic_fetch_add(&this->rx_line_errors_, 1, __ATOMIC_RELAXED);
 #ifdef USE_XR806_LOWPOWER
     this->note_uart_activity_();  // Corruption/noise is UART activity, even with an empty RX FIFO.
 #endif
@@ -158,7 +162,7 @@ bool XR806UARTComponent::tx_hardware_idle_() {
     return false;
   const uint32_t line_status = this->uart_->LINE_STATUS;
   if ((line_status & LINE_ERROR_BITS) != 0) {
-    ++this->rx_line_errors_;
+    __atomic_fetch_add(&this->rx_line_errors_, 1, __ATOMIC_RELAXED);
 #ifdef USE_XR806_LOWPOWER
     this->note_uart_activity_();
 #endif
@@ -166,9 +170,40 @@ bool XR806UARTComponent::tx_hardware_idle_() {
   return (line_status & UART_TX_EMPTY_BIT) != 0;
 }
 
+// Interrupt context. This file stays out of XIP (see the linker script), so it also runs
+// while flash is busy; no division, no logging, no SDK calls besides the register helpers.
+void XR806UARTComponent::rx_isr_(void *arg) {
+  auto *self = static_cast<XR806UARTComponent *>(arg);
+  if ((self->uart_->LINE_STATUS & LINE_ERROR_BITS) != 0)
+    __atomic_fetch_add(&self->rx_line_errors_, 1, __ATOMIC_RELAXED);
+  uint8_t *const buffer = self->rx_buffer_.get();
+  bool received = false;
+  while (HAL_UART_IsRxReady(self->uart_)) {
+    const uint8_t byte = HAL_UART_GetRxData(self->uart_);
+    received = true;
+    if (__atomic_load_n(&self->rx_count_, __ATOMIC_ACQUIRE) >= self->rx_buffer_size_) {
+      __atomic_fetch_add(&self->rx_dropped_, 1, __ATOMIC_RELAXED);
+      continue;
+    }
+    buffer[self->rx_tail_] = byte;
+    if (++self->rx_tail_ == self->rx_buffer_size_)
+      self->rx_tail_ = 0;
+    __atomic_fetch_add(&self->rx_count_, 1, __ATOMIC_RELEASE);
+  }
+  if (received)
+    __atomic_store_n(&self->rx_activity_, true, __ATOMIC_RELAXED);
+}
+
 void XR806UARTComponent::fill_rx_() {
   if (!this->initialized_)
     return;
+  if (this->rx_irq_) {
+#ifdef USE_XR806_LOWPOWER
+    if (__atomic_exchange_n(&this->rx_activity_, false, __ATOMIC_RELAXED))
+      this->note_uart_activity_();
+#endif
+    return;
+  }
 
   this->check_line_status_();
   for (size_t i = 0; i < MAX_RX_BYTES_PER_CALL && HAL_UART_IsRxReady(this->uart_); ++i) {
@@ -194,6 +229,13 @@ void XR806UARTComponent::fill_rx_() {
 }
 
 void XR806UARTComponent::discard_rx_() {
+  if (this->rx_irq_) {
+    // Consume what the interrupt has queued; it keeps owning rx_tail_.
+    const size_t queued = __atomic_load_n(&this->rx_count_, __ATOMIC_ACQUIRE);
+    this->rx_head_ = (this->rx_head_ + queued) % this->rx_buffer_size_;
+    __atomic_fetch_sub(&this->rx_count_, queued, __ATOMIC_ACQ_REL);
+    return;
+  }
   this->rx_head_ = this->rx_tail_ = this->rx_count_ = 0;
   for (size_t i = 0; i < MAX_RX_BYTES_PER_CALL && HAL_UART_IsRxReady(this->uart_); ++i)
     HAL_UART_GetRxData(this->uart_);
@@ -203,12 +245,13 @@ void XR806UARTComponent::discard_rx_() {
 void XR806UARTComponent::loop() {
   this->fill_rx_();
 
-  const uint32_t errors = this->rx_dropped_ + this->rx_line_errors_;
+  const uint32_t errors = this->get_rx_error_count();
   const uint32_t now = App.get_loop_component_start_time();
   if (errors != this->rx_errors_logged_ && now - this->last_error_log_ms_ >= ERROR_LOG_INTERVAL_MS) {
     // Expected while a protocol probes for the baud rate; framed protocols resynchronize.
-    ESP_LOGW(TAG, "RX errors: %" PRIu32 " bytes dropped (buffer full), %" PRIu32 " line errors", this->rx_dropped_,
-             this->rx_line_errors_);
+    ESP_LOGW(TAG, "RX errors: %" PRIu32 " bytes dropped (buffer full), %" PRIu32 " line errors",
+             __atomic_load_n(&this->rx_dropped_, __ATOMIC_RELAXED),
+             __atomic_load_n(&this->rx_line_errors_, __ATOMIC_RELAXED));
     this->rx_errors_logged_ = errors;
     this->last_error_log_ms_ = now;
   }
@@ -220,7 +263,7 @@ void XR806UARTComponent::loop() {
 
 size_t XR806UARTComponent::available() {
   this->fill_rx_();
-  return this->rx_count_;
+  return __atomic_load_n(&this->rx_count_, __ATOMIC_ACQUIRE);
 }
 
 bool XR806UARTComponent::peek_byte(uint8_t *data) {
@@ -240,7 +283,7 @@ bool XR806UARTComponent::read_array(uint8_t *data, size_t len) {
     this->debug_callback_.call(UART_DIRECTION_RX, data[i]);
 #endif
   }
-  this->rx_count_ -= len;
+  __atomic_fetch_sub(&this->rx_count_, len, __ATOMIC_ACQ_REL);
   return true;
 }
 
@@ -313,7 +356,8 @@ void XR806UARTComponent::update_uart_idle_() {
   // Start the 200-ms guard only after the last bit has left the UART,
   // the RX queue is drained and the peripheral reports not busy.
   // The previous activity-start timestamp could expire while a long TX was still on the wire.
-  const bool hardware_idle = this->rx_count_ == 0 && !HAL_UART_IsRxReady(this->uart_) && this->tx_hardware_idle_() &&
+  const bool hardware_idle = __atomic_load_n(&this->rx_count_, __ATOMIC_ACQUIRE) == 0 &&
+                             !HAL_UART_IsRxReady(this->uart_) && this->tx_hardware_idle_() &&
                              (this->uart_->STATUS & UART_BUSY_BIT) == 0;
   const bool idle = this->idle_guard_.ready(hardware_idle, App.get_loop_component_start_time(), UART_IDLE_GUARD_MS);
 

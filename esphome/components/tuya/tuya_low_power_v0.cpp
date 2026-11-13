@@ -760,6 +760,12 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
     }
 
     case 0x02:  // Network-state ACK; generic queue handler clears expected CMD.
+      if (version == 3) {
+        // Diagnosis for MCUs that frame with version 3: they ACK CMD02 without the CMD05 status burst
+        // of the HC32 firmware 1.3.1. Ask for the status the way standard Tuya MCUs expect it.
+        ESP_LOGI(LP_TAG, "Version-3 MCU acknowledged CMD02; querying status with CMD08 (diagnosis)");
+        this->send_low_power_direct_(0x08, {});
+      }
       return;
 
     case 0x05: {  // MCU datapoint reports; acknowledge each DP separately.
@@ -869,9 +875,16 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       return;
     }
 
-    default:
-      ESP_LOGV(LP_TAG, "Unhandled low-power MCU CMD 0x%02X", command);
+    default: {
+      // Shown at DEBUG while other MCU firmware versions are being mapped.
+      char hex[3 * 24 + 1];
+      const size_t shown = len < 24 ? len : 24;
+      for (size_t i = 0; i < shown; ++i)
+        snprintf(hex + 3 * i, 4, "%02X ", data[i]);
+      hex[3 * shown] = '\0';
+      ESP_LOGD(LP_TAG, "Unhandled MCU CMD 0x%02X v%u len %u: %s", command, version, static_cast<unsigned>(len), hex);
       return;
+    }
   }
 }
 

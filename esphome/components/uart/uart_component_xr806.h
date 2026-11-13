@@ -24,7 +24,8 @@ extern "C" {
 
 namespace esphome::uart {
 
-/// UART0 (PB0/PB1) of the XR806, polled into a software RX ring buffer.
+/// UART0 (PB0/PB1) of the XR806. An RX interrupt moves received bytes into a software ring
+/// buffer, so a frame longer than the 64-byte hardware FIFO survives a slow main loop.
 class XR806UARTComponent final : public UARTComponent, public Component {
  public:
   void setup() override;
@@ -42,7 +43,10 @@ class XR806UARTComponent final : public UARTComponent, public Component {
   bool is_connected() override { return this->initialized_ && !this->tx_fault_; }
   /// Monotonic count of dropped RX bytes and RX line errors. A change tells a framed
   /// protocol to discard its in-flight state and resynchronize.
-  uint32_t get_rx_error_count() const { return this->rx_dropped_ + this->rx_line_errors_; }
+  uint32_t get_rx_error_count() const {
+    return __atomic_load_n(&this->rx_dropped_, __ATOMIC_RELAXED) +
+           __atomic_load_n(&this->rx_line_errors_, __ATOMIC_RELAXED);
+  }
 
   void write_array(const uint8_t *data, size_t len) override;
   bool peek_byte(uint8_t *data) override;
@@ -55,6 +59,7 @@ class XR806UARTComponent final : public UARTComponent, public Component {
 
   UART_InitParam make_init_param_() const;
   void fill_rx_();
+  static void rx_isr_(void *arg);
   void discard_rx_();
   void check_line_status_();
   bool tx_hardware_idle_();
@@ -62,11 +67,17 @@ class XR806UARTComponent final : public UARTComponent, public Component {
 
   UART_T *uart_{nullptr};
   std::unique_ptr<uint8_t[]> rx_buffer_;
+  // Single producer (the RX interrupt, or fill_rx_() without it) and single consumer (the
+  // main loop): the producer owns rx_tail_, the consumer rx_head_, and rx_count_ hands bytes over.
+  // Shared fields use __atomic builtins, which always inline: the interrupt must not call a
+  // std::atomic member that the linker may have placed in XIP flash.
   size_t rx_head_{0};
   size_t rx_tail_{0};
   size_t rx_count_{0};
   uint32_t rx_dropped_{0};
   uint32_t rx_line_errors_{0};
+  bool rx_activity_{false};
+  bool rx_irq_{false};
   uint32_t rx_errors_logged_{0};
   uint32_t last_error_log_ms_{0};
   bool initialized_{false};
