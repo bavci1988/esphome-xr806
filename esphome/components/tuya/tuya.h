@@ -139,6 +139,8 @@ class Tuya final : public Component, public uart::UARTDevice {
   /// acknowledged, then an empty packet at the end). The MCU checks the image itself before it installs it. `image`
   /// must stay valid until the transfer ends. Restarts the module afterwards, so it detects the MCU anew.
   bool low_power_update_mcu(const uint8_t *image, size_t size);
+  /// Firmware version from the MCU's product info ("v"), empty until it was reported.
+  const std::string &low_power_mcu_version() const { return this->lp_product_.version; }
   // Called by the platform's power management bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
   /// Standby steps, called by the platform's power management bridge.
