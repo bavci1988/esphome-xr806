@@ -1,3 +1,5 @@
+import logging
+
 from esphome import automation, final_validate as fv, pins
 import esphome.codegen as cg
 from esphome.components import time, uart
@@ -7,6 +9,8 @@ from esphome.const import CONF_PROTOCOL, CONF_SENSOR_DATAPOINT, CONF_TIME_ID
 from esphome.core import CORE as CORE
 from esphome.cpp_generator import MockObj
 from esphome.types import ConfigType
+
+_LOGGER = logging.getLogger(__name__)
 
 DEPENDENCIES = ["uart"]
 DOMAIN = "tuya"
@@ -52,31 +56,39 @@ DATAPOINT_TYPES = {
 
 
 CONF_TUYA_ID = "tuya_id"
+PROTOCOL_LOW_POWER = "low_power"
+# Former name, from when only the version-0 frames of the HC32 firmware were supported.
 PROTOCOL_LOW_POWER_V0 = "low_power_v0"
 
 
 def _validate_time_options(config: ConfigType) -> ConfigType:
+    if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER_V0:
+        _LOGGER.warning(
+            "tuya: protocol 'low_power_v0' is now called 'low_power' (it handles MCUs "
+            "with version 0 and version 3 frames); please update the configuration"
+        )
+        config[CONF_PROTOCOL] = PROTOCOL_LOW_POWER
     if config[CONF_FORCE_TIME_SYNC] and CONF_TIME_ID not in config:
         raise cv.Invalid(
             f"{CONF_FORCE_TIME_SYNC} requires {CONF_TIME_ID}",
             path=[CONF_FORCE_TIME_SYNC],
         )
-    if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER_V0 and config[CONF_FORCE_TIME_SYNC]:
+    if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER and config[CONF_FORCE_TIME_SYNC]:
         raise cv.Invalid(
-            "force_time_sync is unsupported for low_power_v0; CMD06 is MCU initiated",
+            "force_time_sync is unsupported for low_power; CMD06 is MCU initiated",
             path=[CONF_FORCE_TIME_SYNC],
         )
-    if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER_V0 and CONF_STATUS_PIN in config:
+    if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER and CONF_STATUS_PIN in config:
         raise cv.Invalid(
-            "status_pin is unsupported for low_power_v0; wake is configured separately",
+            "status_pin is unsupported for low_power; wake is configured separately",
             path=[CONF_STATUS_PIN],
         )
     for key in (CONF_MCU_WAKE_PIN, CONF_PRODUCT_ID):
-        if key in config and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER_V0:
-            raise cv.Invalid(f"{key} requires protocol: low_power_v0", path=[key])
-    if config[CONF_AUTO_BAUD] and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER_V0:
+        if key in config and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER:
+            raise cv.Invalid(f"{key} requires protocol: low_power", path=[key])
+    if config[CONF_AUTO_BAUD] and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER:
         raise cv.Invalid(
-            "auto_baud is only supported with protocol: low_power_v0",
+            "auto_baud is only supported with protocol: low_power",
             path=[CONF_AUTO_BAUD],
         )
     return config
@@ -87,7 +99,7 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(Tuya),
             cv.Optional(CONF_PROTOCOL, default="standard"): cv.one_of(
-                "standard", PROTOCOL_LOW_POWER_V0, lower=True
+                "standard", PROTOCOL_LOW_POWER, PROTOCOL_LOW_POWER_V0, lower=True
             ),
             cv.Optional(CONF_AUTO_BAUD, default=False): cv.boolean,
             cv.Optional(CONF_MCU_WAKE_PIN): pins.gpio_output_pin_schema,
@@ -118,7 +130,7 @@ CONFIG_SCHEMA = cv.All(
 
 async def to_code(config):
     var = await uart.new_uart_component(config)
-    if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER_V0:
+    if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER:
         # Standard Tuya builds must not carry the low-power driver code or state.
         cg.add_define("USE_TUYA_LOW_POWER_V0")
         cg.add(var.set_protocol(TuyaProtocol.LOW_POWER_V0))
@@ -145,15 +157,15 @@ async def to_code(config):
 
 
 def _validate_refresh_actions(config: ConfigType) -> None:
-    """Reject tuya.refresh unless the referenced Tuya hub uses low_power_v0."""
+    """Reject tuya.refresh unless the referenced Tuya hub uses low_power."""
     full_config = fv.full_config.get()
     for tuya_id, path in iter_ids(full_config):
         if len(path) < 2 or path[-2:] != ["tuya.refresh", CONF_TUYA_ID]:
             continue
         hub = fv.get_declaring_config(tuya_id, full_config)
-        if hub.get(CONF_PROTOCOL) != PROTOCOL_LOW_POWER_V0:
+        if hub.get(CONF_PROTOCOL) != PROTOCOL_LOW_POWER:
             with cv.prepend_path([cv.ROOT_CONFIG_PATH, *path]):
-                raise cv.Invalid("tuya.refresh requires protocol: low_power_v0")
+                raise cv.Invalid("tuya.refresh requires protocol: low_power")
 
 
 FINAL_VALIDATE_SCHEMA = _validate_refresh_actions

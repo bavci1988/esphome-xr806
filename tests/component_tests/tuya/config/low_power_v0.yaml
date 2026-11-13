@@ -25,7 +25,7 @@ uart:
 tuya:
   id: trv16_mcu
   uart_id: trv16_uart
-  protocol: low_power_v0
+  protocol: low_power
   auto_baud: true
   product_id: ihedujbuli6hsx9b
 

@@ -27,7 +27,7 @@ uart:
 tuya:
   id: mcu
   uart_id: uart_mcu
-  protocol: low_power_v0
+  protocol: low_power
   auto_baud: true
 
 ota:

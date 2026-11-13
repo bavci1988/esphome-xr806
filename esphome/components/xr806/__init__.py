@@ -288,7 +288,7 @@ FINAL_VALIDATE_SCHEMA = cv.All(
 
 
 async def _tuya_low_power_host(host_id: ID, tuya_config: ConfigType) -> None:
-    """Connect a Tuya hub running low_power_v0 to XR806 power management."""
+    """Connect a Tuya hub running protocol low_power to XR806 power management."""
     tuya = await cg.get_variable(tuya_config[CONF_ID])
     uart = await cg.get_variable(tuya_config[CONF_UART_ID])
     cg.add_global(
@@ -411,7 +411,7 @@ async def to_code(config: ConfigType) -> None:
             await cg.register_component(standby_wlan, {})
 
     tuya_config = CORE.config.get("tuya")
-    if tuya_config and tuya_config.get(CONF_PROTOCOL) == "low_power_v0":
+    if tuya_config and tuya_config.get(CONF_PROTOCOL) == "low_power":
         await _tuya_low_power_host(config[CONF_TUYA_HOST_ID], tuya_config)
 
 

@@ -16,7 +16,7 @@
 
 namespace esphome::tuya {
 
-static const char *const LP_TAG = "tuya.low_power_v0";
+static const char *const LP_TAG = "tuya.low_power";
 static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
 // A version-3 MCU (firmware 1.0.9) reports changes made at the device only when asked.
 static constexpr uint32_t LP_V3_STATUS_POLL_MS = 60000;
