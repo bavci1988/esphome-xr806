@@ -19,6 +19,7 @@ extern "C" {
 #include "standby_controller.h"
 #include "lowpower_policy.h"
 
+#include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
@@ -331,7 +332,11 @@ void XR806StandbyController::attempt_standby_() {
   // '500' is the SDK wakelock-touch deadline, NOT an upper bound on the
   // total call! pm_enter_mode_timeout waits on a PM semaphore indefinitely
   // in this SDK; physical recovery needs independent hardware testing.
-  result = pm_enter_mode_timeout(PM_MODE_STANDBY, 500);
+  {
+    // Time spent asleep is not a main loop stall.
+    UnavoidableBlockingScope sleeping;
+    result = pm_enter_mode_timeout(PM_MODE_STANDBY, 500);
+  }
   event = HAL_Wakeup_GetEvent();
 
 abort:

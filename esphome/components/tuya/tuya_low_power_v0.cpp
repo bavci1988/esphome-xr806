@@ -482,9 +482,11 @@ void Tuya::send_low_power_awake_frame_() {
   } else {
     if (this->lp_v3_) {
       this->send_low_power_direct_(LP_V3_SLEEP_CMD, {LP_V3_SLEEP_WAKE, 0x01});
-      // Read the state again; its report also ends a recovery after a UART fault.
-      this->lp_v3_last_poll_ms_ = millis();
-      this->send_low_power_direct_(0x08, {});
+      // The MCU pushes its own changes. Only after a fault is its state read again; that report ends the recovery.
+      if (this->lp_standby_.recovery_required()) {
+        this->lp_v3_last_poll_ms_ = millis();
+        this->send_low_power_direct_(0x08, {});
+      }
     } else {
       this->send_low_power_direct_(0x12, {0x00});
     }
@@ -533,6 +535,7 @@ void Tuya::poll_low_power_v3_sleep_() {
     return;
   auto *host = this->lp_host_;
   const LogString *blocked = nullptr;
+  bool link_busy = false;  // The usual short pause after a wake: not worth a DEBUG line.
   if (host == nullptr || !host->standby_supported()) {
     blocked = LOG_STR("no standby controller");
   } else if (this->lp_wake_input_ < 0 || host->standby_wake_pin() != this->lp_wake_input_) {
@@ -542,17 +545,21 @@ void Tuya::poll_low_power_v3_sleep_() {
   } else if (!host->standby_may_quiesce()) {
     blocked = LOG_STR("services busy");
   } else if (host->ota_busy()) {
-    blocked = LOG_STR("OTA running");
+    blocked = LOG_STR("update running");
   } else if (!this->low_power_ready_for_sleep_() || this->available() != 0) {
-    blocked = LOG_STR("MCU link not idle");
+    link_busy = true;
+  }
+  if (link_busy) {
+    ESP_LOGV(LP_TAG, "No sleep offer: MCU link not idle (ready %d, wire %d, queue %u, guard %d)", this->lp_v0_.ready(),
+             this->lp_wire_.idle(), static_cast<unsigned>(this->command_queue_.size()),
+             static_cast<int32_t>(now - this->lp_wake_guard_until_) >= 0);
+    return;
   }
   if (blocked != this->lp_v3_sleep_blocked_) {
     this->lp_v3_sleep_blocked_ = blocked;
     if (blocked != nullptr) {
-      ESP_LOGD(LP_TAG, "No sleep offer: %s (blockers 0x%04X, ready %d, wire %d, queue %u, guard %d)",
-               LOG_STR_ARG(blocked), static_cast<unsigned>(host != nullptr ? host->standby_blockers() : 0),
-               this->lp_v0_.ready(), this->lp_wire_.idle(), static_cast<unsigned>(this->command_queue_.size()),
-               static_cast<int32_t>(now - this->lp_wake_guard_until_) >= 0);
+      ESP_LOGD(LP_TAG, "No sleep offer: %s (blockers 0x%04X)", LOG_STR_ARG(blocked),
+               static_cast<unsigned>(host != nullptr ? host->standby_blockers() : 0));
     } else {
       ESP_LOGD(LP_TAG, "Sleep offers to the MCU start");
     }

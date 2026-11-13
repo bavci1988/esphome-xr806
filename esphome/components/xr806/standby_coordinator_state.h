@@ -69,8 +69,12 @@ class XR806StandbyCoordinatorState {
   // not proof that the hardware spent time in PM_MODE_STANDBY.
   // wlan_wake: the WLAN link stayed up, so received network data is an expected source.
   static bool expected_wake(int pm_return, uint32_t events, int wake_io, bool wlan_wake = false) {
-    if (pm_return != 0 || (events & (WAKE_SOFTWARE | WAKE_INTERNAL)) != 0)
+    if ((events & (WAKE_SOFTWARE | WAKE_INTERNAL)) != 0)
       return false;
+    // With the link kept up, the WLAN driver refuses to suspend while it still has received data
+    // to deliver. The chip did not sleep, nothing was lost, and the next attempt may succeed.
+    if (pm_return != 0)
+      return wlan_wake && (events & WAKE_WLAN) != 0;
 
     uint32_t expected = WAKE_TIMER | (wlan_wake ? WAKE_WLAN : 0u);
     if (wake_io >= 0 && wake_io < 14)
