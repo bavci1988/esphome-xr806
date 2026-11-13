@@ -198,4 +198,13 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   EXPECT_FALSE(info.parsed);
 }
 
+TEST(TuyaLowPowerV0Session, Version3McuSynchronizesOnFirstReport) {
+  esphome::tuya::TuyaLowPowerV0Session s;
+  s.product_received();
+  EXPECT_FALSE(s.ready());
+  s.mark_synchronized();
+  EXPECT_TRUE(s.synchronized() && s.ready());
+  EXPECT_FALSE(s.expire(100000));  // No full-status window was opened, so nothing can time out.
+}
+
 }  // namespace esphome::tuya::testing

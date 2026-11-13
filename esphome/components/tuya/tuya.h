@@ -244,6 +244,8 @@ class Tuya final : public Component, public uart::UARTDevice {
   TuyaLowPowerProductRetry lp_product_retry_{};
   bool lp_mode_requery_pending_{false};
   bool lp_initialized_callback_called_{false};
+  // The MCU frames with protocol version 3: status via CMD08/CMD07, writes via CMD06.
+  bool lp_v3_{false};
   uint32_t lp_mode_requery_after_ms_{0};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_mcu_wake_pulse_until_{0};

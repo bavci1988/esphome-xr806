@@ -145,6 +145,15 @@ class TuyaLowPowerV0Session {
     full_status_active_ = false;
   }
 
+  // MCUs that frame with version 3 report their status (CMD07) in one go after CMD08 and have no
+  // fixed DP list to wait for: their first complete report synchronizes the session.
+  void mark_synchronized() {
+    status_mask_ = 0;
+    full_status_active_ = false;
+    synced_ = true;
+    fault_ = false;
+  }
+
   bool busy() const { return full_status_active_ || write_pending_; }
   bool ready() const { return product_ && synced_ && !fault_ && !busy(); }
 

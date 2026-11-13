@@ -217,7 +217,7 @@ bool Tuya::begin_low_power_command_(const TuyaCommand &command) {
     }
     this->expected_response_ = command.cmd;
   }
-  if (cmd == 0x02 && command.payload.size() == 1 && command.payload[0] == 0x04)
+  if (cmd == 0x02 && command.payload.size() == 1 && command.payload[0] == 0x04 && !this->lp_v3_)
     this->lp_v0_.begin_full_status(millis());
   if (cmd == 0x09 && command.payload.size() >= 4) {
     const auto &p = command.payload;
@@ -273,8 +273,8 @@ void Tuya::send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType dat
   buffer.push_back(data.size() >> 8);
   buffer.push_back(data.size() >> 0);
   buffer.insert(buffer.end(), data.begin(), data.end());
-  // The HC32 low-power firmware expects DP writes as CMD09, not CMD06.
-  this->send_command_(TuyaCommand{.cmd = static_cast<TuyaCommandType>(0x09), .payload = buffer});
+  // The HC32 low-power firmware 1.3.1 expects DP writes as CMD09; version-3 MCUs take the standard CMD06.
+  this->send_command_(TuyaCommand{.cmd = static_cast<TuyaCommandType>(this->lp_v3_ ? 0x06 : 0x09), .payload = buffer});
 }
 
 void Tuya::begin_mcu_wake_pulse_() {
@@ -736,6 +736,12 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       this->lp_product_text_[len] = '\0';
       const bool had_product = this->lp_v0_.has_product();
       this->lp_product_ = std::move(incoming);
+      if (this->lp_v3_ != (version == 3)) {
+        this->lp_v3_ = version == 3;
+        ESP_LOGI(LP_TAG, "MCU frames with protocol version %u: status %s, writes %s", version,
+                 this->lp_v3_ ? LOG_STR_LITERAL("CMD08/CMD07") : LOG_STR_LITERAL("CMD05 burst"),
+                 this->lp_v3_ ? LOG_STR_LITERAL("CMD06") : LOG_STR_LITERAL("CMD09"));
+      }
       this->lp_product_retry_.success();
       this->lp_mode_requery_pending_ = false;
       this->lp_sleep_window_.product_validated();
@@ -760,13 +766,40 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
     }
 
     case 0x02:  // Network-state ACK; generic queue handler clears expected CMD.
-      if (version == 3) {
-        // Diagnosis for MCUs that frame with version 3: they ACK CMD02 without the CMD05 status burst
-        // of the HC32 firmware 1.3.1. Ask for the status the way standard Tuya MCUs expect it.
-        ESP_LOGI(LP_TAG, "Version-3 MCU acknowledged CMD02; querying status with CMD08 (diagnosis)");
+      if (this->lp_v3_) {
+        // Version-3 MCUs ACK CMD02 without the CMD05 burst of the HC32 firmware 1.3.1;
+        // they report their status as CMD07 when asked with CMD08.
+        ESP_LOGD(LP_TAG, "Querying MCU status with CMD08");
         this->send_low_power_direct_(0x08, {});
       }
       return;
+
+    case 0x07: {  // Status report of a version-3 MCU (standard Tuya framing).
+      if (!this->lp_v3_ || len < 5)
+        return;
+      size_t offset = 0;
+      while (offset + 4 <= len) {
+        const size_t size = (static_cast<size_t>(data[offset + 2]) << 8) | data[offset + 3];
+        if (size > len - offset - 4) {
+          ESP_LOGW(LP_TAG, "Rejecting malformed MCU CMD07 report");
+          return;
+        }
+        this->lp_v0_.observe_dp(data[offset], data[offset + 1], data + offset + 4, size);
+        offset += 4 + size;
+      }
+      this->handle_datapoints_(data, len);
+      if (!this->lp_v0_.synchronized()) {
+        this->lp_v0_.mark_synchronized();
+        this->init_state_ = TuyaInitState::INIT_DONE;
+        if (!this->lp_initialized_callback_called_) {
+          this->lp_initialized_callback_called_ = true;
+          this->initialized_callback_.call();
+        }
+        ESP_LOGI(LP_TAG, "MCU status synchronized (version-3 MCU)");
+      }
+      this->update_low_power_sleep_lock_();
+      return;
+    }
 
     case 0x05: {  // MCU datapoint reports; acknowledge each DP separately.
       if (len == 2 && data[0] == 0)
