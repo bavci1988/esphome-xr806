@@ -45,38 +45,10 @@ button:
     on_press:
       - tuya.refresh:
           tuya_id: trv16_mcu
-  - platform: tuya_trv16
-    save_day:
-      name: Save program day
-    save_all_days:
-      name: Save program all days
-    power_on:
-      name: Power on
 
 tuya_trv16:
   tuya_id: trv16_mcu
-
-select:
-  - platform: tuya_trv16
-    program_day:
-      name: Program day
-
-datetime:
-  - platform: tuya_trv16
-    point_1_time:
-      name: Point 1 time
-    point_6_time:
-      name: Point 6 time
-
-number:
-  - platform: tuya_trv16
-    point_1_temperature:
-      name: Point 1 temperature
-
-text_sensor:
-  - platform: tuya_trv16
-    sunday:
-      name: Program Sunday
+  force_manual_mode: true
 
 binary_sensor:
   - platform: tuya_trv16
