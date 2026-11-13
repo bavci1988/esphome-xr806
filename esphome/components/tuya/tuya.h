@@ -132,6 +132,11 @@ class Tuya final : public Component, public uart::UARTDevice {
   void set_product_id(const char *product_id) { this->product_id_ = product_id; }
   void set_low_power_host(TuyaLowPowerHost *host) { this->lp_host_ = host; }
   bool request_low_power_refresh();
+  /// The MCU reports its changes without being asked (a version-3 MCU after the status poll stops;
+  /// the HC32 once synchronized), so it accepts commands too.
+  bool low_power_mcu_reports_changes() const {
+    return this->lp_v3_ ? this->lp_v3_pushes_ : this->lp_v0_.synchronized();
+  }
   // Called by the platform's power management bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
   /// Standby steps, called by the platform's power management bridge.
