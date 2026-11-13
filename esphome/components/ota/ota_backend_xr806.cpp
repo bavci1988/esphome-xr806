@@ -255,8 +255,10 @@ bool XR806OTABackend::read_commit_() {
 
 bool XR806OTABackend::probe_staged_image_() {
   // Same decoder (ROM xz-embedded) and dictionary limit as the bootloader.
-  constexpr size_t IN_CHUNK = 2048;
-  constexpr size_t OUT_CHUNK = 4096;
+  // Small buffers: a web upload ends here while the HTTP server still holds its own buffers, and the
+  // heap is nearly full then. The check reads byte by byte, so the chunk size only affects speed.
+  constexpr size_t IN_CHUNK = 512;
+  constexpr size_t OUT_CHUNK = 1024;
   xz_crc32_init();
   struct xz_dec *dec = xz_dec_init(XZ_PREALLOC, xr806::XR806_BOOTLOADER_XZ_DICT);
   RAMAllocator<uint8_t> allocator;
