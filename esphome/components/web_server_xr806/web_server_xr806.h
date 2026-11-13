@@ -191,6 +191,10 @@ class AsyncWebServer {
   void process_upload_(Client &client);
 #endif
   static constexpr uint32_t CLIENT_TIMEOUT_MS = 5000;
+  // A browser requests its script and the event stream right after the page; until then the server counts as
+  // active, so the chip does not go to standby in between.
+  static constexpr uint32_t FOLLOW_UP_MS = 5000;
+  uint32_t last_accept_ms_{0};
   void dispatch_(Client &client);
   void process_(Client &client);
   uint16_t port_;

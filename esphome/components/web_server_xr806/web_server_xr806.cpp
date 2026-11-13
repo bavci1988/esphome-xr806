@@ -270,7 +270,7 @@ void AsyncWebServer::end() {
 void AsyncWebServer::stop_accepting() { this->listener_.reset(); }
 
 bool AsyncWebServer::has_active_connections() const {
-  if (!this->clients_.empty())
+  if (!this->clients_.empty() || millis() - this->last_accept_ms_ < FOLLOW_UP_MS)
     return true;
 #ifdef USE_WEBSERVER
   for (auto *source = AsyncEventSource::first_source; source != nullptr; source = source->next_source()) {
@@ -604,6 +604,7 @@ void AsyncWebServer::loop() {
       Client client{};
       client.socket = std::move(incoming);
       client.started = App.get_loop_component_start_time();
+      this->last_accept_ms_ = client.started;
       this->clients_.push_back(std::move(client));
     }
   }
@@ -631,8 +632,9 @@ void AsyncEventSource::handleRequest(AsyncWebServerRequest *req) {
   // Keep one enumeration cursor per browser. The previous shared cursor
   // restarted for all users on every new connection.
   if (this->sessions_.size() >= 2) {
-    req->send(503, "text/plain", "Too many event clients");
-    return;
+    // A phone that only hid the tab keeps its old stream open; the browser asking now is the one to serve.
+    ESP_LOGD(TAG, "Closing the oldest event stream for a new one");
+    this->sessions_.erase(this->sessions_.begin());
   }
   auto sock = req->take_socket();
   if (sock == nullptr)
