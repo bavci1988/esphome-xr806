@@ -119,6 +119,11 @@ void TuyaTRV16::load_day() {
     ESP_LOGI(TAG, "On weekend days this MCU uses only points 1 and 2");
 }
 
+void TuyaTRV16::power_on() {
+  ESP_LOGI(TAG, "Switching on (DP%u)", POWER_DP);
+  this->tuya_->set_boolean_datapoint_value(POWER_DP, true);
+}
+
 void TuyaTRV16::save(uint8_t day_mask) {
   if (day_mask == 0)
     day_mask = 1u << this->selected_day_();  // The chosen day

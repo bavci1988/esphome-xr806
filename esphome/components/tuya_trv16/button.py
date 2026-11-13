@@ -18,12 +18,24 @@ SAVE_BUTTONS = {
     "save_all_days": 0x7F,
 }
 
+TuyaTRV16PowerOnButton = tuya_trv16_ns.class_(
+    "TuyaTRV16PowerOnButton", button.Button, cg.Parented.template(TuyaTRV16)
+)
+
+CONF_POWER_ON = "power_on"
+
 CONFIG_SCHEMA = HUB_SCHEMA.extend(
     {
-        cv.Optional(key): button.button_schema(
-            TuyaTRV16SaveButton, entity_category="config", icon="mdi:content-save"
-        )
-        for key in SAVE_BUTTONS
+        **{
+            cv.Optional(key): button.button_schema(
+                TuyaTRV16SaveButton, entity_category="config", icon="mdi:content-save"
+            )
+            for key in SAVE_BUTTONS
+        },
+        # Switches the thermostat on, e.g. while it waits for its button after a battery change
+        cv.Optional(CONF_POWER_ON): button.button_schema(
+            TuyaTRV16PowerOnButton, icon="mdi:power"
+        ),
     }
 )
 
@@ -35,3 +47,6 @@ async def to_code(config: ConfigType) -> None:
             continue
         save = await button.new_button(conf, day_mask)
         await cg.register_parented(save, hub)
+    if (conf := config.get(CONF_POWER_ON)) is not None:
+        power_on = await button.new_button(conf)
+        await cg.register_parented(power_on, hub)

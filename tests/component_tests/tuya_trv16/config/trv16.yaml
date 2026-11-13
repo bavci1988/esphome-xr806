@@ -50,6 +50,8 @@ button:
       name: Save program day
     save_all_days:
       name: Save program all days
+    power_on:
+      name: Power on
 
 tuya_trv16:
   tuya_id: trv16_mcu

@@ -22,3 +22,4 @@ def test_tuya_trv16_generates(
     # The chosen day is resolved when pressed; "all days" writes every day.
     assert "tuya_trv16::TuyaTRV16SaveButton(0)" in main_cpp
     assert "tuya_trv16::TuyaTRV16SaveButton(127)" in main_cpp
+    assert "tuya_trv16::TuyaTRV16PowerOnButton()" in main_cpp

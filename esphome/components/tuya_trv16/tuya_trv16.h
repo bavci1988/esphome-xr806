@@ -65,6 +65,8 @@ class TuyaTRV16 : public Component {
   void load_day();
   /// Sends the edit fields as the program of the days in `day_mask` (bit 0 Monday .. bit 6 Sunday).
   void save(uint8_t day_mask);
+  /// Switches the thermostat on (DP1), as after the button on the device.
+  void power_on();
 
  protected:
   void on_program_(const tuya::TuyaDatapoint &datapoint);
@@ -128,6 +130,11 @@ class TuyaTRV16PointTime : public datetime::TimeEntity {
 #endif
 
 #ifdef USE_BUTTON
+class TuyaTRV16PowerOnButton : public button::Button, public Parented<TuyaTRV16> {
+ protected:
+  void press_action() override { this->parent_->power_on(); }
+};
+
 class TuyaTRV16SaveButton : public button::Button, public Parented<TuyaTRV16> {
  public:
   explicit TuyaTRV16SaveButton(uint8_t day_mask) : day_mask_(day_mask) {}
