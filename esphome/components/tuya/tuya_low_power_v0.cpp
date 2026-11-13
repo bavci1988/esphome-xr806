@@ -698,6 +698,9 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
 
     case 0x01: {  // Product-info response.
       TuyaLowPowerProductInfo incoming{};
+      // The descriptor differs between MCU firmware versions; show it once for diagnosis.
+      ESP_LOGD(LP_TAG, "MCU product info: %.*s", static_cast<int>(len > 200 ? 200 : len),
+               reinterpret_cast<const char *>(data));
       if (!incoming.parse(data, len)) {
         // Original WXU calls CMD01 again after 500 ms for missing descriptors,
         // allocation/JSON failures or absent p/v. Retry only malformed data;

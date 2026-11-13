@@ -86,6 +86,23 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   EXPECT_TRUE(scan.locked() && !scan.searching() && !scan.probe_due(2000));
   EXPECT_FALSE(scan.accept_frame(valid.data(), valid.size(), 2000));  // No repeat.
 
+  // Other TRV16 MCU firmware answers with protocol version 3; version 1 is still refused.
+  auto with_version = [](std::vector<uint8_t> b, uint8_t version) {
+    b[2] = version;
+    uint8_t sum = 0;
+    for (size_t i = 0; i + 1 < b.size(); ++i)
+      sum += b[i];
+    b.back() = sum;
+    return b;
+  };
+  auto v3 = with_version(valid, 0x03);
+  auto v1 = with_version(valid, 0x01);
+  TuyaLowPowerAutoBaud scan_v3;
+  scan_v3.start(115200);
+  scan_v3.probe_sent(10);
+  EXPECT_FALSE(scan_v3.accept_frame(v1.data(), v1.size(), 20));
+  EXPECT_TRUE(scan_v3.accept_frame(v3.data(), v3.size(), 20));
+
   // Default to 9600 unless configured to one of the supported candidates.
   scan.start(57600);
   EXPECT_TRUE(scan.baud() == 9600 && scan.probe_due(0));

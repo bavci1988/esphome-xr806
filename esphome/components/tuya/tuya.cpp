@@ -165,7 +165,8 @@ bool Tuya::validate_message_() {
   // Keep the low-power MCU parser bounded. Corrupted length bytes on a
   // sleeping UART must not accumulate a 64-KiB heap buffer.
 #ifdef USE_TUYA_LOW_POWER_V0
-  if (this->is_low_power_() && (length > 512 || version != 0)) {
+  // The HC32 firmware 1.3.1 sends version 0; other TRV16 MCU firmware sends version 3 like standard Tuya MCUs.
+  if (this->is_low_power_() && (length > 512 || (version != 0 && version != 3))) {
     ESP_LOGW(TAG, "Invalid low-power MCU frame length/version: %u/%u", length, version);
     return false;
   }
