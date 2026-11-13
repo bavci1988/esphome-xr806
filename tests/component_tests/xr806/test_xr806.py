@@ -422,7 +422,7 @@ def test_standby_wake_pin_is_dedicated(
     # duplicate-use validation does not detect a second consumer.
     config = (
         "esphome:\n  name: xr806-wake-pin-test\n"
-        "xr806:\n  board: wxu\n  lowpower: true\n"
+        "xr806:\n  board: wxu\n"
         "  standby:\n    enabled: true\n    wake_pin: PA20\n    wake_edge: falling\n"
         "switch:\n  - platform: gpio\n    id: test_switch\n"
         f"    pin: {gpio_pin}\n"
@@ -445,7 +445,7 @@ def test_standby_wake_pin_rejects_allow_other_uses(
 ) -> None:
     config = (
         "esphome:\n  name: xr806-wake-pin-sharing\n"
-        "xr806:\n  board: wxu\n  lowpower: true\n"
+        "xr806:\n  board: wxu\n"
         "  standby:\n    enabled: true\n    wake_pin: PA20\n    wake_edge: falling\n"
         "binary_sensor:\n  - platform: gpio\n    id: wake_sensor\n"
         "    pin:\n      number: PA20\n      allow_other_uses: true\n"
@@ -536,7 +536,7 @@ def test_standby_wake_pin_must_be_a_wake_input(
 ) -> None:
     config = (
         "esphome:\n  name: xr806-wake-pin-invalid\n"
-        "xr806:\n  board: wxu\n  lowpower: true\n"
+        "xr806:\n  board: wxu\n"
         "  standby:\n    enabled: true\n    wake_pin: PB0\n    wake_edge: falling\n"
     )
     CORE.config_path = tmp_path / "wake_invalid.yaml"
@@ -606,3 +606,22 @@ def test_stay_connected_rejects_invalid_configs(
 
     assert read_config({}) is None
     assert message in capsys.readouterr().out
+
+
+def test_former_lowpower_key_is_ignored_with_a_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Power management follows standby; the old switch still validates."""
+    CORE.config_path = tmp_path / "old_lowpower.yaml"
+    CORE.config_path.write_text(
+        "esphome:\n  name: xr806-old-lowpower\n"
+        "xr806:\n  board: wxu\n  lowpower: true\n"
+        "  standby:\n    enabled: true\n"
+    )
+
+    result = read_config({})
+
+    assert result is not None
+    assert "lowpower" not in result["xr806"]
+    assert "'lowpower' is no longer needed" in caplog.text

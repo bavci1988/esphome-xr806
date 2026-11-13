@@ -2,7 +2,6 @@ esphome:
   name: xr806-ota
 xr806:
   board: wxu
-  lowpower: true
   ota_diagnostic_readonly: true
 wifi:
   ssid: TEST-NETWORK-NO-HARDWARE

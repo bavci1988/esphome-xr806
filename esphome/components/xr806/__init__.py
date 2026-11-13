@@ -1,5 +1,6 @@
 """Native ESPHome platform for the Allwinner/XRadio XR806 SoC."""
 
+import logging
 from pathlib import Path
 
 from esphome import final_validate as fv, pins
@@ -29,12 +30,15 @@ IS_TARGET_PLATFORM = True
 
 OTA_IMAGE_NAME = "firmware.ota.bin"
 
+_LOGGER = logging.getLogger(__name__)
+
 CONF_WLAN = "wlan"
 CONF_NETWORK_SUSPEND = "network_suspend"
 CONF_STAY_CONNECTED = "stay_connected"
 CONF_DTIM = "dtim"
 CONF_LISTEN_INTERVAL = "listen_interval"
 CONF_STANDBY = "standby"
+CONF_LOWPOWER = "lowpower"
 CONF_OTA_GUARD_ID = "ota_guard_id"
 CONF_OTA_DIAGNOSTIC_READONLY = "ota_diagnostic_readonly"
 CONF_API_STANDBY_ID = "api_standby_id"
@@ -135,7 +139,14 @@ STANDBY_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 
 
-def _update_core_data(config: ConfigType) -> None:
+def _update_core_data(config: ConfigType) -> ConfigType:
+    if CONF_LOWPOWER in config:
+        # Power management is prepared whenever standby is configured; on its own it did nothing.
+        _LOGGER.warning(
+            "xr806: 'lowpower' is no longer needed and is ignored; "
+            "'standby:' enables power management"
+        )
+        config.pop(CONF_LOWPOWER)
     if config[CONF_WLAN][CONF_NETWORK_SUSPEND] and CONF_STANDBY not in config:
         raise cv.Invalid(
             "xr806.wlan.network_suspend requires xr806.standby and full PM gating"
@@ -157,8 +168,6 @@ def _update_core_data(config: ConfigType) -> None:
             raise cv.Invalid(
                 "xr806.standby requires explicit wake_pin and wake_edge together"
             )
-        if not config["lowpower"]:
-            raise cv.Invalid("xr806.standby requires xr806.lowpower: true")
         if not config[CONF_STANDBY][CONF_ENABLED]:
             raise cv.Invalid("Remove xr806.standby when disabled")
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = DOMAIN
@@ -202,7 +211,8 @@ def _renamed_ms_keys(*keys: str) -> list:
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
-            cv.Optional("lowpower", default=False): cv.boolean,
+            # Former switch for power management, now implied by standby
+            cv.Optional(CONF_LOWPOWER): cv.boolean,
             cv.GenerateID(CONF_TUYA_HOST_ID): cv.declare_id(XR806TuyaLowPowerHost),
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
             cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
@@ -304,10 +314,9 @@ async def to_code(config: ConfigType) -> None:
     if config[CONF_OTA_DIAGNOSTIC_READONLY]:
         # ROM/FDCM read-only snapshot: does not enable ESPHome OTA.
         cg.add_define("USE_XR806_OTA_RUNTIME_PROBE")
-    # Activate future XR806 PM policy
-    if config["lowpower"]:
-        cg.add_define("USE_XR806_LOWPOWER")
     if CONF_STANDBY in config:
+        # The power management policy and the UART and service wakelocks that standby relies on.
+        cg.add_define("USE_XR806_LOWPOWER")
         cfg = config[CONF_STANDBY]
         cg.add_define("USE_XR806_STANDBY_CONTROLLER")
         cg.add_global(

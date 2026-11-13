@@ -2,7 +2,6 @@ esphome:
   name: xr806-trv16-low-power
 xr806:
   board: wxu
-  lowpower: true
   standby:
     enabled: true
     wake_after: 3000ms
