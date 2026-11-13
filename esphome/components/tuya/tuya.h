@@ -135,6 +135,10 @@ class Tuya final : public Component, public uart::UARTDevice {
   /// Diagnostics: sends only the start of an MCU firmware update (CMD0A, or CMD0D for version-0 frames) for an
   /// image of `image_size` bytes and logs the MCU's answer. No data follows; the running MCU firmware is untouched.
   bool low_power_probe_mcu_update(uint32_t image_size);
+  /// Sends an MCU firmware image with the Tuya MCU update commands (start, then packets of offset and data, each
+  /// acknowledged, then an empty packet at the end). The MCU checks the image itself before it installs it. `image`
+  /// must stay valid until the transfer ends. Restarts the module afterwards, so it detects the MCU anew.
+  bool low_power_update_mcu(const uint8_t *image, size_t size);
   // Called by the platform's power management bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
   /// Standby steps, called by the platform's power management bridge.
@@ -283,7 +287,30 @@ class Tuya final : public Component, public uart::UARTDevice {
   uint32_t lp_update_probe_size_{0};
   uint32_t lp_update_probe_sent_ms_{0};
   uint8_t low_power_update_start_cmd_() const { return this->lp_v3_ ? 0x0A : 0x0D; }
+  uint8_t low_power_update_data_cmd_() const { return this->lp_v3_ ? 0x0B : 0x0E; }
   void poll_low_power_update_probe_();
+  void wake_low_power_mcu_();
+  enum class McuUpdate : uint8_t {
+    MCU_UPDATE_IDLE,
+    MCU_UPDATE_START_PENDING,
+    MCU_UPDATE_START_SENT,
+    MCU_UPDATE_SEND_PACKET,
+    MCU_UPDATE_PACKET_SENT,
+    MCU_UPDATE_FINAL_SENT,
+  };
+  void poll_low_power_mcu_update_();
+  bool handle_low_power_mcu_update_(uint8_t command, const uint8_t *data, size_t len);
+  void send_low_power_update_packet_();
+  void fail_low_power_mcu_update_(const char *reason);
+  McuUpdate lp_mcu_update_{McuUpdate::MCU_UPDATE_IDLE};
+  const uint8_t *lp_mcu_update_image_{nullptr};
+  uint32_t lp_mcu_update_size_{0};
+  uint32_t lp_mcu_update_offset_{0};
+  uint16_t lp_mcu_update_packet_{256};
+  uint16_t lp_mcu_update_chunk_{0};
+  uint8_t lp_mcu_update_retries_{0};
+  uint8_t lp_mcu_update_percent_{0};
+  uint32_t lp_mcu_update_sent_ms_{0};
   bool lp_mcu_wake_from_host_{false};  // The wake output belongs to the host, not to the configuration
   int lp_wake_input_{-1};              // wk mapped to this module's GPIO numbering
   uint32_t lp_mode_requery_after_ms_{0};

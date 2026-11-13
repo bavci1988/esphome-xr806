@@ -144,6 +144,7 @@ void Tuya::loop_low_power_() {
   this->poll_low_power_v3_status_();
   this->poll_low_power_v3_sleep_();
   this->poll_low_power_update_probe_();
+  this->poll_low_power_mcu_update_();
 }
 
 void Tuya::poll_low_power_v3_status_() {
@@ -284,7 +285,8 @@ void Tuya::send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType dat
     }
     this->update_low_power_sleep_lock_();
   }
-  if (!this->lp_v0_.ready() || !this->lp_wire_.idle() || this->lp_standby_.requested()) {
+  if (!this->lp_v0_.ready() || !this->lp_wire_.idle() || this->lp_standby_.requested() ||
+      this->lp_mcu_update_ != McuUpdate::MCU_UPDATE_IDLE) {
     ESP_LOGW(LP_TAG, "Refusing DP%u write before MCU synchronization or while another transaction owns UART",
              static_cast<unsigned>(datapoint_id));
     return;
@@ -451,7 +453,7 @@ bool Tuya::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
          this->lp_uart_rx_errors_.unchanged(this->low_power_uart_rx_error_count_()) &&
          !this->lp_standby_.recovery_required() && this->command_queue_.empty() && !this->lp_mcu_wake_pulse_active_ &&
          !this->lp_awake_notification_pending_ && !this->expected_response_.has_value() &&
-         (in_cmd38_handler || this->rx_message_.empty());
+         this->lp_mcu_update_ == McuUpdate::MCU_UPDATE_IDLE && (in_cmd38_handler || this->rx_message_.empty());
 }
 
 void Tuya::update_low_power_sleep_lock_() {
@@ -478,8 +480,15 @@ bool Tuya::low_power_probe_mcu_update(uint32_t image_size) {
     ESP_LOGW(LP_TAG, "MCU update probe: MCU not identified yet");
     return false;
   }
+  this->wake_low_power_mcu_();
+  this->lp_update_probe_size_ = image_size;
+  this->lp_update_probe_ = UpdateProbe::UPDATE_PROBE_PENDING;
+  return true;
+}
+
+// Wakes the MCU for a command of our own; when it sleeps under its standby consent, the consent ends first.
+void Tuya::wake_low_power_mcu_() {
   if (this->lp_standby_.requested() && this->lp_host_ != nullptr) {
-    // The MCU sleeps under its standby consent: end it and wake the MCU first.
     const bool compensate = this->lp_standby_.force_cancel();
     this->lp_host_->request_standby(false);
     this->begin_mcu_wake_pulse_();
@@ -490,13 +499,135 @@ bool Tuya::low_power_probe_mcu_update(uint32_t image_size) {
         this->send_low_power_awake_notification_();
       }
     }
-    this->update_low_power_sleep_lock_();
   } else {
     this->begin_mcu_wake_pulse_();
   }
-  this->lp_update_probe_size_ = image_size;
-  this->lp_update_probe_ = UpdateProbe::UPDATE_PROBE_PENDING;
+  this->update_low_power_sleep_lock_();
+}
+
+bool Tuya::low_power_update_mcu(const uint8_t *image, size_t size) {
+  if (this->protocol_ != TuyaProtocol::LOW_POWER_V0 || !this->lp_v0_.has_product() || image == nullptr || size == 0) {
+    ESP_LOGW(LP_TAG, "MCU update: MCU not identified yet or no image");
+    return false;
+  }
+  if (this->lp_mcu_update_ != McuUpdate::MCU_UPDATE_IDLE) {
+    ESP_LOGW(LP_TAG, "MCU update: already running");
+    return false;
+  }
+  this->lp_mcu_update_image_ = image;
+  this->lp_mcu_update_size_ = size;
+  this->lp_mcu_update_offset_ = 0;
+  this->lp_mcu_update_retries_ = 0;
+  this->lp_mcu_update_percent_ = 0;
+  this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_START_PENDING;
+  this->wake_low_power_mcu_();
+  ESP_LOGI(LP_TAG, "MCU update: starting, %u bytes", static_cast<unsigned>(size));
   return true;
+}
+
+void Tuya::fail_low_power_mcu_update_(const char *reason) {
+  // The MCU installs nothing without a complete image with a valid checksum; it keeps running its firmware.
+  ESP_LOGE(LP_TAG, "MCU update failed at %u of %u bytes: %s; the MCU keeps its firmware",
+           static_cast<unsigned>(this->lp_mcu_update_offset_), static_cast<unsigned>(this->lp_mcu_update_size_),
+           reason);
+  this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_IDLE;
+  this->update_low_power_sleep_lock_();
+}
+
+void Tuya::send_low_power_update_packet_() {
+  const uint32_t offset = this->lp_mcu_update_offset_;
+  const uint32_t rest = this->lp_mcu_update_size_ - offset;
+  this->lp_mcu_update_chunk_ = rest < this->lp_mcu_update_packet_ ? rest : this->lp_mcu_update_packet_;
+  std::vector<uint8_t> payload;
+  payload.reserve(4 + this->lp_mcu_update_chunk_);
+  payload.push_back(offset >> 24);
+  payload.push_back(offset >> 16);
+  payload.push_back(offset >> 8);
+  payload.push_back(offset);
+  payload.insert(payload.end(), this->lp_mcu_update_image_ + offset,
+                 this->lp_mcu_update_image_ + offset + this->lp_mcu_update_chunk_);
+  this->send_low_power_direct_(this->low_power_update_data_cmd_(), payload);
+  this->lp_mcu_update_sent_ms_ = millis();
+  this->lp_mcu_update_ =
+      this->lp_mcu_update_chunk_ == 0 ? McuUpdate::MCU_UPDATE_FINAL_SENT : McuUpdate::MCU_UPDATE_PACKET_SENT;
+}
+
+void Tuya::poll_low_power_mcu_update_() {
+  const uint32_t now = millis();
+  switch (this->lp_mcu_update_) {
+    case McuUpdate::MCU_UPDATE_START_PENDING: {
+      if (this->lp_mcu_wake_pulse_active_ || this->lp_awake_notification_pending_ || !this->lp_wire_.idle())
+        return;
+      const uint32_t size = this->lp_mcu_update_size_;
+      this->send_low_power_direct_(this->low_power_update_start_cmd_(),
+                                   {static_cast<uint8_t>(size >> 24), static_cast<uint8_t>(size >> 16),
+                                    static_cast<uint8_t>(size >> 8), static_cast<uint8_t>(size)});
+      this->lp_mcu_update_sent_ms_ = now;
+      this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_START_SENT;
+      return;
+    }
+    case McuUpdate::MCU_UPDATE_START_SENT:
+      if (now - this->lp_mcu_update_sent_ms_ > 3000)
+        this->fail_low_power_mcu_update_("no answer to the start");
+      return;
+    case McuUpdate::MCU_UPDATE_SEND_PACKET:
+      if (this->lp_mcu_wake_pulse_active_)
+        return;
+      this->send_low_power_update_packet_();
+      return;
+    case McuUpdate::MCU_UPDATE_PACKET_SENT:
+      if (now - this->lp_mcu_update_sent_ms_ < 2000)
+        return;
+      if (++this->lp_mcu_update_retries_ > 3) {
+        this->fail_low_power_mcu_update_("packet not acknowledged");
+        return;
+      }
+      ESP_LOGW(LP_TAG, "MCU update: no acknowledgement at %u, sending again",
+               static_cast<unsigned>(this->lp_mcu_update_offset_));
+      this->begin_mcu_wake_pulse_();  // The MCU may have fallen asleep.
+      this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_SEND_PACKET;
+      return;
+    case McuUpdate::MCU_UPDATE_FINAL_SENT:
+      // A good image makes the MCU restart without an answer; an acknowledgement means its check failed.
+      if (now - this->lp_mcu_update_sent_ms_ < 10000)
+        return;
+      ESP_LOGI(LP_TAG, "MCU update: transfer complete, the MCU installs the image and restarts; restarting the module");
+      this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_IDLE;
+      App.safe_reboot();
+      return;
+    default:
+      return;
+  }
+}
+
+// Returns true when the frame belonged to the running update.
+bool Tuya::handle_low_power_mcu_update_(uint8_t command, const uint8_t *data, size_t len) {
+  if (this->lp_mcu_update_ == McuUpdate::MCU_UPDATE_START_SENT && command == this->low_power_update_start_cmd_()) {
+    // Packet size: 0 = 256, 1 = 512, 2 = 1024 bytes
+    const uint8_t code = len >= 1 ? data[0] : 0;
+    this->lp_mcu_update_packet_ = code == 2 ? 1024 : code == 1 ? 512 : 256;
+    ESP_LOGI(LP_TAG, "MCU update: MCU ready, packets of %u bytes", this->lp_mcu_update_packet_);
+    this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_SEND_PACKET;
+    return true;
+  }
+  if (command != this->low_power_update_data_cmd_() || len != 0)
+    return false;
+  if (this->lp_mcu_update_ == McuUpdate::MCU_UPDATE_PACKET_SENT) {
+    this->lp_mcu_update_offset_ += this->lp_mcu_update_chunk_;
+    this->lp_mcu_update_retries_ = 0;
+    const uint8_t percent = static_cast<uint8_t>(100ull * this->lp_mcu_update_offset_ / this->lp_mcu_update_size_);
+    if (percent / 10 != this->lp_mcu_update_percent_ / 10)
+      ESP_LOGI(LP_TAG, "MCU update: %u%%", percent);
+    this->lp_mcu_update_percent_ = percent;
+    // After the last packet an empty one at offset = size ends the transfer.
+    this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_SEND_PACKET;
+    return true;
+  }
+  if (this->lp_mcu_update_ == McuUpdate::MCU_UPDATE_FINAL_SENT) {
+    this->fail_low_power_mcu_update_("the MCU rejected the image checksum");
+    return true;
+  }
+  return false;
 }
 
 // Sends a pending probe once the MCU is awake, and reports a missing answer.
@@ -949,6 +1080,8 @@ void Tuya::send_low_power_time_(uint8_t command) {
 
 void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uint8_t *data, size_t len) {
   (void) version;
+  if (this->lp_mcu_update_ != McuUpdate::MCU_UPDATE_IDLE && this->handle_low_power_mcu_update_(command, data, len))
+    return;
   if (this->lp_update_probe_ == UpdateProbe::UPDATE_PROBE_SENT && command == this->low_power_update_start_cmd_()) {
     this->lp_update_probe_ = UpdateProbe::UPDATE_PROBE_IDLE;
     char hex[3 * 8 + 1] = "";
