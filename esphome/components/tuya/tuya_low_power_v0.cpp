@@ -159,8 +159,18 @@ void Tuya::handle_low_power_frame_(uint8_t command, uint8_t version, const uint8
   if (this->auto_baud_ && this->lp_autobaud_.searching()) {
     // validate_message_ already checked the full checksum. Keep the scanner
     // independent so bad/wrong frames cannot unlock the boot state machine.
-    if (!this->lp_autobaud_.accept_frame(this->rx_message_.data(), this->rx_message_.size(), millis()))
+    if (!this->lp_autobaud_.accept_frame(this->rx_message_.data(), this->rx_message_.size(), millis())) {
+      // Show what the MCU sent, so a reply the scan does not recognize can be diagnosed.
+      char hex[3 * 12 + 1];
+      const size_t shown = len < 12 ? len : 12;
+      for (size_t i = 0; i < shown; ++i)
+        snprintf(hex + 3 * i, 4, "%02X ", buffer[i]);
+      hex[3 * shown] = '\0';
+      ESP_LOGD(LP_TAG, "Baud scan ignored CMD 0x%02X v%u len %u: %s| %.*s", command, version,
+               static_cast<unsigned>(len), hex, static_cast<int>(len > 120 ? 120 : len),
+               reinterpret_cast<const char *>(buffer));
       return;
+    }
     ESP_LOGI(LP_TAG, "Tuya low_power_v0 baud locked: %u", static_cast<unsigned>(this->lp_autobaud_.baud()));
   }
 

@@ -168,6 +168,12 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   const std::string long_json = R"({"p":"x","v":"1","wk":20,"mwk":28,"sm":1,"mwkpt":250})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(long_json.data()), long_json.size()));
   EXPECT_EQ(info.mcu_wake_pulse_ms, 200u);
+  // Only p and v are required; missing low-power fields stay unset.
+  const std::string minimal_json = R"({"p":"abc","v":"2.0.0","m":0})";
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(minimal_json.data()), minimal_json.size()));
+  EXPECT_TRUE(info.wake_gpio == -1 && info.mcu_wake_gpio == -1 && info.sleep_mode == -1);
+  const std::string no_version = R"({"p":"abc","wk":20,"mwk":28,"sm":1})";
+  EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(no_version.data()), no_version.size()));
   const std::string hib_json = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":0})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(hib_json.data()), hib_json.size()));
   EXPECT_TRUE(info.matches("ihedujbuli6hsx9b") && info.sleep_mode == 0);
@@ -176,15 +182,17 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   EXPECT_FALSE(info.matches("ihedujbuli6hsx9b"));
   EXPECT_TRUE(info.matches(""));
   const std::string missing_pin = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"sm":1})";
-  EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(missing_pin.data()), missing_pin.size()));
-  EXPECT_FALSE(info.parsed);
+  // A missing wake pin no longer rejects the product; it only rules out standby.
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(missing_pin.data()), missing_pin.size()));
+  EXPECT_TRUE(info.mcu_wake_gpio == -1 && info.wake_gpio == 20);
   const std::string missing_p = R"({"v":"1.3.1","wk":20,"mwk":28,"sm":1})";
   const std::string missing_v = R"({"p":"ihedujbuli6hsx9b","wk":20,"mwk":28,"sm":1})";
   const std::string bad_sm = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":2})";
   const std::string typed_p = R"({"p":42,"v":"1.3.1","wk":20,"mwk":28,"sm":1})";
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(missing_p.data()), missing_p.size()));
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(missing_v.data()), missing_v.size()));
-  EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(bad_sm.data()), bad_sm.size()));
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(bad_sm.data()), bad_sm.size()));
+  EXPECT_EQ(info.sleep_mode, -1);  // Unknown sleep mode: no standby.
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(typed_p.data()), typed_p.size()));
   EXPECT_FALSE(info.parse(nullptr, 0));
   EXPECT_FALSE(info.parsed);

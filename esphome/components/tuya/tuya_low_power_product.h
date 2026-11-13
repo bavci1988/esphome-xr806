@@ -75,8 +75,15 @@ struct TuyaLowPowerProductInfo {
     const std::string s(reinterpret_cast<const char *>(data), len);
     if (s.front() != '{' || s.back() != '}')
       return false;
-    parsed = get_string(s, "p", pid) && get_string(s, "v", version) && get_integer(s, "wk", wake_gpio) &&
-             get_integer(s, "mwk", mcu_wake_gpio) && get_integer(s, "sm", sleep_mode) && sleep_mode <= 1;
+    // Like the original WXU, only p and v are required. MCU firmware versions differ in the rest; without
+    // wk, mwk or sm the fields stay -1, and standby is refused because it needs sm=1 and a matching wk.
+    parsed = get_string(s, "p", pid) && get_string(s, "v", version);
+    if (parsed) {
+      (void) get_integer(s, "wk", wake_gpio);
+      (void) get_integer(s, "mwk", mcu_wake_gpio);
+      if (get_integer(s, "sm", sleep_mode) && sleep_mode > 1)
+        sleep_mode = -1;
+    }
     int pulse_ms = 0;
     if (parsed && get_integer(s, "mwkpt", pulse_ms))
       mcu_wake_pulse_ms = pulse_ms < 5 ? 5 : (pulse_ms > 200 ? 200 : static_cast<uint32_t>(pulse_ms));
