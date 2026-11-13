@@ -820,8 +820,8 @@ void Tuya::send_low_power_network_() {
   this->send_command_({.cmd = static_cast<TuyaCommandType>(0x02), .payload = {status}});
 }
 
-void Tuya::send_low_power_time_() {
-  // CMD06 carries local calendar time. No duplicate timezone/DST adjustment.
+void Tuya::send_low_power_time_(uint8_t command) {
+  // Local calendar time (HC32: CMD06, version-3 MCU: CMD1C). No duplicate timezone/DST adjustment.
   std::vector<uint8_t> payload(8, 0);
 #ifdef USE_TIME
   if (this->time_id_ != nullptr) {
@@ -841,7 +841,9 @@ void Tuya::send_low_power_time_() {
     }
   }
 #endif
-  this->send_low_power_direct_(0x06, payload);
+  if (payload[0] == 0)
+    ESP_LOGW(LP_TAG, "MCU asked for the time before it was known");
+  this->send_low_power_direct_(command, payload);
 }
 
 void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uint8_t *data, size_t len) {
@@ -1040,7 +1042,12 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
 
     case 0x06:  // Local time query.
       if (len == 0)
-        this->send_low_power_time_();
+        this->send_low_power_time_(0x06);
+      return;
+
+    case 0x1C:  // Local time query of a version-3 MCU (standard Tuya); its weekly program needs the clock.
+      if (this->lp_v3_ && len == 0)
+        this->send_low_power_time_(0x1C);
       return;
 
     case 0x09:  // ACK alone never means that a new setpoint was adopted.
