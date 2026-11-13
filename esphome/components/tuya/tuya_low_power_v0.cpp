@@ -595,7 +595,7 @@ void Tuya::handle_low_power_v3_sleep_(const uint8_t *data, size_t len) {
         this->send_low_power_awake_notification_();
         return;
       }
-      ESP_LOGD(LP_TAG, "MCU agreed to sleep");
+      ESP_LOGV(LP_TAG, "MCU agreed to sleep");
       host->request_standby(true);
       this->update_low_power_sleep_lock_();
       return;
@@ -622,7 +622,7 @@ void Tuya::handle_low_power_v3_sleep_(const uint8_t *data, size_t len) {
         this->update_low_power_sleep_lock_();
         return;
       }
-      ESP_LOGD(LP_TAG, "MCU asked to sleep");
+      ESP_LOGV(LP_TAG, "MCU asked to sleep");
       host->request_standby(true);
       this->update_low_power_sleep_lock_();
       return;

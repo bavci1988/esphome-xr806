@@ -28,6 +28,7 @@ extern "C" {
 #include "driver/chip/hal_prcm.h"
 #include "driver/chip/hal_wakeup.h"
 #include "pm/pm.h"
+#include "sys/xr_debug.h"
 }
 
 #ifdef USE_XR806_STANDBY_HTTP_CLIENT
@@ -109,6 +110,8 @@ void XR806StandbyController::setup() {
     return;
   }
   active_controller = this;
+  // The SDK's power management prints several lines on every standby; keep only its warnings and errors.
+  pm_set_debug_mask(ROM_WRN_MASK | ROM_ERR_MASK | ROM_ABORT_MASK);
   auto &p = lowpower_policy();
   p.request_standby(false);
   p.set_scheduler_idle(false);
@@ -389,7 +392,7 @@ abort:
       this->participants_[i]->standby_resumed(resume);
     // With the link kept up every received packet ends a standby; keep those wakes out of the INFO log.
     if (expected && this->stay_connected_) {
-      ESP_LOGD(TAG, "Standby PM return=%d event=0x%08lx", result, static_cast<unsigned long>(event));
+      ESP_LOGV(TAG, "Standby PM return=%d event=0x%08lx", result, static_cast<unsigned long>(event));
     } else {
       ESP_LOGI(TAG, "Standby PM return=%d event=0x%08lx expected=%d; hardware current not verified", result,
                static_cast<unsigned long>(event), static_cast<int>(expected));
