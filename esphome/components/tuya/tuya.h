@@ -132,6 +132,9 @@ class Tuya final : public Component, public uart::UARTDevice {
   void set_product_id(const char *product_id) { this->product_id_ = product_id; }
   void set_low_power_host(TuyaLowPowerHost *host) { this->lp_host_ = host; }
   bool request_low_power_refresh();
+  /// Diagnostics: sends only the start of an MCU firmware update (CMD0A, or CMD0D for version-0 frames) for an
+  /// image of `image_size` bytes and logs the MCU's answer. No data follows; the running MCU firmware is untouched.
+  bool low_power_probe_mcu_update(uint32_t image_size);
   // Called by the platform's power management bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
   /// Standby steps, called by the platform's power management bridge.
@@ -275,6 +278,12 @@ class Tuya final : public Component, public uart::UARTDevice {
   uint32_t lp_v3_offer_deadline_ms_{0};
   uint32_t lp_v3_idle_since_ms_{0};
   bool lp_wake_lines_configured_{false};
+  enum class UpdateProbe : uint8_t { UPDATE_PROBE_IDLE, UPDATE_PROBE_PENDING, UPDATE_PROBE_SENT };
+  UpdateProbe lp_update_probe_{UpdateProbe::UPDATE_PROBE_IDLE};
+  uint32_t lp_update_probe_size_{0};
+  uint32_t lp_update_probe_sent_ms_{0};
+  uint8_t low_power_update_start_cmd_() const { return this->lp_v3_ ? 0x0A : 0x0D; }
+  void poll_low_power_update_probe_();
   bool lp_mcu_wake_from_host_{false};  // The wake output belongs to the host, not to the configuration
   int lp_wake_input_{-1};              // wk mapped to this module's GPIO numbering
   uint32_t lp_mode_requery_after_ms_{0};

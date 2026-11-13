@@ -143,6 +143,7 @@ void Tuya::loop_low_power_() {
   this->process_low_power_queue_();
   this->poll_low_power_v3_status_();
   this->poll_low_power_v3_sleep_();
+  this->poll_low_power_update_probe_();
 }
 
 void Tuya::poll_low_power_v3_status_() {
@@ -470,6 +471,53 @@ bool Tuya::request_low_power_refresh() {
   }
   this->send_datapoint_command_(106, TuyaDatapointType::BOOLEAN, {0x01});
   return true;
+}
+
+bool Tuya::low_power_probe_mcu_update(uint32_t image_size) {
+  if (this->protocol_ != TuyaProtocol::LOW_POWER_V0 || !this->lp_v0_.has_product()) {
+    ESP_LOGW(LP_TAG, "MCU update probe: MCU not identified yet");
+    return false;
+  }
+  if (this->lp_standby_.requested() && this->lp_host_ != nullptr) {
+    // The MCU sleeps under its standby consent: end it and wake the MCU first.
+    const bool compensate = this->lp_standby_.force_cancel();
+    this->lp_host_->request_standby(false);
+    this->begin_mcu_wake_pulse_();
+    if (compensate) {
+      if (this->lp_mcu_wake_pulse_active_) {
+        this->lp_awake_notification_pending_ = true;
+      } else {
+        this->send_low_power_awake_notification_();
+      }
+    }
+    this->update_low_power_sleep_lock_();
+  } else {
+    this->begin_mcu_wake_pulse_();
+  }
+  this->lp_update_probe_size_ = image_size;
+  this->lp_update_probe_ = UpdateProbe::UPDATE_PROBE_PENDING;
+  return true;
+}
+
+// Sends a pending probe once the MCU is awake, and reports a missing answer.
+void Tuya::poll_low_power_update_probe_() {
+  if (this->lp_update_probe_ == UpdateProbe::UPDATE_PROBE_PENDING) {
+    if (this->lp_mcu_wake_pulse_active_ || this->lp_awake_notification_pending_ || !this->lp_wire_.idle())
+      return;
+    const uint32_t size = this->lp_update_probe_size_;
+    const uint8_t cmd = this->low_power_update_start_cmd_();
+    this->send_low_power_direct_(cmd, {static_cast<uint8_t>(size >> 24), static_cast<uint8_t>(size >> 16),
+                                       static_cast<uint8_t>(size >> 8), static_cast<uint8_t>(size)});
+    this->lp_update_probe_sent_ms_ = millis();
+    this->lp_update_probe_ = UpdateProbe::UPDATE_PROBE_SENT;
+    ESP_LOGI(LP_TAG, "MCU update probe: sent CMD%02X with image size %u (start only, no data)", cmd,
+             static_cast<unsigned>(size));
+    return;
+  }
+  if (this->lp_update_probe_ == UpdateProbe::UPDATE_PROBE_SENT && millis() - this->lp_update_probe_sent_ms_ > 3000) {
+    this->lp_update_probe_ = UpdateProbe::UPDATE_PROBE_IDLE;
+    ESP_LOGW(LP_TAG, "MCU update probe: no answer to CMD%02X within 3 s", this->low_power_update_start_cmd_());
+  }
 }
 
 void Tuya::send_low_power_awake_notification_() {
@@ -901,6 +949,16 @@ void Tuya::send_low_power_time_(uint8_t command) {
 
 void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uint8_t *data, size_t len) {
   (void) version;
+  if (this->lp_update_probe_ == UpdateProbe::UPDATE_PROBE_SENT && command == this->low_power_update_start_cmd_()) {
+    this->lp_update_probe_ = UpdateProbe::UPDATE_PROBE_IDLE;
+    char hex[3 * 8 + 1] = "";
+    const size_t shown = len < 8 ? len : 8;
+    for (size_t i = 0; i < shown; ++i)
+      snprintf(hex + 3 * i, 4, "%02X ", data[i]);
+    // Standard Tuya answer: one byte, the packet size (0 = 256, 1 = 512, 2 = 1024 bytes).
+    ESP_LOGI(LP_TAG, "MCU update probe: answer CMD%02X len %u: %s", command, static_cast<unsigned>(len), hex);
+    return;
+  }
   // Once CMD38 is provisionally accepted, any new MCU traffic invalidates
   // the quiet interval. Do not race a report burst against CPU standby.
   if (command != 0x38 && command != LP_V3_SLEEP_CMD && this->lp_standby_.requested())
