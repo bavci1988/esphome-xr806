@@ -50,6 +50,8 @@ class TuyaLowPowerHost {
                                    bool /*create_mcu_wake_output*/) {
     return -1;
   }
+  /// Platform-specific bit mask of what currently keeps the module awake, for diagnostics; 0 if unknown.
+  virtual uint32_t standby_blockers() const { return 0; }
   /// The output to the MCU's wake line set up by configure_wake_lines(), or nullptr.
   virtual GPIOPin *mcu_wake_output() { return nullptr; }
 

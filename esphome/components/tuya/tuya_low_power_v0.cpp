@@ -529,9 +529,35 @@ void Tuya::poll_low_power_v3_sleep_() {
     }
     return;
   }
-  if (this->lp_standby_.requested() || now - this->lp_v3_idle_since_ms_ < LP_V3_SLEEP_IDLE_MS ||
-      !this->low_power_v3_sleep_supported_() || this->lp_host_->ota_busy() || !this->low_power_ready_for_sleep_() ||
-      this->available() != 0)
+  if (this->lp_standby_.requested() || now - this->lp_v3_idle_since_ms_ < LP_V3_SLEEP_IDLE_MS)
+    return;
+  auto *host = this->lp_host_;
+  const LogString *blocked = nullptr;
+  if (host == nullptr || !host->standby_supported()) {
+    blocked = LOG_STR("no standby controller");
+  } else if (this->lp_wake_input_ < 0 || host->standby_wake_pin() != this->lp_wake_input_) {
+    blocked = LOG_STR("wake input differs from the MCU's");
+  } else if (!host->standby_requires_external_sync()) {
+    blocked = LOG_STR("require_external_sync is off");
+  } else if (!host->standby_may_quiesce()) {
+    blocked = LOG_STR("services busy");
+  } else if (host->ota_busy()) {
+    blocked = LOG_STR("OTA running");
+  } else if (!this->low_power_ready_for_sleep_() || this->available() != 0) {
+    blocked = LOG_STR("MCU link not idle");
+  }
+  if (blocked != this->lp_v3_sleep_blocked_) {
+    this->lp_v3_sleep_blocked_ = blocked;
+    if (blocked != nullptr) {
+      ESP_LOGD(LP_TAG, "No sleep offer: %s (blockers 0x%04X, ready %d, wire %d, queue %u, guard %d)",
+               LOG_STR_ARG(blocked), static_cast<unsigned>(host != nullptr ? host->standby_blockers() : 0),
+               this->lp_v0_.ready(), this->lp_wire_.idle(), static_cast<unsigned>(this->command_queue_.size()),
+               static_cast<int32_t>(now - this->lp_wake_guard_until_) >= 0);
+    } else {
+      ESP_LOGD(LP_TAG, "Sleep offers to the MCU start");
+    }
+  }
+  if (blocked != nullptr)
     return;
   ESP_LOGV(LP_TAG, "Offering sleep to the MCU");
   this->send_low_power_direct_(LP_V3_SLEEP_CMD, {LP_V3_SLEEP_OFFER});
@@ -549,6 +575,11 @@ void Tuya::handle_low_power_v3_sleep_(const uint8_t *data, size_t len) {
         return;
       this->lp_v3_offer_pending_ = false;
       this->lp_v3_idle_since_ms_ = millis();
+      if (data[1] != this->lp_v3_last_answer_) {
+        this->lp_v3_last_answer_ = data[1];
+        if (data[1] != 0x01)
+          ESP_LOGD(LP_TAG, "MCU declines sleep (answer %u)", data[1]);
+      }
       if (data[1] != 0x01)
         return;
       if (!this->low_power_v3_sleep_supported_() || host->ota_busy() ||
@@ -841,8 +872,11 @@ void Tuya::send_low_power_time_(uint8_t command) {
     }
   }
 #endif
-  if (payload[0] == 0)
+  if (payload[0] == 0) {
     ESP_LOGW(LP_TAG, "MCU asked for the time before it was known");
+  } else {
+    ESP_LOGD(LP_TAG, "Sending local time to the MCU (CMD%02X)", command);
+  }
   this->send_low_power_direct_(command, payload);
 }
 

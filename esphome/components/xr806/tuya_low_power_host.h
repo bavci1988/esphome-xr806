@@ -83,6 +83,13 @@ class XR806TuyaLowPowerHost final : public Component,
                mcu_wake_gpio);
     return lines.wake_input;
   }
+  uint32_t standby_blockers() const override {
+#ifdef USE_XR806_LOWPOWER
+    return lowpower_policy().blockers();
+#else
+    return 0;
+#endif
+  }
   GPIOPin *mcu_wake_output() override { return this->mcu_wake_created_ ? &this->mcu_wake_ : nullptr; }
 
   uint32_t uart_rx_error_count() const override { return this->uart_->get_rx_error_count(); }

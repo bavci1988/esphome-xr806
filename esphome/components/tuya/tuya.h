@@ -258,6 +258,9 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool lp_v3_pushes_{false};
   // sm=2: the module offers sleep with 0x91 after a quiet period, as the original T3-U firmware does.
   bool lp_v3_offer_pending_{false};
+  // Diagnostics: logged only when they change, so a waiting module does not fill the log.
+  const LogString *lp_v3_sleep_blocked_{nullptr};
+  uint8_t lp_v3_last_answer_{0xFF};
   uint32_t lp_v3_offer_deadline_ms_{0};
   uint32_t lp_v3_idle_since_ms_{0};
   bool lp_wake_lines_configured_{false};
