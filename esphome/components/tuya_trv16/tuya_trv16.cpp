@@ -14,6 +14,18 @@ void TuyaTRV16::setup() {
   if (this->day_select_ != nullptr && !this->day_select_->has_state())
     this->day_select_->publish_state(static_cast<size_t>(0));  // Monday
 #endif
+  this->tuya_->register_listener(POWER_DP, [this](const tuya::TuyaDatapoint &dp) {
+    if (dp.type != tuya::TuyaDatapointType::BOOLEAN)
+      return;
+    this->power_ = dp.value_bool ? 1 : 0;
+    this->publish_awaiting_confirmation_();
+  });
+  this->tuya_->register_listener(TARGET_TEMPERATURE_DP, [this](const tuya::TuyaDatapoint &dp) {
+    if (dp.type != tuya::TuyaDatapointType::INTEGER)
+      return;
+    this->target_temperature_ = dp.value_int;
+    this->publish_awaiting_confirmation_();
+  });
   this->tuya_->register_listener(WEEK_PROGRAM_DP, [this](const tuya::TuyaDatapoint &dp) { this->on_program_(dp); });
   this->tuya_->register_listener(WORKDAY_PROGRAM_DP, [this](const tuya::TuyaDatapoint &dp) { this->on_program_(dp); });
   this->tuya_->register_listener(WEEK_PROFILE_DP, [this](const tuya::TuyaDatapoint &dp) {
@@ -50,6 +62,15 @@ void TuyaTRV16::on_program_(const tuya::TuyaDatapoint &datapoint) {
     ESP_LOGD(TAG, "Heating program format: DP%u", datapoint.id);
     this->load_day();
   }
+}
+
+void TuyaTRV16::publish_awaiting_confirmation_() {
+#ifdef USE_BINARY_SENSOR
+  // A target of 0 is reported only while the MCU waits for the button after a reset; switched off by the user,
+  // it keeps its target temperature.
+  if (this->awaiting_confirmation_binary_sensor_ != nullptr && this->power_ >= 0 && this->target_temperature_ >= 0)
+    this->awaiting_confirmation_binary_sensor_->publish_state(this->power_ == 0 && this->target_temperature_ == 0);
+#endif
 }
 
 size_t TuyaTRV16::selected_day_() const {

@@ -22,6 +22,9 @@
 #ifdef USE_TEXT_SENSOR
 #include "esphome/components/text_sensor/text_sensor.h"
 #endif
+#ifdef USE_BINARY_SENSOR
+#include "esphome/components/binary_sensor/binary_sensor.h"
+#endif
 
 namespace esphome::tuya_trv16 {
 
@@ -51,6 +54,13 @@ class TuyaTRV16 : public Component {
   void set_day_text_sensor(size_t day, text_sensor::TextSensor *sensor) { this->day_text_sensors_[day] = sensor; }
 #endif
 
+#ifdef USE_BINARY_SENSOR
+  /// On after the batteries were changed: the MCU stays off with target 0 until the button on the device is pressed.
+  void set_awaiting_confirmation_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    this->awaiting_confirmation_binary_sensor_ = sensor;
+  }
+#endif
+
   /// Loads the points of the chosen day into the edit fields.
   void load_day();
   /// Sends the edit fields as the program of the days in `day_mask` (bit 0 Monday .. bit 6 Sunday).
@@ -59,10 +69,16 @@ class TuyaTRV16 : public Component {
  protected:
   void on_program_(const tuya::TuyaDatapoint &datapoint);
   void publish_days_();
+  void publish_awaiting_confirmation_();
   size_t selected_day_() const;
 
   tuya::Tuya *tuya_;
   Schedule schedule_;
+  int8_t power_{-1};                // DP1, -1 until reported
+  int32_t target_temperature_{-1};  // DP3 times ten, -1 until reported
+#ifdef USE_BINARY_SENSOR
+  binary_sensor::BinarySensor *awaiting_confirmation_binary_sensor_{nullptr};
+#endif
 #ifdef USE_SELECT
   select::Select *day_select_{nullptr};
 #endif

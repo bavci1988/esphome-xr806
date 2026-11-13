@@ -75,3 +75,8 @@ text_sensor:
   - platform: tuya_trv16
     sunday:
       name: Program Sunday
+
+binary_sensor:
+  - platform: tuya_trv16
+    awaiting_confirmation:
+      name: Awaiting confirmation

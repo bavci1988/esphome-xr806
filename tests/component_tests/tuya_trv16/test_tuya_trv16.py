@@ -18,6 +18,7 @@ def test_tuya_trv16_generates(
     assert "set_point_time(5, " in main_cpp
     assert "set_point_temperature(0, " in main_cpp
     assert "set_day_text_sensor(6, " in main_cpp
+    assert "set_awaiting_confirmation_binary_sensor(" in main_cpp
     # The chosen day is resolved when pressed; "all days" writes every day.
     assert "tuya_trv16::TuyaTRV16SaveButton(0)" in main_cpp
     assert "tuya_trv16::TuyaTRV16SaveButton(127)" in main_cpp

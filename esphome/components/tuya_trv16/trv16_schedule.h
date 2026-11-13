@@ -18,6 +18,8 @@ enum class ScheduleLayout : uint8_t {
   SCHEDULE_LAYOUT_WORKDAY_WEEKEND,
 };
 
+static constexpr uint8_t POWER_DP = 1;
+static constexpr uint8_t TARGET_TEMPERATURE_DP = 3;
 static constexpr uint8_t WEEK_PROGRAM_DP = 31;
 static constexpr uint8_t WORKDAY_PROGRAM_DP = 107;
 static constexpr uint8_t WEEK_PROFILE_DP = 104;
