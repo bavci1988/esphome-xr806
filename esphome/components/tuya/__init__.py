@@ -1,5 +1,3 @@
-import logging
-
 from esphome import automation, final_validate as fv, pins
 import esphome.codegen as cg
 from esphome.components import time, uart
@@ -9,8 +7,6 @@ from esphome.const import CONF_PROTOCOL, CONF_SENSOR_DATAPOINT, CONF_TIME_ID
 from esphome.core import CORE as CORE
 from esphome.cpp_generator import MockObj
 from esphome.types import ConfigType
-
-_LOGGER = logging.getLogger(__name__)
 
 DEPENDENCIES = ["uart"]
 DOMAIN = "tuya"
@@ -58,17 +54,9 @@ DATAPOINT_TYPES = {
 
 CONF_TUYA_ID = "tuya_id"
 PROTOCOL_LOW_POWER = "low_power"
-# Former name, from when only the version-0 frames of the HC32 firmware were supported.
-PROTOCOL_LOW_POWER_V0 = "low_power_v0"
 
 
 def _validate_time_options(config: ConfigType) -> ConfigType:
-    if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER_V0:
-        _LOGGER.warning(
-            "tuya: protocol 'low_power_v0' is now called 'low_power' (it handles MCUs "
-            "with version 0 and version 3 frames); please update the configuration"
-        )
-        config[CONF_PROTOCOL] = PROTOCOL_LOW_POWER
     if config[CONF_FORCE_TIME_SYNC] and CONF_TIME_ID not in config:
         raise cv.Invalid(
             f"{CONF_FORCE_TIME_SYNC} requires {CONF_TIME_ID}",
@@ -100,7 +88,7 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(Tuya),
             cv.Optional(CONF_PROTOCOL, default="standard"): cv.one_of(
-                "standard", PROTOCOL_LOW_POWER, PROTOCOL_LOW_POWER_V0, lower=True
+                "standard", PROTOCOL_LOW_POWER, lower=True
             ),
             cv.Optional(CONF_AUTO_BAUD, default=False): cv.boolean,
             cv.Optional(CONF_MCU_WAKE_PIN): pins.gpio_output_pin_schema,

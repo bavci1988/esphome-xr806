@@ -36,19 +36,6 @@ def test_low_power_v0_generates(
     assert "xr806::XR806TuyaLowPowerHost(" in main_cpp
 
 
-def test_low_power_old_protocol_name(
-    generate_main: Callable[[str | Path], str],
-    component_config_path: Callable[[str], Path],
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """The former name low_power_v0 still works and asks for the new one."""
-    main_cpp = generate_main(component_config_path("low_power_old_name.yaml"))
-
-    assert "USE_TUYA_LOW_POWER_V0" in defines()
-    assert "xr806::XR806TuyaLowPowerHost(" in main_cpp
-    assert "is now called 'low_power'" in caplog.text
-
-
 def test_low_power_v0_product_id(
     generate_main: Callable[[str | Path], str],
     component_config_path: Callable[[str], Path],
