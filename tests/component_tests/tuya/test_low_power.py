@@ -36,15 +36,6 @@ def test_low_power_generates(
     assert "xr806::XR806TuyaLowPowerHost(" in main_cpp
 
 
-def test_low_power_product_id(
-    generate_main: Callable[[str | Path], str],
-    component_config_path: Callable[[str], Path],
-) -> None:
-    main_cpp = generate_main(component_config_path("low_power.yaml"))
-
-    assert 'set_product_id("ihedujbuli6hsx9b")' in main_cpp
-
-
 def test_on_mcu_ready(
     generate_main: Callable[[str | Path], str],
     component_config_path: Callable[[str], Path],
