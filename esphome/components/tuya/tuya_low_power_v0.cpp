@@ -21,8 +21,8 @@ static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
 // A version-3 MCU (firmware 1.0.9) reports changes made at the device only when asked.
 static constexpr uint32_t LP_V3_STATUS_POLL_MS = 60000;
 static constexpr uint32_t LP_COMMAND_DELAY_MS = 10;
-// After this long without a byte from the MCU it may be asleep and is woken before the next command.
-static constexpr uint32_t LP_MCU_SILENT_MS = 1000;
+// The HC32 sleeps within a second of its last byte; after this long without one it is woken before a command.
+static constexpr uint32_t LP_MCU_SILENT_MS = 200;
 // sm=2: quiet time before the module offers sleep with 0x91, and how long it waits for the answer.
 // The original T3-U firmware uses the same 5 s.
 static constexpr uint32_t LP_V3_SLEEP_IDLE_MS = 5000;
