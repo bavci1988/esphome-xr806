@@ -633,8 +633,9 @@ bool Tuya::handle_low_power_mcu_update_(uint8_t command, const uint8_t *data, si
     this->lp_mcu_update_offset_ += this->lp_mcu_update_chunk_;
     this->lp_mcu_update_retries_ = 0;
     const uint8_t percent = static_cast<uint8_t>(100ull * this->lp_mcu_update_offset_ / this->lp_mcu_update_size_);
-    if (percent / 10 != this->lp_mcu_update_percent_ / 10)
+    if (percent / 10 != this->lp_mcu_update_percent_ / 10) {
       ESP_LOGI(LP_TAG, "MCU update: %u%%", percent);
+    }
     this->lp_mcu_update_percent_ = percent;
     // After the last packet an empty one at offset = size ends the transfer.
     this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_SEND_PACKET;
@@ -792,8 +793,9 @@ void Tuya::handle_low_power_v3_sleep_(const uint8_t *data, size_t len) {
       this->lp_v3_idle_since_ms_ = millis();
       if (data[1] != this->lp_v3_last_answer_) {
         this->lp_v3_last_answer_ = data[1];
-        if (data[1] != 0x01)
+        if (data[1] != 0x01) {
           ESP_LOGD(LP_TAG, "MCU declines sleep (answer %u)", data[1]);
+        }
       }
       if (data[1] != 0x01)
         return;
