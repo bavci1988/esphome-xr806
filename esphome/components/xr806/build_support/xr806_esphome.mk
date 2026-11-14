@@ -9,7 +9,6 @@
 XR806_REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../..)
 
 # Set by run_compile() in esphome/components/xr806/__init__.py.
-XR806_ARDUINOJSON_SRC ?= $(error XR806_ARDUINOJSON_SRC must be provided by ESPHome)
 
 XR806_OBJDIR ?= $(error XR806_OBJDIR must be provided by ESPHome)
 XR806_OUTPUT ?= $(error XR806_OUTPUT must be provided by ESPHome)
@@ -88,7 +87,6 @@ XR806_CXXFLAGS := \
     -include $(XR806_DEFINES) \
     -include $(XR806_SRC)/esphome/components/xr806/socket_compat.h \
     -include $(XR806_SRC)/esphome/components/xr806/api_compat.h \
-    -I$(XR806_ARDUINOJSON_SRC) \
     -I$(ROOT_PATH)/include \
     -I$(ROOT_PATH)/project \
     -I$(ROOT_PATH)/project/common/framework \
@@ -102,15 +100,16 @@ XR806_CXXFLAGS := \
     -I$(ROOT_PATH)/include/kernel/FreeRTOS/FreeRTOSv10.2.1/portable/GCC/ARM_CM33_NTZ/non_secure \
     $(XR806_EXTRA_CXXFLAGS)
 
-# Archives supplied by ESPHome run_compile.
-ifneq ($(strip $(XR806_NOISE_C_ARCHIVE)),)
-XR806_CXXFLAGS += \
-    -I$(XR806_NOISE_C_INCLUDE) \
-    -I$(XR806_NOISE_SRC_INCLUDE) \
-    -I$(XR806_SODIUM_INCLUDE) \
-    -I$(XR806_SODIUM_PORT_INCLUDE)
-$(XR806_OUTPUT): $(XR806_NOISE_C_ARCHIVE) $(XR806_SODIUM_ARCHIVE)
-LIBRARIES += $(XR806_NOISE_C_ARCHIVE) $(XR806_SODIUM_ARCHIVE) -lm -lc -lgcc
+# Libraries added with cg.add_library(), as the Make fragment ESPHome run_compile writes.
+XR806_LIBRARY_CFLAGS := $(CPU) -Os -ffunction-sections -fdata-sections -fno-common \
+    $(filter -D%,$(XR806_EXTRA_CXXFLAGS))
+ifneq ($(strip $(XR806_LIBRARIES_MK)),)
+include $(XR806_LIBRARIES_MK)
+XR806_CXXFLAGS += $(XR806_LIBRARY_INCLUDES)
+$(XR806_OUTPUT): $(XR806_LIBRARY_ARCHIVES) $(XR806_LIBRARY_OBJECTS)
+# Not sorted by dependency, so the archives link as one group
+LIBRARIES += $(XR806_LIBRARY_OBJECTS) \
+    -Wl,--start-group $(XR806_LIBRARY_ARCHIVES) -Wl,--end-group -lm -lc -lgcc
 endif
 
 define XR806_COMPILE_CPP

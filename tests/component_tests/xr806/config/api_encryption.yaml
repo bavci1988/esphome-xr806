@@ -1,0 +1,13 @@
+esphome:
+  name: xr806-api-encryption-ci
+xr806:
+  board: wxu
+wifi:
+  ssid: XR806-CI-NO-REAL-NETWORK
+  password: test-only-not-secret
+logger:
+api:
+  encryption:
+    key: "zX+9PBkpSv0zxlbN8yz1Yx1C8U8qy7ixvHvkn9ifXaA="
+web_server:
+  port: 80

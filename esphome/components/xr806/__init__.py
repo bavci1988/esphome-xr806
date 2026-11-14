@@ -450,8 +450,7 @@ def run_compile(args: object, config: ConfigType) -> bool:
     import subprocess
 
     from . import framework
-    from .build_support.dependencies import resolve_dependencies
-    from .build_support.noise_build import prepare_noise_build
+    from .build_support import libraries as xr806_libraries
 
     # Locate the ESPHome checkout from this platform module.
     repo_root = Path(__file__).resolve().parents[3]
@@ -461,10 +460,10 @@ def run_compile(args: object, config: ConfigType) -> bool:
     obj = xr_build / "obj"
     fw_dir = xr_build / "firmware"
 
-    # SDK and compiler from the pinned release archives, the remaining sources from Git.
+    # SDK and compiler from the pinned release archives, libraries from cg.add_library().
     try:
         paths = framework.check_and_install()
-        arduinojson_src = resolve_dependencies()
+        libraries = xr806_libraries.resolve()
     except (OSError, RuntimeError, subprocess.CalledProcessError) as err:
         raise EsphomeError(f"XR806 dependency resolution failed: {err}") from err
     sdk_cache = paths.sdk
@@ -540,7 +539,6 @@ def run_compile(args: object, config: ConfigType) -> bool:
 
     variables = {
         "XR806_REPO_ROOT": str(repo_root),
-        "XR806_ARDUINOJSON_SRC": str(arduinojson_src),
         "XR806_SRC": str(source),
         "XR806_OBJDIR": str(obj),
         "XR806_ESPHOME_MAIN": str(obj / "sdk_main_esphome.o"),
@@ -560,15 +558,9 @@ def run_compile(args: object, config: ConfigType) -> bool:
     variables["XR806_EXTRA_CXXFLAGS"] = extra_flags
     variables["XR806_FLAGS_STAMP"] = str(flags_stamp)
 
-    # Plain esphome compile owns crypto builds.
-    import re
-
-    defines = (source / "esphome/core/defines.h").read_text()
-    if re.search(r"(?m)^\s*#define\s+USE_NOISE(?:\s|$)", defines):
-        try:
-            variables.update(prepare_noise_build(env["PATH"]))
-        except (OSError, RuntimeError, subprocess.CalledProcessError) as err:
-            raise EsphomeError(f"XR806 Noise ARM build failed: {err}") from err
+    libraries_mk = obj / "libraries.mk"
+    xr806_libraries.write_fragment(libraries, obj, libraries_mk)
+    variables["XR806_LIBRARIES_MK"] = str(libraries_mk)
 
     command = [
         "make",
