@@ -39,6 +39,17 @@ class APINoiseFrameHelper final : public APIFrameHelper {
   APIError read_packet(ReadPacketBuffer *buffer) override;
   APIError write_protobuf_packet(uint16_t type, ProtoWriteBuffer buffer) override;
   APIError write_protobuf_messages(ProtoWriteBuffer buffer, std::span<const MessageInfo> messages) override;
+#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
+  /// Encrypts a message without payload into one complete frame in out, without sending it.
+  /// Uses up one send nonce: the frame must reach the peer before any later message does.
+  APIError seal_empty_message(uint16_t message_type, uint8_t *out, uint16_t capacity, uint16_t &len_out) {
+    if (this->state_ != State::DATA)
+      return APIError::BAD_STATE;
+    if (capacity < HEADER_PADDING + this->frame_footer_size_)
+      return APIError::BAD_ARG;
+    return this->encrypt_noise_message_(out, 0, message_type, len_out);
+  }
+#endif
 
  protected:
   APIError pump_handshake_();

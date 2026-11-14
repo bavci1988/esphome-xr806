@@ -608,6 +608,53 @@ def test_stay_connected_rejects_invalid_configs(
     assert message in capsys.readouterr().out
 
 
+def test_api_keepalive_offload(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    generated = generate_main(component_config_path("api_keepalive_offload.yaml"))
+
+    assert "USE_XR806_API_KEEPALIVE_OFFLOAD" in defines()
+    assert "set_keepalive_offload(8, true, false)" in generated
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        (
+            "    stay_connected: true\n",
+            "    stay_connected: false\n",
+            "xr806.standby.api_keepalive_offload requires xr806.wlan.stay_connected",
+        ),
+        (
+            '  encryption:\n    key: "pz9e6sCcYa7KLRn94ZBPVEnoRBrE6XrJtg3Lbb6pfpM="\n',
+            "",
+            "xr806.standby.api_keepalive_offload requires api with an encryption key",
+        ),
+        (
+            "      period: 8s\n",
+            "      period: 300s\n",
+            "period",
+        ),
+    ],
+)
+def test_api_keepalive_offload_rejects_invalid_configs(
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    old: str,
+    new: str,
+    message: str,
+) -> None:
+    config = component_config_path("api_keepalive_offload.yaml").read_text()
+    assert old in config
+    CORE.config_path = tmp_path / "api_keepalive_offload.yaml"
+    CORE.config_path.write_text(config.replace(old, new))
+
+    assert read_config({}) is None
+    assert message in capsys.readouterr().out
+
+
 def test_former_lowpower_key_is_ignored_with_a_warning(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,

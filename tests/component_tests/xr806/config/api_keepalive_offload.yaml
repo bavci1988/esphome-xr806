@@ -1,0 +1,19 @@
+esphome:
+  name: xr806-api-keepalive-offload
+xr806:
+  board: wxu
+  wlan:
+    stay_connected: true
+  standby:
+    enabled: true
+    wake_after: 60s
+    api_keepalive_offload:
+      period: 8s
+wifi:
+  ssid: TEST-NETWORK-NO-HARDWARE
+  password: TestOnlyPassword123
+  power_save_mode: light
+api:
+  encryption:
+    key: "pz9e6sCcYa7KLRn94ZBPVEnoRBrE6XrJtg3Lbb6pfpM="
+logger:

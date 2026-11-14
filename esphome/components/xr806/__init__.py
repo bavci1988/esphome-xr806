@@ -9,7 +9,10 @@ from esphome.components.const import CONF_ENABLED
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_BOARD,
+    CONF_ENCRYPTION,
     CONF_ID,
+    CONF_KEY,
+    CONF_PERIOD,
     CONF_PROTOCOL,
     CONF_UART_ID,
     KEY_CORE,
@@ -51,6 +54,9 @@ CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
 CONF_WAKE_AFTER = "wake_after"
 CONF_WAKE_PIN = "wake_pin"
 CONF_WAKE_EDGE = "wake_edge"
+CONF_API_KEEPALIVE_OFFLOAD = "api_keepalive_offload"
+CONF_HOST_SLEEP = "host_sleep"
+CONF_WAKE_ON_PEER = "wake_on_peer"
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
 XR806WiFiStandby = xr806_ns.class_("XR806WiFiStandby", cg.Component)
@@ -98,6 +104,21 @@ def validate_wake_pin(value: object) -> int:
     return number
 
 
+# Experiment: the WLAN firmware sends a pre-encrypted PingResponse on the API connection while the CPU sleeps.
+# The connection is closed on every wake, because the firmware does not report what it sent.
+API_KEEPALIVE_OFFLOAD_SCHEMA = cv.Schema(
+    {
+        # Home Assistant pings after 20 s without a message from the device.
+        cv.Optional(CONF_PERIOD, default="8s"): cv.All(
+            cv.positive_time_period_seconds,
+            cv.Range(min=cv.TimePeriod(seconds=1), max=cv.TimePeriod(seconds=255)),
+        ),
+        cv.Optional(CONF_HOST_SLEEP, default=True): cv.boolean,
+        cv.Optional(CONF_WAKE_ON_PEER, default=False): cv.boolean,
+    }
+)
+
+
 # Production standby coordinator: deliberately does NOT implement any
 # Tuya/HC32 commands, UART autobaud, or transport-specific idle voting.
 # A firmware with active transports must register lifecycle participants
@@ -135,6 +156,7 @@ STANDBY_SCHEMA = cv.Schema(
         cv.Optional(CONF_WAKE_PIN): validate_wake_pin,
         cv.Optional(CONF_WAKE_EDGE): cv.one_of("falling", "rising", lower=True),
         cv.Optional(CONF_REQUIRE_EXTERNAL_SYNC, default=False): cv.boolean,
+        cv.Optional(CONF_API_KEEPALIVE_OFFLOAD): API_KEEPALIVE_OFFLOAD_SCHEMA,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -167,6 +189,14 @@ def _update_core_data(config: ConfigType) -> ConfigType:
         if (CONF_WAKE_PIN in standby_cfg) != (CONF_WAKE_EDGE in standby_cfg):
             raise cv.Invalid(
                 "xr806.standby requires explicit wake_pin and wake_edge together"
+            )
+        if (
+            CONF_API_KEEPALIVE_OFFLOAD in standby_cfg
+            and not config[CONF_WLAN][CONF_STAY_CONNECTED]
+        ):
+            raise cv.Invalid(
+                "xr806.standby.api_keepalive_offload requires xr806.wlan.stay_connected",
+                path=[CONF_STANDBY, CONF_API_KEEPALIVE_OFFLOAD],
             )
         if not config[CONF_STANDBY][CONF_ENABLED]:
             raise cv.Invalid("Remove xr806.standby when disabled")
@@ -290,8 +320,22 @@ def _final_validate_stay_connected(config: ConfigType) -> ConfigType:
     return config
 
 
+def _final_validate_api_keepalive_offload(config: ConfigType) -> ConfigType:
+    standby = config.get(CONF_STANDBY)
+    if standby is None or CONF_API_KEEPALIVE_OFFLOAD not in standby:
+        return config
+    api_config = fv.full_config.get().get("api")
+    if api_config is None or CONF_KEY not in api_config.get(CONF_ENCRYPTION, {}):
+        raise cv.Invalid(
+            "xr806.standby.api_keepalive_offload requires api with an encryption key",
+            path=[CONF_STANDBY, CONF_API_KEEPALIVE_OFFLOAD],
+        )
+    return config
+
+
 FINAL_VALIDATE_SCHEMA = cv.All(
     _final_validate_uart,
+    _final_validate_api_keepalive_offload,
     _final_validate_wake_pin_ownership,
     _final_validate_stay_connected,
 )
@@ -366,6 +410,15 @@ async def to_code(config: ConfigType) -> None:
             )
             api_standby = cg.new_Pvariable(cfg[CONF_API_STANDBY_ID])
             await cg.register_component(api_standby, {})
+            if (offload := cfg.get(CONF_API_KEEPALIVE_OFFLOAD)) is not None:
+                cg.add_define("USE_XR806_API_KEEPALIVE_OFFLOAD")
+                cg.add(
+                    api_standby.set_keepalive_offload(
+                        offload[CONF_PERIOD].total_seconds,
+                        offload[CONF_HOST_SLEEP],
+                        offload[CONF_WAKE_ON_PEER],
+                    )
+                )
         if "mqtt" in CORE.config:
             # Disconnects cleanly before standby and votes MQTT_BUSY until the socket is closed.
             cg.add_global(

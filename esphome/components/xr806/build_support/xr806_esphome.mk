@@ -317,6 +317,22 @@ endif
 
 
 
+# API keepalive offload experiment: reads the lwIP connection state, so it is C with the lwIP private headers.
+# The source is empty unless USE_XR806_API_KEEPALIVE_OFFLOAD is defined.
+XR806_API_OFFLOAD_C := $(XR806_SRC)/esphome/components/xr806/api_offload_lwip.c
+ifneq ($(wildcard $(XR806_API_OFFLOAD_C)),)
+XR806_API_OFFLOAD_OBJ := $(XR806_OBJDIR)/xr_api_offload_lwip.o
+XR806_ESPHOME_OBJECTS += $(XR806_API_OFFLOAD_OBJ)
+$(XR806_OUTPUT): $(XR806_API_OFFLOAD_OBJ)
+$(XR806_API_OFFLOAD_OBJ): $(XR806_API_OFFLOAD_C) $(XR806_DEPS)
+>@mkdir -p $(@D)
+>$(CC) $(CC_FLAGS) $(CC_SYMBOLS) $(INCLUDE_PATHS) \
+>    -I$(XR806_SRC) -include $(XR806_DEFINES) -MMD -MP -c $< -o $@
+-include $(XR806_API_OFFLOAD_OBJ:.o=.d)
+endif
+
+
+
 # Flash-backed preferences manager (FDCM journal in two reserved sectors).
 
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr806_preferences.o
