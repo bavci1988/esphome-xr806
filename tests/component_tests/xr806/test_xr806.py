@@ -608,11 +608,11 @@ def test_stay_connected_rejects_invalid_configs(
     assert message in capsys.readouterr().out
 
 
-def test_api_keepalive_offload(
+def test_wifi_fw_standby_patch(
     generate_main: Callable[[str | Path], str],
     component_config_path: Callable[[str], Path],
 ) -> None:
-    generated = generate_main(component_config_path("api_keepalive_offload.yaml"))
+    generated = generate_main(component_config_path("wifi_fw_standby_patch.yaml"))
 
     assert "USE_XR806_API_KEEPALIVE_OFFLOAD" in defines()
     assert "set_keepalive_offload(8, true, false)" in generated
@@ -624,21 +624,26 @@ def test_api_keepalive_offload(
         (
             "    stay_connected: true\n",
             "    stay_connected: false\n",
-            "xr806.standby.api_keepalive_offload requires xr806.wlan.stay_connected",
+            "xr806.experimental_wifi_fw_standby_patch requires xr806.wlan.stay_connected",
         ),
         (
             '  encryption:\n    key: "pz9e6sCcYa7KLRn94ZBPVEnoRBrE6XrJtg3Lbb6pfpM="\n',
             "",
-            "xr806.standby.api_keepalive_offload requires api with an encryption key",
+            "xr806.experimental_wifi_fw_standby_patch requires api with an encryption key",
         ),
         (
-            "      period: 8s\n",
-            "      period: 300s\n",
-            "period",
+            "    keepalive_period: 8s\n",
+            "    keepalive_period: 300s\n",
+            "keepalive_period",
+        ),
+        (
+            "    enabled: true\n    keepalive_period",
+            "    enabled: false\n    keepalive_period",
+            "Remove xr806.experimental_wifi_fw_standby_patch when disabled",
         ),
     ],
 )
-def test_api_keepalive_offload_rejects_invalid_configs(
+def test_wifi_fw_standby_patch_rejects_invalid_configs(
     component_config_path: Callable[[str], Path],
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -646,9 +651,9 @@ def test_api_keepalive_offload_rejects_invalid_configs(
     new: str,
     message: str,
 ) -> None:
-    config = component_config_path("api_keepalive_offload.yaml").read_text()
+    config = component_config_path("wifi_fw_standby_patch.yaml").read_text()
     assert old in config
-    CORE.config_path = tmp_path / "api_keepalive_offload.yaml"
+    CORE.config_path = tmp_path / "wifi_fw_standby_patch.yaml"
     CORE.config_path.write_text(config.replace(old, new))
 
     assert read_config({}) is None

@@ -1,5 +1,5 @@
 esphome:
-  name: xr806-api-keepalive-offload
+  name: xr806-wifi-fw-standby-patch
 xr806:
   board: wxu
   wlan:
@@ -7,8 +7,9 @@ xr806:
   standby:
     enabled: true
     wake_after: 60s
-    api_keepalive_offload:
-      period: 8s
+  experimental_wifi_fw_standby_patch:
+    enabled: true
+    keepalive_period: 8s
 wifi:
   ssid: TEST-NETWORK-NO-HARDWARE
   password: TestOnlyPassword123
