@@ -318,6 +318,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   uint32_t lp_mode_requery_after_ms_{0};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_mcu_wake_pulse_until_{0};
+  uint32_t lp_mcu_woken_ms_{0};  // Last wake pulse before a queued command
   bool lp_mcu_wake_pulse_active_{false};
   bool lp_awake_notification_pending_{false};
   uint32_t lp_last_resync_ms_{0};

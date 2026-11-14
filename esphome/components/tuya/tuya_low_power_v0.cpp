@@ -21,6 +21,8 @@ static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
 // A version-3 MCU (firmware 1.0.9) reports changes made at the device only when asked.
 static constexpr uint32_t LP_V3_STATUS_POLL_MS = 60000;
 static constexpr uint32_t LP_COMMAND_DELAY_MS = 10;
+// After this long without a byte from the MCU it may be asleep and is woken before the next command.
+static constexpr uint32_t LP_MCU_SILENT_MS = 1000;
 // sm=2: quiet time before the module offers sleep with 0x91, and how long it waits for the answer.
 // The original T3-U firmware uses the same 5 s.
 static constexpr uint32_t LP_V3_SLEEP_IDLE_MS = 5000;
@@ -970,12 +972,9 @@ void Tuya::process_low_power_queue_() {
     this->lp_v0_.command_timeout();
     this->lp_network_status_ = 0xFF;
     this->invalidate_low_power_mode_epoch_();
-    if (product_query) {
-      // A first CMD01 can time out before any product epoch exists. The
-      // existing invalidate helper only schedules re-query once a product
-      // was previously received; explicitly start bounded bootstrap retry.
-      this->lp_product_retry_.begin(now);
-    }
+    // Recover with the direct CMD01 probe (it wakes the MCU first): the queued re-query of the
+    // invalidate helper would wait behind the quarantined queue for good.
+    this->lp_product_retry_.begin(now);
     ESP_LOGW(LP_TAG, "MCU command ACK timeout (product=%s); quarantining writes until full resync",
              YESNO(product_query));
     // A late ACK cannot be distinguished from one for a subsequent write.
@@ -993,6 +992,14 @@ void Tuya::process_low_power_queue_() {
     return;
   if (!this->lp_v0_.has_product() && this->command_queue_.front().cmd != TuyaCommandType::PRODUCT_QUERY)
     return;
+  // A low-power MCU sleeps whenever it is idle and listens only after a pulse on its wake line, so
+  // wake it before a command when it has been silent; the command goes out once the pulse is over.
+  if (this->mcu_wake_pin_ != nullptr && now - this->last_rx_char_timestamp_ > LP_MCU_SILENT_MS &&
+      now - this->lp_mcu_woken_ms_ > LP_MCU_SILENT_MS) {
+    this->lp_mcu_woken_ms_ = now;
+    this->begin_mcu_wake_pulse_();
+    return;
+  }
 
   this->send_raw_command_(this->command_queue_.front());
   if (!this->expected_response_.has_value())
