@@ -978,7 +978,7 @@ void Tuya::low_power_standby_resumed(bool expected_source, bool wake_gpio) {
 
 void Tuya::process_low_power_queue_() {
   const uint32_t now = App.get_loop_component_start_time();
-  // The byte and command timestamps of tuya.cpp come from App.get_loop_component_start_time(), so compare them with it.
+  // The byte and command timestamps of tuya.cpp come from millis(), so compare them with it.
   const uint32_t wire_now = millis();
   if (static_cast<uint32_t>(wire_now - this->last_rx_char_timestamp_) > LP_RX_TIMEOUT_MS)
     this->rx_message_.clear();
