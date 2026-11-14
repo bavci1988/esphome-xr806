@@ -614,7 +614,7 @@ def test_wifi_fw_standby_patch(
 ) -> None:
     generated = generate_main(component_config_path("wifi_fw_standby_patch.yaml"))
 
-    assert "USE_XR806_API_KEEPALIVE_OFFLOAD" in defines()
+    assert "-DUSE_XR806_API_KEEPALIVE_OFFLOAD" in CORE.build_flags
     assert "set_keepalive_offload(8, true, false)" in generated
 
 

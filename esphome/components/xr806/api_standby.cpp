@@ -18,6 +18,57 @@ extern "C" {
 #include "xr_config.h"
 #include "net/wlan/wlan.h"
 #include "net/wlan/wlan_ext_req.h"
+#include "lwip/sockets.h"
+#include "kernel/os/os_thread.h"
+}
+
+// The build links with --wrap=lwip_write --wrap=lwip_writev when the experiment is enabled. While a capture is open
+// on the main loop, the frame the API writes is kept here instead of going out, so the API's own Noise code
+// encrypts it and the API component needs no change.
+namespace {
+struct FrameCapture {
+  OS_ThreadHandle_t task{nullptr};
+  int fd{-1};
+  uint16_t len{0};
+  bool overflow{false};
+  uint8_t data[IPC_P2P_KPALIVE_PAYLOAD_LEN_MAX];
+};
+FrameCapture frame_capture;
+
+bool capturing_here() { return frame_capture.task != nullptr && frame_capture.task == OS_ThreadGetCurrentHandle(); }
+
+// Keeps the bytes of the first socket written to during the capture; reports them all as sent.
+ssize_t capture_write(int fd, const void *data, size_t size) {
+  if (frame_capture.fd < 0)
+    frame_capture.fd = fd;
+  if (fd != frame_capture.fd || frame_capture.len + size > sizeof(frame_capture.data)) {
+    frame_capture.overflow = true;
+  } else {
+    memcpy(frame_capture.data + frame_capture.len, data, size);
+    frame_capture.len += size;
+  }
+  return static_cast<ssize_t>(size);
+}
+}  // namespace
+
+extern "C" {
+ssize_t __real_lwip_write(int s, const void *data, size_t size);
+ssize_t __real_lwip_writev(int s, const struct iovec *iov, int iovcnt);
+
+ssize_t __wrap_lwip_write(int s, const void *data, size_t size) {
+  if (!capturing_here())
+    return __real_lwip_write(s, data, size);
+  return capture_write(s, data, size);
+}
+
+ssize_t __wrap_lwip_writev(int s, const struct iovec *iov, int iovcnt) {
+  if (!capturing_here())
+    return __real_lwip_writev(s, iov, iovcnt);
+  ssize_t total = 0;
+  for (int i = 0; i < iovcnt; ++i)
+    total += capture_write(s, iov[i].iov_base, iov[i].iov_len);
+  return total;
+}
 }
 #endif
 
@@ -142,22 +193,35 @@ void XR806APIStandby::arm_offload_() {
   if (count != 1 || !client->is_authenticated())
     return;
 
-  xr806_offload_tcp tcp{};
-  const int read = xr806_offload_read_tcp(client->get_socket_fd(), wlan_netif_get(WLAN_MODE_STA), &tcp);
-  if (read != 0 || !tcp.established) {
-    ESP_LOGW(OFFLOAD_TAG, "Not armed: TCP state %d, established %u", read, static_cast<unsigned>(tcp.established));
-    return;
-  }
-
-  uint8_t frame[IPC_P2P_KPALIVE_PAYLOAD_LEN_MAX];
-  const uint16_t frame_len = client->seal_keepalive_frame(frame, sizeof(frame));
-  if (frame_len == 0) {
-    ESP_LOGW(OFFLOAD_TAG, "Not armed: no encrypted connection");
-    return;
-  }
+  // The API encrypts the PingResponse as usual; the capture keeps the frame and the socket it was meant for.
+  frame_capture.fd = -1;
+  frame_capture.len = 0;
+  frame_capture.overflow = false;
+  frame_capture.task = OS_ThreadGetCurrentHandle();
+  const bool sent = client->send_message(api::PingResponse{});
+  frame_capture.task = nullptr;
+  if (!sent || frame_capture.fd < 0)
+    return;  // Nothing reached the socket, so no nonce was used.
   // From here on the Noise nonce is used up; any failure has to end the connection.
   this->offload_client_ = client;
   this->offload_armed_ms_ = millis();
+  this->offload_fd_ = frame_capture.fd;
+  const uint16_t frame_len = frame_capture.len;
+  const uint8_t *frame = frame_capture.data;
+  // A Noise frame starts with indicator 1; a plaintext connection cannot be offloaded.
+  if (frame_capture.overflow || frame_len == 0 || frame[0] != 0x01) {
+    ESP_LOGW(OFFLOAD_TAG, "Not armed: no encrypted keepalive frame (%u bytes)", frame_len);
+    this->disarm_offload_(nullptr);
+    return;
+  }
+
+  xr806_offload_tcp tcp{};
+  const int read = xr806_offload_read_tcp(this->offload_fd_, wlan_netif_get(WLAN_MODE_STA), &tcp);
+  if (read != 0 || !tcp.established) {
+    ESP_LOGW(OFFLOAD_TAG, "Not armed: TCP state %d, established %u", read, static_cast<unsigned>(tcp.established));
+    this->disarm_offload_(nullptr);
+    return;
+  }
   this->offload_snd_nxt_ = tcp.snd_nxt;
   this->offload_rcv_nxt_ = tcp.rcv_nxt;
 
@@ -234,7 +298,7 @@ void XR806APIStandby::disarm_offload_(const XR806StandbyResume *event) {
     if (conn.get() != client)
       continue;
     xr806_offload_tcp tcp{};
-    const int read = xr806_offload_read_tcp(client->get_socket_fd(), wlan_netif_get(WLAN_MODE_STA), &tcp);
+    const int read = xr806_offload_read_tcp(this->offload_fd_, wlan_netif_get(WLAN_MODE_STA), &tcp);
     ESP_LOGI(OFFLOAD_TAG,
              "Disarmed after %" PRIu32 " ms: firmware state %s, wake wlan=%d timer=%d gpio=%d; lwIP read %d, "
              "snd_nxt +%" PRIu32 ", rcv_nxt +%" PRIu32 "; closing the connection",

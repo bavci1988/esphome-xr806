@@ -205,10 +205,6 @@ class APIFrameHelper {
   // or track that they stopped early and retry without this check.
   // See Socket::ready() for details.
   bool is_socket_ready() const { return socket_ != nullptr && socket_->ready(); }
-#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
-  // The lwIP socket number, so the platform can hand the connection to the WLAN firmware.
-  int get_socket_fd() const { return socket_ != nullptr ? socket_->get_fd() : -1; }
-#endif
 #if defined(USE_API_NOISE) && defined(USE_API_PLAINTEXT)
   // Move the socket out of this helper so a replacement helper can take it
   // over (plaintext to Noise handoff on unprovisioned devices). The drained

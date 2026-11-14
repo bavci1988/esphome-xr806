@@ -376,23 +376,6 @@ void APIConnection::loop() {
 #endif
 }
 
-#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
-uint16_t APIConnection::seal_keepalive_frame(uint8_t *out, uint16_t capacity) {
-#ifdef USE_API_NOISE
-  // Only a Noise helper has a MAC footer.
-  if (!this->is_authenticated() || this->helper_->frame_footer_size() == 0)
-    return 0;
-  uint16_t len = 0;
-  auto *noise = static_cast<APINoiseFrameHelper *>(this->helper_.get());
-  if (noise->seal_empty_message(PingResponse::MESSAGE_TYPE, out, capacity, len) != APIError::OK)
-    return 0;
-  return len;
-#else
-  return 0;
-#endif
-}
-#endif
-
 void APIConnection::check_keepalive_(uint32_t now) {
   // Caller guarantees: now - last_traffic_ > KEEPALIVE_TIMEOUT_MS
   if (this->flags_.sent_ping) {

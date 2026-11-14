@@ -326,9 +326,13 @@ XR806_ESPHOME_OBJECTS += $(XR806_API_OFFLOAD_OBJ)
 $(XR806_OUTPUT): $(XR806_API_OFFLOAD_OBJ)
 $(XR806_API_OFFLOAD_OBJ): $(XR806_API_OFFLOAD_C) $(XR806_DEPS)
 >@mkdir -p $(@D)
->$(CC) $(CC_FLAGS) $(CC_SYMBOLS) $(INCLUDE_PATHS) \
+>$(CC) $(CC_FLAGS) $(CC_SYMBOLS) $(INCLUDE_PATHS) $(filter -D%,$(XR806_EXTRA_CXXFLAGS)) \
 >    -I$(XR806_SRC) -include $(XR806_DEFINES) -MMD -MP -c $< -o $@
 -include $(XR806_API_OFFLOAD_OBJ:.o=.d)
+endif
+# The experiment takes the frame the API writes, so the API component itself stays unchanged.
+ifneq ($(filter -DUSE_XR806_API_KEEPALIVE_OFFLOAD,$(XR806_EXTRA_CXXFLAGS)),)
+$(XR806_OUTPUT): LD_FLAGS += -Wl,--wrap=lwip_write -Wl,--wrap=lwip_writev
 endif
 
 

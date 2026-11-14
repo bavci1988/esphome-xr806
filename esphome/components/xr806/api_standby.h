@@ -54,6 +54,7 @@ class XR806APIStandby final : public Component, public XR806StandbyParticipant {
   uint32_t offload_armed_ms_{0};
   uint32_t offload_snd_nxt_{0};
   uint32_t offload_rcv_nxt_{0};
+  int offload_fd_{-1};
   uint8_t offload_period_s_{0};
   bool offload_host_sleep_{false};
   bool offload_wake_on_peer_{false};

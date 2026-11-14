@@ -389,12 +389,6 @@ class APIConnection final : public APIServerConnectionBase {
            !this->flags_.may_have_remaining_data && this->deferred_batch_.empty();
   }
 #endif
-#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
-  int get_socket_fd() const { return this->helper_->get_socket_fd(); }
-  /// Encrypts a PingResponse into out for the WLAN firmware to send while the CPU sleeps.
-  /// Returns the frame length, or 0 when the connection is not an established Noise connection.
-  uint16_t seal_keepalive_frame(uint8_t *out, uint16_t capacity);
-#endif
   /// Get peer name (IP address) into caller-provided buffer, returns buf for convenience
   const char *get_peername_to(std::span<char, socket::SOCKADDR_STR_LEN> buf) const {
     return this->helper_->get_peername_to(buf);

@@ -422,7 +422,8 @@ async def to_code(config: ConfigType) -> None:
             if (
                 patch := config.get(CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH)
             ) is not None:
-                cg.add_define("USE_XR806_API_KEEPALIVE_OFFLOAD")
+                # A build flag, not a define: the XR806 makefile links lwip_write wrappers only with it.
+                cg.add_build_flag("-DUSE_XR806_API_KEEPALIVE_OFFLOAD")
                 cg.add(
                     api_standby.set_keepalive_offload(
                         patch[CONF_KEEPALIVE_PERIOD].total_seconds,
