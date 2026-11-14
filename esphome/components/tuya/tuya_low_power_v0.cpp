@@ -572,6 +572,12 @@ void Tuya::poll_low_power_mcu_update_() {
       if (now - this->lp_mcu_update_sent_ms_ > 3000)
         this->fail_low_power_mcu_update_("no answer to the start");
       return;
+    case McuUpdate::MCU_UPDATE_ERASE_WAIT:
+      // The erase command has no answer and blocks the MCU for the whole erase, so wait before packets.
+      if (now - this->lp_mcu_update_sent_ms_ < LOW_POWER_UPDATE_ERASE_MS)
+        return;
+      this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_SEND_PACKET;
+      return;
     case McuUpdate::MCU_UPDATE_SEND_PACKET:
       if (this->lp_mcu_wake_pulse_active_)
         return;
@@ -609,7 +615,16 @@ bool Tuya::handle_low_power_mcu_update_(uint8_t command, const uint8_t *data, si
     const uint8_t code = len >= 1 ? data[0] : 0;
     this->lp_mcu_update_packet_ = code == 2 ? 1024 : code == 1 ? 512 : 256;
     ESP_LOGI(LP_TAG, "MCU update: MCU ready, packets of %u bytes", this->lp_mcu_update_packet_);
-    this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_SEND_PACKET;
+    if (this->lp_v3_) {
+      // The version-3 start command already erased the staging area.
+      this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_SEND_PACKET;
+    } else {
+      // Erase the staging area first; flash keeps old bits otherwise and the checksum fails.
+      ESP_LOGI(LP_TAG, "MCU update: erasing the MCU staging area");
+      this->send_low_power_direct_(LOW_POWER_UPDATE_ERASE_CMD, {0x00});
+      this->lp_mcu_update_sent_ms_ = millis();
+      this->lp_mcu_update_ = McuUpdate::MCU_UPDATE_ERASE_WAIT;
+    }
     return true;
   }
   if (command != this->low_power_update_data_cmd_() || len != 0)

@@ -290,12 +290,17 @@ class Tuya final : public Component, public uart::UARTDevice {
   uint32_t lp_update_probe_sent_ms_{0};
   uint8_t low_power_update_start_cmd_() const { return this->lp_v3_ ? 0x0A : 0x0D; }
   uint8_t low_power_update_data_cmd_() const { return this->lp_v3_ ? 0x0B : 0x0E; }
+  // Version-0 MCUs (HC32) clear the staging area only on a separate erase command (0x0C, subcommand 0),
+  // which blocks for the whole erase without an answer. Version-3 MCUs erase on the start command.
+  static constexpr uint8_t LOW_POWER_UPDATE_ERASE_CMD = 0x0C;
+  static constexpr uint32_t LOW_POWER_UPDATE_ERASE_MS = 1000;
   void poll_low_power_update_probe_();
   void wake_low_power_mcu_();
   enum class McuUpdate : uint8_t {
     MCU_UPDATE_IDLE,
     MCU_UPDATE_START_PENDING,
     MCU_UPDATE_START_SENT,
+    MCU_UPDATE_ERASE_WAIT,
     MCU_UPDATE_SEND_PACKET,
     MCU_UPDATE_PACKET_SENT,
     MCU_UPDATE_FINAL_SENT,
