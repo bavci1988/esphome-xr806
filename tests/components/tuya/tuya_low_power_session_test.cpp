@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <cstddef>
 #include <cstdint>
-#include "esphome/components/tuya/tuya_low_power_v0.h"
+#include "esphome/components/tuya/tuya_low_power.h"
 #include "esphome/components/tuya/tuya_low_power_autobaud.h"
 #include "esphome/components/tuya/tuya_low_power_product.h"
 #include <vector>
@@ -9,19 +9,19 @@
 
 namespace esphome::tuya::testing {
 
-TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
-  using esphome::tuya::TuyaLowPowerV0Session;
-  TuyaLowPowerV0Session state;
+TEST(TuyaLowPowerSession, FullStatusAndWrites) {
+  using esphome::tuya::TuyaLowPowerSession;
+  TuyaLowPowerSession state;
   EXPECT_FALSE(state.ready());
   state.product_received();
   state.begin_full_status(100);
 
-  for (size_t i = 0; i + 1 < TuyaLowPowerV0Session::FULL_STATUS_DPS.size(); ++i) {
-    uint8_t id = TuyaLowPowerV0Session::FULL_STATUS_DPS[i];
+  for (size_t i = 0; i + 1 < TuyaLowPowerSession::FULL_STATUS_DPS.size(); ++i) {
+    uint8_t id = TuyaLowPowerSession::FULL_STATUS_DPS[i];
     state.observe_dp(id, 1, &id, 1);
   }
   EXPECT_TRUE(state.busy() && !state.ready());
-  uint8_t last = TuyaLowPowerV0Session::FULL_STATUS_DPS.back();
+  uint8_t last = TuyaLowPowerSession::FULL_STATUS_DPS.back();
   state.observe_dp(last, 1, &last, 1);
   EXPECT_TRUE(state.ready());
 
@@ -46,7 +46,7 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   EXPECT_TRUE(state.expire(13000, 12000));
   EXPECT_FALSE(state.ready());  // Failure locks sleep.
   state.begin_full_status(14000);
-  for (uint8_t id : TuyaLowPowerV0Session::FULL_STATUS_DPS)
+  for (uint8_t id : TuyaLowPowerSession::FULL_STATUS_DPS)
     state.observe_dp(id, 1, &id, 1);
   EXPECT_TRUE(state.ready());  // Full re-synchronization releases the fault.
   state.reset_status();
@@ -113,26 +113,26 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   // The refresh request DP106 never echoes DP106; it returns exactly
   // eight other DPs. An empty CMD09 ACK alone must not release the write.
   state.begin_full_status(15000);
-  for (uint8_t id : TuyaLowPowerV0Session::FULL_STATUS_DPS)
+  for (uint8_t id : TuyaLowPowerSession::FULL_STATUS_DPS)
     state.observe_dp(id, 1, &id, 1);
   EXPECT_TRUE(state.ready());
   const uint8_t one = 1;
   state.begin_write(106, 1, &one, 1, 16000);
   state.write_ack();
   EXPECT_TRUE(state.refresh_pending() && !state.ready());
-  for (size_t i = 0; i + 1 < TuyaLowPowerV0Session::REFRESH_DPS.size(); ++i) {
-    uint8_t dp = TuyaLowPowerV0Session::REFRESH_DPS[i];
+  for (size_t i = 0; i + 1 < TuyaLowPowerSession::REFRESH_DPS.size(); ++i) {
+    uint8_t dp = TuyaLowPowerSession::REFRESH_DPS[i];
     state.observe_dp(dp, 1, &dp, 1);
   }
   EXPECT_TRUE(state.write_pending());
-  uint8_t end_dp = TuyaLowPowerV0Session::REFRESH_DPS.back();
+  uint8_t end_dp = TuyaLowPowerSession::REFRESH_DPS.back();
   state.observe_dp(end_dp, 1, &end_dp, 1);
   EXPECT_TRUE(state.ready());
-  EXPECT_TRUE(state.last_write_result() == TuyaLowPowerV0Session::WriteResult::CONFIRMED);
+  EXPECT_TRUE(state.last_write_result() == TuyaLowPowerSession::WriteResult::CONFIRMED);
 
   // Report-before-ACK also works for the eight-DP refresh.
   state.begin_write(106, 1, &one, 1, 17000);
-  for (uint8_t dp : TuyaLowPowerV0Session::REFRESH_DPS)
+  for (uint8_t dp : TuyaLowPowerSession::REFRESH_DPS)
     state.observe_dp(dp, 1, &dp, 1);
   EXPECT_TRUE(state.write_pending());
   state.write_ack();
@@ -143,10 +143,10 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   state.write_ack();
   state.observe_dp(1, 1, &one, 1);
   EXPECT_TRUE(state.expire(30000));
-  EXPECT_TRUE(state.last_write_result() == TuyaLowPowerV0Session::WriteResult::TIMED_OUT);
+  EXPECT_TRUE(state.last_write_result() == TuyaLowPowerSession::WriteResult::TIMED_OUT);
   EXPECT_FALSE(state.ready());
   state.begin_full_status(31000);
-  for (uint8_t dp : TuyaLowPowerV0Session::FULL_STATUS_DPS)
+  for (uint8_t dp : TuyaLowPowerSession::FULL_STATUS_DPS)
     state.observe_dp(dp, 1, &dp, 1);
   EXPECT_TRUE(state.ready());
 
@@ -207,8 +207,8 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   EXPECT_FALSE(info.parsed);
 }
 
-TEST(TuyaLowPowerV0Session, Version3McuSynchronizesOnFirstReport) {
-  esphome::tuya::TuyaLowPowerV0Session s;
+TEST(TuyaLowPowerSession, Version3McuSynchronizesOnFirstReport) {
+  esphome::tuya::TuyaLowPowerSession s;
   s.product_received();
   EXPECT_FALSE(s.ready());
   s.mark_synchronized();

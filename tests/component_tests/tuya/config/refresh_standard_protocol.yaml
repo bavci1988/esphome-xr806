@@ -1,4 +1,4 @@
-# tuya.refresh is a low_power_v0 action; a standard Tuya hub must reject it.
+# tuya.refresh is a low_power action; a standard Tuya hub must reject it.
 esphome:
   name: tuya-refresh-standard
 esp8266:

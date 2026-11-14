@@ -6,7 +6,7 @@
 
 namespace esphome::tuya {
 
-/// What the low_power_v0 protocol needs from the platform that powers the Wi-Fi module.
+/// What the low_power protocol needs from the platform that powers the Wi-Fi module.
 ///
 /// A platform with power management implements this and passes it to Tuya::set_low_power_host().
 /// Without a host the protocol still runs, but always answers the MCU's sleep request (CMD38) with "busy".

@@ -122,8 +122,8 @@ async def to_code(config):
     var = await uart.new_uart_component(config)
     if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER:
         # Standard Tuya builds must not carry the low-power driver code or state.
-        cg.add_define("USE_TUYA_LOW_POWER_V0")
-        cg.add(var.set_protocol(TuyaProtocol.LOW_POWER_V0))
+        cg.add_define("USE_TUYA_LOW_POWER")
+        cg.add(var.set_protocol(TuyaProtocol.TUYA_PROTOCOL_LOW_POWER))
         cg.add(var.set_auto_baud(config[CONF_AUTO_BAUD]))
         await cg.add_pin(var.set_mcu_wake_pin, config.get(CONF_MCU_WAKE_PIN))
         cg.add_optional(var.set_product_id, config.get(CONF_PRODUCT_ID))

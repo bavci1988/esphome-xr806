@@ -1,6 +1,6 @@
 #pragma once
 
-// Protocol-neutral MCU wire-transaction gate for Tuya low_power_v0.
+// Protocol-neutral MCU wire-transaction gate for Tuya low_power.
 // No sequence numbers exist in the original protocol: serializing writes
 // prevents local overlap but cannot prove an arbitrarily late same-CMD ACK
 // belongs to the latest transaction. An ambiguous timeout blocks new writes.
