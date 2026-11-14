@@ -37,8 +37,8 @@ def _output(*args: str, cwd: Path | None = None) -> str:
     ).stdout.strip()
 
 
-def _tool(name: str) -> str:
-    path = shutil.which(name)
+def _tool(name: str, search_path: str | None = None) -> str:
+    path = shutil.which(name, path=search_path)
     if path is None:
         raise RuntimeError(f"Required XR806 Noise build tool not found: {name}")
     return str(Path(path).resolve())
@@ -57,15 +57,18 @@ def _patched_sodium(source: Path, target: Path) -> None:
     marker.write_text("patched\n")
 
 
-def prepare_noise_build() -> dict[str, str]:
-    """Resolve source pins, cross-build archives and provide Make variables."""
+def prepare_noise_build(search_path: str | None = None) -> dict[str, str]:
+    """Resolve source pins, cross-build archives and provide Make variables.
+
+    ``search_path`` is the PATH to find the compiler and cmake in.
+    """
     noise = ensure_dependency("noise_c")
     sodium = ensure_dependency("libsodium")
     cc, ar, ranlib = (
-        _tool(x)
+        _tool(x, search_path)
         for x in ("arm-none-eabi-gcc", "arm-none-eabi-ar", "arm-none-eabi-ranlib")
     )
-    _tool("cmake")
+    cmake = _tool("cmake", search_path)
     digest = hashlib.sha256(
         json.dumps(
             {
@@ -119,7 +122,7 @@ def prepare_noise_build() -> dict[str, str]:
 
         subprocess.run(
             [
-                "cmake",
+                cmake,
                 "-S",
                 str(project),
                 "-B",
@@ -132,7 +135,7 @@ def prepare_noise_build() -> dict[str, str]:
             check=True,
         )
         subprocess.run(
-            ["cmake", "--build", str(build), "--parallel", "4"],
+            [cmake, "--build", str(build), "--parallel", "4"],
             check=True,
         )
 

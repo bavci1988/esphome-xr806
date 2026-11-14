@@ -1,4 +1,6 @@
-"""Pinned external dependencies for the native ESPHome XR806 platform."""
+"""Pinned source dependencies of the XR806 build, and a local SDK checkout for development.
+
+The SDK and the compiler come from framework.py as release archives."""
 
 from __future__ import annotations
 
@@ -13,18 +15,6 @@ from esphome.framework_helpers import install_lock
 CACHE_ROOT = Path.home() / ".cache/esphome-xr806/dependencies"
 
 DEPENDENCIES = {
-    "xr806_sdk": {
-        "url": "https://github.com/bavci1988/xr806-sdk.git",
-        "commit": "b7bb8710981dda6946e3f42fe18823e19ed1fc9f",
-        "required": (
-            "gcc.mk",
-            ".config",
-            "project/common/board/xr806_wxu/board_config.c",
-            "project/demo/trv16_port/gcc/Makefile",
-            "lib/xradio_v3/libwlan.a",
-            "bin/xradio_v3/wlan_fw.bin",
-        ),
-    },
     "arduinojson": {
         "url": "https://github.com/bblanchon/ArduinoJson.git",
         "commit": "77771d3c07668e01d8f52acb03910c1110bb373f",
@@ -95,33 +85,56 @@ def _verify(path: Path, name: str, expected_commit: str | None = None) -> None:
             raise RuntimeError(f"Missing {name} dependency file: {relative}")
 
 
+# Files every SDK checkout needs, like the release archive's layout check
+_SDK_REQUIRED = (
+    "gcc.mk",
+    ".config",
+    "project/common/board/xr806_wxu/board_config.c",
+    "project/demo/trv16_port/gcc/Makefile",
+    "lib/xradio_v3/libwlan.a",
+    "bin/xradio_v3/wlan_fw.bin",
+)
+
+
+def sdk_source_override() -> tuple[Path, str] | None:
+    """A local SDK checkout from XR806_SDK_SOURCE_DIR, with its Git revision.
+
+    For SDK development and CI. The checkout must be clean;
+    XR806_SDK_EXPECTED_COMMIT, when set, must equal its revision.
+    """
+    override = os.environ.get("XR806_SDK_SOURCE_DIR", "").strip()
+    if not override:
+        return None
+    source = Path(override).expanduser().resolve(strict=True)
+    if not (source / ".git").exists():
+        raise RuntimeError(f"XR806_SDK_SOURCE_DIR is not a Git checkout: {source}")
+    revision = _git("rev-parse", "HEAD", cwd=source)
+    expected = os.environ.get("XR806_SDK_EXPECTED_COMMIT", "").strip()
+    if expected and (
+        len(expected) != 40 or any(c not in "0123456789abcdef" for c in expected)
+    ):
+        raise RuntimeError(
+            "Invalid XR806_SDK_EXPECTED_COMMIT: expected full lowercase Git SHA"
+        )
+    if expected and revision != expected:
+        raise RuntimeError(f"Unexpected xr806_sdk revision: {revision}")
+    if _git("status", "--porcelain", "--untracked-files=all", cwd=source):
+        raise RuntimeError(
+            f"Cached xr806_sdk sources have local modifications: {source}"
+        )
+    for relative in _SDK_REQUIRED:
+        if not (source / relative).is_file():
+            raise RuntimeError(f"Missing xr806_sdk dependency file: {relative}")
+    print(f"[XR806] Verified external SDK checkout: {source}", flush=True)
+    return source, revision
+
+
 def ensure_dependency(name: str) -> Path:
     """Ensure a pinned dependency is present in the shared cache."""
     if name not in DEPENDENCIES:
         raise ValueError(f"Unknown XR806 dependency: {name}")
 
     info = DEPENDENCIES[name]
-
-    # HA Device Builder: allow a read-only, pre-provisioned SDK checkout.
-    # Keep revision, required-file and clean-worktree verification enabled.
-    if name == "xr806_sdk":
-        override = os.environ.get("XR806_SDK_SOURCE_DIR", "").strip()
-        if override:
-            source = Path(override).expanduser().resolve(strict=True)
-            # Only explicitly pre-provisioned SDKs may use a non-default SHA.
-            # CI supplies its checked-out GitHub event SHA, preserving exact
-            # revision and clean-worktree verification for each build.
-            expected_commit = os.environ.get("XR806_SDK_EXPECTED_COMMIT", "").strip()
-            if expected_commit and (
-                len(expected_commit) != 40
-                or any(c not in "0123456789abcdef" for c in expected_commit)
-            ):
-                raise RuntimeError(
-                    "Invalid XR806_SDK_EXPECTED_COMMIT: expected full lowercase Git SHA"
-                )
-            _verify(source, name, expected_commit or None)
-            print(f"[XR806] Verified external SDK checkout: {source}", flush=True)
-            return source
 
     parent = CACHE_ROOT / name
     destination = parent / info["commit"]
@@ -198,9 +211,6 @@ def ensure_dependency(name: str) -> Path:
         return destination
 
 
-def resolve_dependencies() -> tuple[Path, Path]:
-    """Return the verified SDK and ArduinoJson source directories."""
-    sdk = ensure_dependency("xr806_sdk")
-    arduinojson = ensure_dependency("arduinojson")
-
-    return sdk, arduinojson / "src"
+def resolve_dependencies() -> Path:
+    """Return the verified ArduinoJson source directory."""
+    return ensure_dependency("arduinojson") / "src"

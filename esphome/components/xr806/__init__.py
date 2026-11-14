@@ -11,6 +11,7 @@ from esphome.const import (
     CONF_BOARD,
     CONF_ID,
     CONF_PROTOCOL,
+    CONF_TOOLCHAIN,
     CONF_UART_ID,
     KEY_CORE,
     KEY_FRAMEWORK_VERSION,
@@ -18,6 +19,7 @@ from esphome.const import (
     KEY_TARGET_PLATFORM,
     Framework,
     ThreadModel,
+    Toolchain,
 )
 from esphome.core import CORE, ID, EsphomeError
 from esphome.types import ConfigType
@@ -208,6 +210,9 @@ def _renamed_ms_keys(*keys: str) -> list:
     return validators
 
 
+# The SDK's own Makefiles; PlatformIO has no XR806 platform.
+_TOOLCHAINS = (Toolchain.XRADIO,)
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
@@ -223,8 +228,10 @@ CONFIG_SCHEMA = cv.All(
                 STANDBY_SCHEMA,
             ),
             cv.Optional(CONF_OTA_DIAGNOSTIC_READONLY, default=False): cv.boolean,
+            cv.Optional(CONF_TOOLCHAIN): cv.toolchain_enum(_TOOLCHAINS),
         }
     ),
+    cv.resolve_toolchain("XR806", _TOOLCHAINS, Toolchain.XRADIO),
     _update_core_data,
 )
 
@@ -442,7 +449,8 @@ def run_compile(args: object, config: ConfigType) -> bool:
     import shutil
     import subprocess
 
-    from .build_support.dependencies import checkout_revision, resolve_dependencies
+    from . import framework
+    from .build_support.dependencies import resolve_dependencies
     from .build_support.noise_build import prepare_noise_build
 
     # Locate the ESPHome checkout from this platform module.
@@ -453,11 +461,18 @@ def run_compile(args: object, config: ConfigType) -> bool:
     obj = xr_build / "obj"
     fw_dir = xr_build / "firmware"
 
-    # Resolve pinned Git dependencies from the local cache.
+    # SDK and compiler from the pinned release archives, the remaining sources from Git.
     try:
-        sdk_cache, arduinojson_src = resolve_dependencies()
+        paths = framework.check_and_install()
+        arduinojson_src = resolve_dependencies()
     except (OSError, RuntimeError, subprocess.CalledProcessError) as err:
         raise EsphomeError(f"XR806 dependency resolution failed: {err}") from err
+    sdk_cache = paths.sdk
+    env = framework.get_build_env(paths.toolchain_bin)
+    if shutil.which("make", path=env["PATH"]) is None:
+        raise EsphomeError(
+            "The XR806 build needs GNU make; install it (on Debian/Ubuntu: apt install make)"
+        )
 
     adapter = repo_root / "esphome/components/xr806/build_support/xr806_esphome.mk"
 
@@ -467,8 +482,8 @@ def run_compile(args: object, config: ConfigType) -> bool:
     # The vendor Makefiles generate files inside their SDK tree.
     # Never compile directly inside the shared dependency cache.
     sdk_root = xr_build / "sdk-work"
-    # The checkout actually used: the pinned one, or XR806_SDK_SOURCE_DIR at its own revision.
-    sdk_revision = checkout_revision(sdk_cache)
+    # The release tag, or the Git revision of an XR806_SDK_SOURCE_DIR checkout.
+    sdk_revision = paths.sdk_revision
     revision_file = sdk_root / ".esphome-xr806-sdk-revision"
 
     if sdk_root.exists():
@@ -551,7 +566,7 @@ def run_compile(args: object, config: ConfigType) -> bool:
     defines = (source / "esphome/core/defines.h").read_text()
     if re.search(r"(?m)^\s*#define\s+USE_NOISE(?:\s|$)", defines):
         try:
-            variables.update(prepare_noise_build())
+            variables.update(prepare_noise_build(env["PATH"]))
         except (OSError, RuntimeError, subprocess.CalledProcessError) as err:
             raise EsphomeError(f"XR806 Noise ARM build failed: {err}") from err
 
@@ -571,6 +586,7 @@ def run_compile(args: object, config: ConfigType) -> bool:
         result = subprocess.run(
             command,
             cwd=sdk,
+            env=env,
             check=False,
         )
     except OSError as err:

@@ -26,6 +26,8 @@ class Toolchain(StrEnum):
     ARDUINO = "arduino"
     # host: the system C/C++ compiler driven by ninja (no PlatformIO)
     HOST = "host"
+    # XR806: the XRadio SDK's own Makefiles with a downloaded arm-none-eabi gcc
+    XRADIO = "xradio"
 
 
 class ErrorFormat(StrEnum):
@@ -39,7 +41,13 @@ class ErrorFormat(StrEnum):
 
 # Toolchains that drive their build natively and never read platformio.ini.
 NATIVE_TOOLCHAINS = frozenset(
-    {Toolchain.ESP_IDF, Toolchain.ARDUINO, Toolchain.HOST, Toolchain.SDK_NRF}
+    {
+        Toolchain.ESP_IDF,
+        Toolchain.ARDUINO,
+        Toolchain.HOST,
+        Toolchain.SDK_NRF,
+        Toolchain.XRADIO,
+    }
 )
 
 
