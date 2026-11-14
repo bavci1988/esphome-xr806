@@ -426,9 +426,7 @@ async def to_code(config: ConfigType) -> None:
             )
             await cg.register_component(standby_wlan, {})
 
-    tuya_config = CORE.config.get("tuya")
-    if tuya_config and tuya_config.get(CONF_PROTOCOL) == "low_power":
-        await _tuya_low_power_host(config[CONF_TUYA_HOST_ID], tuya_config)
+    # Test branch: the Tuya base protocol has no TuyaLowPowerHost, so the module stays awake.
 
 
 def compiler_build_flags(build_flags: set[str]) -> list[str]:
