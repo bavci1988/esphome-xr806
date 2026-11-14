@@ -114,8 +114,7 @@ void ESPHomeOTAComponent::setup() {
     return;
   }
 
-  // Where a wake path exists, loop() self-disables on its first idle tick; no explicit
-  // disable_loop() needed here.
+  // loop() self-disables on its first idle tick; no explicit disable_loop() needed here.
   global_esphome_ota_component = this;
 #ifdef USE_LWIP_FAST_SELECT
   // Filter fast-select wakes to this listener only. If the sock lookup returns nullptr,
@@ -187,11 +186,10 @@ void ESPHomeOTAComponent::dump_config() {
 }
 
 void ESPHomeOTAComponent::loop() {
-  // Self-disable idle loop only where a wake path re-enables on listener readiness
-  // (fast-select, raw-TCP accept_fn_). Without one (host BSD select, plain lwIP
-  // sockets as on XR806) a disabled loop never sees a client, so stay enabled.
+  // Self-disable idle loop where a wake path re-enables on listener readiness
+  // (fast-select, raw-TCP accept_fn_). Host BSD select doesn't, so stay enabled.
   if (this->client_ == nullptr && !this->server_->ready()) {
-#if defined(USE_LWIP_FAST_SELECT) || defined(USE_SOCKET_IMPL_LWIP_TCP)
+#ifndef USE_HOST
     this->disable_loop();
 #endif
     return;
