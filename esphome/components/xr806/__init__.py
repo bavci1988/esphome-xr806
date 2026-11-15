@@ -629,7 +629,12 @@ def run_compile(args: object, config: ConfigType) -> bool:
 
 
 def ota_image(binary: Path) -> Path:
-    """Network updates send the compressed APP image, not the full firmware.bin."""
+    """Network updates send the compressed APP image, not the full firmware.bin.
+
+    Only the build output is replaced; a file given with ``--file`` is sent as it is.
+    """
+    if Path(binary).name != CORE.firmware_bin.name:
+        return Path(binary)
     ota = Path(binary).with_name(OTA_IMAGE_NAME)
     if not ota.is_file():
         raise EsphomeError(f"No XR806 OTA image was built: {ota}")

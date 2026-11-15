@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import lzma
+from pathlib import Path
 import random
 import struct
 
@@ -153,3 +154,23 @@ def test_ota_image_rejects_backward_chain() -> None:
     struct.pack_into(HEADER.format, image, APP_START, *fields)
     with pytest.raises(ValueError, match="next_addr"):
         make_ota_image(bytes(image))
+
+
+def test_upload_hook_maps_only_the_build_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from esphome.components import xr806
+    from esphome.core import CORE, EsphomeError
+
+    build_output = tmp_path / "firmware.bin"
+    monkeypatch.setattr(type(CORE), "firmware_bin", property(lambda _: build_output))
+    (tmp_path / "firmware.ota.bin").write_bytes(b"ota")
+    assert xr806.ota_image(build_output) == tmp_path / "firmware.ota.bin"
+
+    # A file given with --file is sent as it is, whatever its name
+    given = tmp_path / "trv16-test.ota.bin"
+    assert xr806.ota_image(given) == given
+
+    (tmp_path / "firmware.ota.bin").unlink()
+    with pytest.raises(EsphomeError, match="No XR806 OTA image"):
+        xr806.ota_image(build_output)
