@@ -94,7 +94,24 @@ def test_library_fragment(tmp_path: Path) -> None:
     assert "$(XR806_CXX) $(XR806_CXXFLAGS) -DCONFIGURED=1" in text
     # Only the library with sources gets an archive
     assert text.count("XR806_LIBRARY_ARCHIVES += ") == 1
-    assert "1_esphome_libsodium/lib1.a" in text
+    assert "1_esphome_libsodium/libsodium.a" in text
+
+
+@pytest.mark.parametrize(
+    ("library", "archive"),
+    [
+        # The SDK linker script places these two archives in flash
+        ("esphome/noise-c", "libnoise_c.a"),
+        ("esphome/libsodium", "libsodium.a"),
+        ("esphome__noise-c", "libnoise_c.a"),
+        ("esphome__libsodium", "libsodium.a"),
+        ("bblanchon/ArduinoJson", "libArduinoJson.a"),
+    ],
+)
+def test_archive_name(library: str, archive: str) -> None:
+    from esphome.components.xr806.build_support.libraries import archive_name
+
+    assert archive_name(library) == archive
 
 
 def test_api_encryption_adds_noise_libraries(

@@ -10,6 +10,7 @@ global include path.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import shlex
 
 from esphome.arduino.library import ArduinoLibrary, resolve_libraries
@@ -36,6 +37,17 @@ def resolve() -> list[ArduinoLibrary]:
         framework=None,
         manifest_optional=True,
     )
+
+
+def archive_name(library_name: str) -> str:
+    """The archive file name for a library: lib<name>.a, from the part after the owner.
+
+    The ESPHome linker script of the SDK places archives by name in flash (XIP), for example
+    libnoise_c.a and libsodium.a; code in any other archive runs from RAM and takes heap space.
+    """
+    # Owner and name are joined by "/" or, after resolution, by "__"
+    name = re.split(r"/|__", library_name)[-1].removeprefix("lib")
+    return "lib" + "".join(c if c.isalnum() else "_" for c in name) + ".a"
 
 
 def _make_word(value: str | Path) -> str:
@@ -82,7 +94,7 @@ def write_fragment(libraries: list[ArduinoLibrary], obj_dir: Path, path: Path) -
             # Header-only, like ArduinoJson
             continue
         if library.lib_archive:
-            archive = lib_dir / f"lib{index}.a"
+            archive = lib_dir / archive_name(library.name)
             object_words = " ".join(_make_word(o) for o in objects)
             lines.append(f"{_make_word(archive)}: {object_words}")
             lines.append(">@rm -f $@")
