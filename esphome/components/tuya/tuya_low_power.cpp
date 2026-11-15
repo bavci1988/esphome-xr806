@@ -4,7 +4,6 @@
 
 #include <cctype>
 #include <cstring>
-#include <utility>
 
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
@@ -1176,7 +1175,7 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       std::memcpy(this->lp_product_text_.data(), data, len);
       this->lp_product_text_[len] = '\0';
       const bool had_product = this->lp_session_.has_product();
-      this->lp_product_ = std::move(incoming);
+      this->lp_product_ = incoming;
       this->lp_v3_mode_acked_ = false;
       this->lp_v3_pushes_ = false;
       if (this->lp_v3_ != (version == 3)) {
