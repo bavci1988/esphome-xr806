@@ -35,7 +35,7 @@ def test_ota_diagnostic_with_wifi_and_tuya(
     assert {
         "USE_XR806_OTA_RUNTIME_PROBE",
         "USE_WIFI",
-        "USE_TUYA_LOW_POWER_V0",
+        "USE_TUYA_LOW_POWER",
     } <= defines()
     assert "USE_OTA" not in defines()
 

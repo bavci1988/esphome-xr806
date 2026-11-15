@@ -2,7 +2,7 @@
 
 #include "esphome/core/defines.h"
 
-#if defined(USE_XR806) && defined(USE_TUYA_LOW_POWER_V0)
+#if defined(USE_XR806) && defined(USE_TUYA_LOW_POWER)
 
 #include "esphome/components/tuya/tuya.h"
 #include "esphome/components/uart/uart_component_xr806.h"
@@ -26,7 +26,7 @@ namespace esphome::xr806 {
 
 ESPHOME_LOG_TAG(TUYA_HOST_TAG, "xr806.tuya_host");
 
-/// Connects a Tuya hub running protocol low_power_v0 to XR806 power management:
+/// Connects a Tuya hub running protocol low_power to XR806 power management:
 /// the MCU decides when the module may sleep, and this bridge carries that to the standby controller.
 class XR806TuyaLowPowerHost final : public Component,
                                     public tuya::TuyaLowPowerHost
@@ -211,4 +211,4 @@ class XR806TuyaLowPowerHost final : public Component,
 
 }  // namespace esphome::xr806
 
-#endif  // USE_XR806 && USE_TUYA_LOW_POWER_V0
+#endif  // USE_XR806 && USE_TUYA_LOW_POWER

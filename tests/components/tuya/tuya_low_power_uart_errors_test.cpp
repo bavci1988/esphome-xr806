@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include "esphome/components/tuya/tuya_low_power_uart_errors.h"
-#include "esphome/components/tuya/tuya_low_power_v0.h"
+#include "esphome/components/tuya/tuya_low_power.h"
 #include "esphome/components/tuya/tuya_low_power_wire_transactions.h"
 
 namespace esphome::tuya::testing {
@@ -21,12 +21,12 @@ TEST(TuyaLowPowerUartErrors, IgnoresProbeErrorsButInvalidatesAfterLock) {
 
 TEST(TuyaLowPowerUartErrors, ErrorForcesFullStatusAndWireQuarantine) {
   TuyaLowPowerUartErrors guard;
-  TuyaLowPowerV0Session session;
+  TuyaLowPowerSession session;
   TuyaLowPowerWireTransactions wire;
   guard.reset(0);
   session.product_received();
   session.begin_full_status(100);
-  for (uint8_t id : TuyaLowPowerV0Session::FULL_STATUS_DPS)
+  for (uint8_t id : TuyaLowPowerSession::FULL_STATUS_DPS)
     session.observe_dp(id, 1, &id, 1);
   EXPECT_TRUE(session.ready());
   EXPECT_TRUE(wire.begin(0x09, 200));
@@ -39,12 +39,12 @@ TEST(TuyaLowPowerUartErrors, ErrorForcesFullStatusAndWireQuarantine) {
   wire.recovered();                     // Only after verified CMD01 identity.
   EXPECT_FALSE(session.ready());
   session.begin_full_status(300);  // CMD02/04 needs all 17 DP reports.
-  for (size_t i = 0; i + 1 < TuyaLowPowerV0Session::FULL_STATUS_DPS.size(); ++i) {
-    uint8_t id = TuyaLowPowerV0Session::FULL_STATUS_DPS[i];
+  for (size_t i = 0; i + 1 < TuyaLowPowerSession::FULL_STATUS_DPS.size(); ++i) {
+    uint8_t id = TuyaLowPowerSession::FULL_STATUS_DPS[i];
     session.observe_dp(id, 1, &id, 1);
   }
   EXPECT_FALSE(session.ready());
-  uint8_t last = TuyaLowPowerV0Session::FULL_STATUS_DPS.back();
+  uint8_t last = TuyaLowPowerSession::FULL_STATUS_DPS.back();
   session.observe_dp(last, 1, &last, 1);
   EXPECT_TRUE(session.ready());
 }

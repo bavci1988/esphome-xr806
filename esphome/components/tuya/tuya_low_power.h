@@ -9,7 +9,7 @@
 
 namespace esphome::tuya {
 
-class TuyaLowPowerV0Session {
+class TuyaLowPowerSession {
  public:
   static constexpr std::array<uint8_t, 17> FULL_STATUS_DPS = {
       1, 3, 4, 2, 17, 16, 10, 11, 7, 19, 20, 108, 101, 102, 104, 105, 107,

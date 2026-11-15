@@ -9,11 +9,11 @@
 #include "esphome/core/helpers.h"
 #include "esphome/components/uart/uart.h"
 
-#ifdef USE_TUYA_LOW_POWER_V0
+#ifdef USE_TUYA_LOW_POWER
 #include <array>
 
 #include "esphome/core/automation.h"
-#include "tuya_low_power_v0.h"
+#include "tuya_low_power.h"
 #include "tuya_low_power_product.h"
 #include "tuya_low_power_autobaud.h"
 #include "tuya_low_power_sleep_window.h"
@@ -22,7 +22,7 @@
 #include "tuya_low_power_wire_transactions.h"
 #include "tuya_low_power_uart_errors.h"
 #include "tuya_low_power_host.h"
-#endif  // USE_TUYA_LOW_POWER_V0
+#endif  // USE_TUYA_LOW_POWER
 
 #ifdef USE_TIME
 #include "esphome/components/time/real_time_clock.h"
@@ -63,10 +63,10 @@ struct TuyaDatapointListener {
   Callback<void(const TuyaDatapoint &)> on_datapoint;
 };
 
-#ifdef USE_TUYA_LOW_POWER_V0
+#ifdef USE_TUYA_LOW_POWER
 enum class TuyaProtocol : uint8_t {
-  STANDARD = 0,
-  LOW_POWER_V0 = 1,
+  TUYA_PROTOCOL_STANDARD = 0,
+  TUYA_PROTOCOL_LOW_POWER = 1,
 };
 #endif
 
@@ -124,12 +124,10 @@ class Tuya final : public Component, public uart::UARTDevice {
   void set_boolean_datapoint_value(uint8_t datapoint_id, bool value);
   void set_integer_datapoint_value(uint8_t datapoint_id, uint32_t value);
   void set_status_pin(InternalGPIOPin *status_pin) { this->status_pin_ = status_pin; }
-#ifdef USE_TUYA_LOW_POWER_V0
+#ifdef USE_TUYA_LOW_POWER
   void set_protocol(TuyaProtocol protocol) { this->protocol_ = protocol; }
   void set_auto_baud(bool auto_baud) { this->auto_baud_ = auto_baud; }
   void set_mcu_wake_pin(GPIOPin *pin) { this->mcu_wake_pin_ = pin; }
-  /// Only an MCU that reports this product ID (CMD01 "p") is accepted; empty accepts any.
-  void set_product_id(const char *product_id) { this->product_id_ = product_id; }
   void set_low_power_host(TuyaLowPowerHost *host) { this->lp_host_ = host; }
   bool request_low_power_refresh();
   /// Diagnostics: sends only the start of an MCU firmware update (CMD0A, or CMD0D for version-0 frames) for an
@@ -140,14 +138,14 @@ class Tuya final : public Component, public uart::UARTDevice {
   /// must stay valid until the transfer ends. Restarts the module afterwards, so it detects the MCU anew.
   bool low_power_update_mcu(const uint8_t *image, size_t size);
   /// Firmware version from the MCU's product info ("v"), empty until it was reported.
-  const std::string &low_power_mcu_version() const { return this->lp_product_.version; }
+  const char *low_power_mcu_version() const { return this->lp_product_.version.data(); }
   // Called by the platform's power management bridge (not by CMD38 alone).
   bool notify_low_power_transition(bool sleeping);
   /// Standby steps, called by the platform's power management bridge.
   bool low_power_prepare_for_standby();
   void low_power_standby_cancelled();
   void low_power_standby_resumed(bool expected_source, bool wake_gpio);
-#endif  // USE_TUYA_LOW_POWER_V0
+#endif  // USE_TUYA_LOW_POWER
   void set_string_datapoint_value(uint8_t datapoint_id, const std::string &value);
   void set_string_datapoint_value(uint8_t datapoint_id, const char *value);
   void set_enum_datapoint_value(uint8_t datapoint_id, uint8_t value);
@@ -190,8 +188,8 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool validate_message_();
 
   void handle_command_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len);
-#ifdef USE_TUYA_LOW_POWER_V0
-  bool is_low_power_() const { return this->protocol_ == TuyaProtocol::LOW_POWER_V0; }
+#ifdef USE_TUYA_LOW_POWER
+  bool is_low_power_() const { return this->protocol_ == TuyaProtocol::TUYA_PROTOCOL_LOW_POWER; }
   // Entry points called from the standard Tuya code paths in tuya.cpp.
   void setup_low_power_();
   void loop_low_power_();
@@ -228,7 +226,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool low_power_v3_sleep_supported_() const;
   void poll_low_power_v3_sleep_();
   void handle_low_power_v3_sleep_(const uint8_t *data, size_t len);
-#endif  // USE_TUYA_LOW_POWER_V0
+#endif  // USE_TUYA_LOW_POWER
   void send_raw_command_(TuyaCommand command);
   void process_command_queue_();
   void send_command_(const TuyaCommand &command);
@@ -254,15 +252,14 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool time_sync_callback_registered_{false};
   bool gmt_time_sync_callback_registered_{false};
 #endif
-#ifdef USE_TUYA_LOW_POWER_V0
-  TuyaProtocol protocol_{TuyaProtocol::STANDARD};
+#ifdef USE_TUYA_LOW_POWER
+  TuyaProtocol protocol_{TuyaProtocol::TUYA_PROTOCOL_STANDARD};
   bool auto_baud_{false};
   GPIOPin *mcu_wake_pin_{nullptr};
   TuyaLowPowerHost *lp_host_{nullptr};
-  const char *product_id_{""};
   TuyaLowPowerAutoBaud lp_autobaud_{};
   TuyaLowPowerUartErrors lp_uart_rx_errors_{};
-  TuyaLowPowerV0Session lp_v0_{};
+  TuyaLowPowerSession lp_session_{};
   TuyaLowPowerProductInfo lp_product_{};
   // Bounded CMD01 JSON copy for diagnostics, no extra heap allocation.
   std::array<char, 513> lp_product_text_{};
@@ -333,7 +330,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   uint32_t lp_cmd38_deadline_ms_{0};
   uint32_t lp_cmd38_cooldown_until_{0};
   uint8_t lp_network_status_{0xFF};
-#endif  // USE_TUYA_LOW_POWER_V0
+#endif  // USE_TUYA_LOW_POWER
   TuyaInitState init_state_ = TuyaInitState::INIT_HEARTBEAT;
   bool init_failed_{false};
   int init_retries_{0};
@@ -357,7 +354,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool mcu_ready_{false};
 };
 
-#ifdef USE_TUYA_LOW_POWER_V0
+#ifdef USE_TUYA_LOW_POWER
 // Explicit DP106 refresh for automation; no unsolicited boot refresh.
 template<typename... Ts> class TuyaRefreshAction : public Action<Ts...> {
  public:

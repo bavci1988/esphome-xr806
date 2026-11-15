@@ -1,27 +1,28 @@
 #include <gtest/gtest.h>
 #include <cstddef>
 #include <cstdint>
-#include "esphome/components/tuya/tuya_low_power_v0.h"
+#include "esphome/components/tuya/tuya_low_power.h"
 #include "esphome/components/tuya/tuya_low_power_autobaud.h"
 #include "esphome/components/tuya/tuya_low_power_product.h"
 #include <vector>
+#include <cstring>
 #include <string>
 
 namespace esphome::tuya::testing {
 
-TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
-  using esphome::tuya::TuyaLowPowerV0Session;
-  TuyaLowPowerV0Session state;
+TEST(TuyaLowPowerSession, FullStatusAndWrites) {
+  using esphome::tuya::TuyaLowPowerSession;
+  TuyaLowPowerSession state;
   EXPECT_FALSE(state.ready());
   state.product_received();
   state.begin_full_status(100);
 
-  for (size_t i = 0; i + 1 < TuyaLowPowerV0Session::FULL_STATUS_DPS.size(); ++i) {
-    uint8_t id = TuyaLowPowerV0Session::FULL_STATUS_DPS[i];
+  for (size_t i = 0; i + 1 < TuyaLowPowerSession::FULL_STATUS_DPS.size(); ++i) {
+    uint8_t id = TuyaLowPowerSession::FULL_STATUS_DPS[i];
     state.observe_dp(id, 1, &id, 1);
   }
   EXPECT_TRUE(state.busy() && !state.ready());
-  uint8_t last = TuyaLowPowerV0Session::FULL_STATUS_DPS.back();
+  uint8_t last = TuyaLowPowerSession::FULL_STATUS_DPS.back();
   state.observe_dp(last, 1, &last, 1);
   EXPECT_TRUE(state.ready());
 
@@ -46,7 +47,7 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   EXPECT_TRUE(state.expire(13000, 12000));
   EXPECT_FALSE(state.ready());  // Failure locks sleep.
   state.begin_full_status(14000);
-  for (uint8_t id : TuyaLowPowerV0Session::FULL_STATUS_DPS)
+  for (uint8_t id : TuyaLowPowerSession::FULL_STATUS_DPS)
     state.observe_dp(id, 1, &id, 1);
   EXPECT_TRUE(state.ready());  // Full re-synchronization releases the fault.
   state.reset_status();
@@ -113,26 +114,26 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   // The refresh request DP106 never echoes DP106; it returns exactly
   // eight other DPs. An empty CMD09 ACK alone must not release the write.
   state.begin_full_status(15000);
-  for (uint8_t id : TuyaLowPowerV0Session::FULL_STATUS_DPS)
+  for (uint8_t id : TuyaLowPowerSession::FULL_STATUS_DPS)
     state.observe_dp(id, 1, &id, 1);
   EXPECT_TRUE(state.ready());
   const uint8_t one = 1;
   state.begin_write(106, 1, &one, 1, 16000);
   state.write_ack();
   EXPECT_TRUE(state.refresh_pending() && !state.ready());
-  for (size_t i = 0; i + 1 < TuyaLowPowerV0Session::REFRESH_DPS.size(); ++i) {
-    uint8_t dp = TuyaLowPowerV0Session::REFRESH_DPS[i];
+  for (size_t i = 0; i + 1 < TuyaLowPowerSession::REFRESH_DPS.size(); ++i) {
+    uint8_t dp = TuyaLowPowerSession::REFRESH_DPS[i];
     state.observe_dp(dp, 1, &dp, 1);
   }
   EXPECT_TRUE(state.write_pending());
-  uint8_t end_dp = TuyaLowPowerV0Session::REFRESH_DPS.back();
+  uint8_t end_dp = TuyaLowPowerSession::REFRESH_DPS.back();
   state.observe_dp(end_dp, 1, &end_dp, 1);
   EXPECT_TRUE(state.ready());
-  EXPECT_TRUE(state.last_write_result() == TuyaLowPowerV0Session::WriteResult::CONFIRMED);
+  EXPECT_TRUE(state.last_write_result() == TuyaLowPowerSession::WriteResult::CONFIRMED);
 
   // Report-before-ACK also works for the eight-DP refresh.
   state.begin_write(106, 1, &one, 1, 17000);
-  for (uint8_t dp : TuyaLowPowerV0Session::REFRESH_DPS)
+  for (uint8_t dp : TuyaLowPowerSession::REFRESH_DPS)
     state.observe_dp(dp, 1, &dp, 1);
   EXPECT_TRUE(state.write_pending());
   state.write_ack();
@@ -143,20 +144,20 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   state.write_ack();
   state.observe_dp(1, 1, &one, 1);
   EXPECT_TRUE(state.expire(30000));
-  EXPECT_TRUE(state.last_write_result() == TuyaLowPowerV0Session::WriteResult::TIMED_OUT);
+  EXPECT_TRUE(state.last_write_result() == TuyaLowPowerSession::WriteResult::TIMED_OUT);
   EXPECT_FALSE(state.ready());
   state.begin_full_status(31000);
-  for (uint8_t dp : TuyaLowPowerV0Session::FULL_STATUS_DPS)
+  for (uint8_t dp : TuyaLowPowerSession::FULL_STATUS_DPS)
     state.observe_dp(dp, 1, &dp, 1);
   EXPECT_TRUE(state.ready());
 
-  // The product info names the wake pins and standby-vs-hibernation; product_id restricts the PID.
+  // The product info names the wake pins and standby-vs-hibernation.
   using esphome::tuya::TuyaLowPowerProductInfo;
   TuyaLowPowerProductInfo info;
   const std::string product_json = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":1})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(product_json.data()), product_json.size()));
-  EXPECT_TRUE(info.matches("ihedujbuli6hsx9b"));
-  EXPECT_TRUE(info.matches(""));
+  EXPECT_STREQ(info.pid.data(), "ihedujbuli6hsx9b");
+  EXPECT_STREQ(info.version.data(), "1.3.1");
   EXPECT_TRUE(info.wake_gpio == 20 && info.mcu_wake_gpio == 28 && info.sleep_mode == 1);
   EXPECT_EQ(info.mcu_wake_pulse_ms, 50u);  // TRV16 reports no mwkpt: the original WXU default
   const std::string pulse_json = R"({"p":"x","v":"1","wk":20,"mwk":28,"sm":1,"mwkpt":120})";
@@ -185,11 +186,10 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(no_version.data()), no_version.size()));
   const std::string hib_json = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"mwk":28,"sm":0})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(hib_json.data()), hib_json.size()));
-  EXPECT_TRUE(info.matches("ihedujbuli6hsx9b") && info.sleep_mode == 0);
+  EXPECT_EQ(info.sleep_mode, 0);
   const std::string wrong_pid = R"({"p":"another_product","v":"1.3.1","wk":20,"mwk":28,"sm":1})";
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(wrong_pid.data()), wrong_pid.size()));
-  EXPECT_FALSE(info.matches("ihedujbuli6hsx9b"));
-  EXPECT_TRUE(info.matches(""));
+  EXPECT_STREQ(info.pid.data(), "another_product");
   const std::string missing_pin = R"({"p":"ihedujbuli6hsx9b","v":"1.3.1","wk":20,"sm":1})";
   // A missing wake pin no longer rejects the product; it only rules out standby.
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(missing_pin.data()), missing_pin.size()));
@@ -205,10 +205,17 @@ TEST(TuyaLowPowerV0Session, FullStatusAndWrites) {
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(typed_p.data()), typed_p.size()));
   EXPECT_FALSE(info.parse(nullptr, 0));
   EXPECT_FALSE(info.parsed);
+  // A product field holds at most 48 characters.
+  const std::string max_p = R"({"p":")" + std::string(48, 'a') + R"(","v":"1"})";
+  const std::string long_p = R"({"p":")" + std::string(49, 'a') + R"(","v":"1"})";
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(max_p.data()), max_p.size()));
+  EXPECT_EQ(std::strlen(info.pid.data()), 48u);
+  EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(long_p.data()), long_p.size()));
+  EXPECT_STREQ(info.pid.data(), "");
 }
 
-TEST(TuyaLowPowerV0Session, Version3McuSynchronizesOnFirstReport) {
-  esphome::tuya::TuyaLowPowerV0Session s;
+TEST(TuyaLowPowerSession, Version3McuSynchronizesOnFirstReport) {
+  esphome::tuya::TuyaLowPowerSession s;
   s.product_received();
   EXPECT_FALSE(s.ready());
   s.mark_synchronized();

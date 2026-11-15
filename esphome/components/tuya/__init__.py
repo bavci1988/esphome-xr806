@@ -4,7 +4,6 @@ from esphome.components import time, uart
 from esphome.config import iter_ids
 import esphome.config_validation as cv
 from esphome.const import CONF_PROTOCOL, CONF_SENSOR_DATAPOINT, CONF_TIME_ID
-from esphome.core import CORE as CORE
 from esphome.cpp_generator import MockObj
 from esphome.types import ConfigType
 
@@ -20,7 +19,6 @@ CONF_STATUS_PIN = "status_pin"
 CONF_FORCE_TIME_SYNC = "force_time_sync"
 CONF_AUTO_BAUD = "auto_baud"
 CONF_MCU_WAKE_PIN = "mcu_wake_pin"
-CONF_PRODUCT_ID = "product_id"
 
 tuya_ns = cg.esphome_ns.namespace("tuya")
 TuyaDatapointType = tuya_ns.enum("TuyaDatapointType", is_class=True)
@@ -72,9 +70,11 @@ def _validate_time_options(config: ConfigType) -> ConfigType:
             "status_pin is unsupported for low_power; wake is configured separately",
             path=[CONF_STATUS_PIN],
         )
-    for key in (CONF_MCU_WAKE_PIN, CONF_PRODUCT_ID):
-        if key in config and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER:
-            raise cv.Invalid(f"{key} requires protocol: low_power", path=[key])
+    if CONF_MCU_WAKE_PIN in config and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER:
+        raise cv.Invalid(
+            f"{CONF_MCU_WAKE_PIN} requires protocol: low_power",
+            path=[CONF_MCU_WAKE_PIN],
+        )
     if config[CONF_AUTO_BAUD] and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER:
         raise cv.Invalid(
             "auto_baud is only supported with protocol: low_power",
@@ -92,9 +92,6 @@ CONFIG_SCHEMA = cv.All(
             ),
             cv.Optional(CONF_AUTO_BAUD, default=False): cv.boolean,
             cv.Optional(CONF_MCU_WAKE_PIN): pins.gpio_output_pin_schema,
-            cv.Optional(CONF_PRODUCT_ID): cv.All(
-                cv.string_strict, cv.Length(min=1, max=48)
-            ),
             cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
             cv.Optional(CONF_FORCE_TIME_SYNC, default=False): cv.boolean,
             cv.Optional(CONF_IGNORE_MCU_UPDATE_ON_DATAPOINTS): cv.ensure_list(
@@ -122,11 +119,10 @@ async def to_code(config):
     var = await uart.new_uart_component(config)
     if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER:
         # Standard Tuya builds must not carry the low-power driver code or state.
-        cg.add_define("USE_TUYA_LOW_POWER_V0")
-        cg.add(var.set_protocol(TuyaProtocol.LOW_POWER_V0))
+        cg.add_define("USE_TUYA_LOW_POWER")
+        cg.add(var.set_protocol(TuyaProtocol.TUYA_PROTOCOL_LOW_POWER))
         cg.add(var.set_auto_baud(config[CONF_AUTO_BAUD]))
         await cg.add_pin(var.set_mcu_wake_pin, config.get(CONF_MCU_WAKE_PIN))
-        cg.add_optional(var.set_product_id, config.get(CONF_PRODUCT_ID))
     if (time_id := config.get(CONF_TIME_ID)) is not None:
         await cg.add_variable(var.set_time_id, time_id)
         if config[CONF_FORCE_TIME_SYNC]:
