@@ -7,6 +7,8 @@
 
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/core/application.h"
+#include "esphome/core/helpers.h"
+#include "esphome/core/preferences.h"
 #include "esphome/core/log.h"
 #include "wlan_mib.h"
 
@@ -25,7 +27,12 @@ extern const uint8_t xr806_wlan_fw_keepalive_end[];
 namespace {
 // Image section of wlan_fw.bin (project/image_cfg/image.cfg).
 constexpr uint32_t WLAN_FW_SECTION_ID = 0xA5F95A06;
+// Initialised data, so it holds before the SDK loads the WLAN firmware at platform start, ahead of setup().
+#ifdef USE_XR806_WLAN_FW_LOAD_AT_BOOT
+volatile bool serve_patched = true;
+#else
 volatile bool serve_patched = false;
+#endif
 volatile uint32_t served_bytes = 0;
 }  // namespace
 
@@ -57,6 +64,9 @@ ESPHOME_LOG_TAG(TAG, "xr806.wlan_fw_swap");
 static constexpr uint32_t SWAP_AFTER_MS = 60000;
 static constexpr uint32_t VERIFY_MS = 120000;
 static constexpr uint32_t RESTART_DELAY_MS = 500;
+// With load_at_boot: after this many starts in a row without a confirmed connection on the patched firmware, the
+// stock one is used until the next firmware update.
+static constexpr uint8_t BOOT_ATTEMPTS = 3;
 
 // The first patched instruction pair (two Thumb NOPs where the stock firmware calls the keepalive send), read back
 // from the running WLAN core to confirm the patched firmware was loaded.
@@ -72,10 +82,44 @@ static bool patched_code_running() {
 
 bool wlan_fw_patched_active() { return patched_active; }
 
+void XR806WlanFirmwareSwap::setup() {
+#ifdef USE_XR806_WLAN_FW_LOAD_AT_BOOT
+  // Counts starts on the patched firmware; a confirmed connection resets it. Keyed by the build, so an update
+  // tries the patched firmware again.
+  this->attempts_pref_ = global_preferences->make_preference<uint8_t>(fnv1_hash("xr806_wlan_fw") ^
+                                                                      App.get_config_hash());
+  uint8_t attempts = 0;
+  this->attempts_pref_.load(&attempts);
+  if (attempts >= BOOT_ATTEMPTS) {
+    ESP_LOGW(TAG, "Patched WLAN firmware failed %u starts in a row; stock firmware until the next update", attempts);
+    this->phase_ = Phase::FALLBACK;
+    return;
+  }
+  ESP_LOGI(TAG, "Patched WLAN firmware served at boot (%" PRIu32 " bytes), start %u of %u", served_bytes,
+           attempts + 1, BOOT_ATTEMPTS);
+  ++attempts;
+  this->attempts_pref_.save(&attempts);
+  global_preferences->sync();
+  this->phase_ = Phase::VERIFY;
+#endif
+}
+
+void XR806WlanFirmwareSwap::fall_back_(wifi::WiFiComponent *wifi) {
+  wifi->disable();
+  this->restart_wlan_(false);
+  wifi->enable();
+  this->phase_ = Phase::STOCK;
+}
+
 void XR806WlanFirmwareSwap::dump_config() {
+#ifdef USE_XR806_WLAN_FW_LOAD_AT_BOOT
+  ESP_LOGCONFIG(TAG, "XR806 WLAN firmware swap: patched keepalive firmware (%u bytes) loaded at boot",
+                static_cast<unsigned>(xr806_wlan_fw_keepalive_end - xr806_wlan_fw_keepalive));
+#else
   ESP_LOGCONFIG(
       TAG, "XR806 WLAN firmware swap: patched keepalive firmware (%u bytes) %" PRIu32 " s after the station connected",
       static_cast<unsigned>(xr806_wlan_fw_keepalive_end - xr806_wlan_fw_keepalive), SWAP_AFTER_MS / 1000);
+#endif
 }
 
 void XR806WlanFirmwareSwap::restart_wlan_(bool patched) {
@@ -118,27 +162,33 @@ void XR806WlanFirmwareSwap::loop() {
       this->since_ms_ = now;
       return;
     case Phase::VERIFY:
+      if (this->since_ms_ == 0)
+        this->since_ms_ = now;
       if (connected) {
         if (patched_code_running()) {
           patched_active = true;
           ESP_LOGI(TAG, "Station connected; the WLAN core runs the patched firmware");
+#ifdef USE_XR806_WLAN_FW_LOAD_AT_BOOT
+          uint8_t attempts = 0;
+          this->attempts_pref_.save(&attempts);
+          global_preferences->sync();
+#endif
           this->phase_ = Phase::ACTIVE;
           return;
         }
         ESP_LOGW(TAG, "The WLAN core does not run the patched code; stock firmware until the next boot");
-        wifi->disable();
-        this->restart_wlan_(false);
-        wifi->enable();
-        this->phase_ = Phase::STOCK;
+        this->fall_back_(wifi);
         return;
       }
       if (now - this->since_ms_ < VERIFY_MS)
         return;
       ESP_LOGW(TAG, "No connection with the patched WLAN firmware; back to the stock firmware until the next boot");
-      wifi->disable();
-      this->restart_wlan_(false);
-      wifi->enable();
-      this->phase_ = Phase::STOCK;
+      this->fall_back_(wifi);
+      return;
+    case Phase::FALLBACK:
+      if (wifi == nullptr)
+        return;
+      this->fall_back_(wifi);
       return;
     case Phase::ACTIVE:
     case Phase::STOCK:

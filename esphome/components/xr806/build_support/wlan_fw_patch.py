@@ -11,7 +11,7 @@ server 0 sends a different, pre-encrypted frame each time Home Assistant acknowl
 1. MIB 0x1078 no longer sends a frame right away (BL at 0x0900A374), so the first frame goes out one period after
    configuration instead of while the host suspends the WLAN.
 2. Before the payload copy at 0x09009E0C a new function chooses frame k = (sequence - TcpSeqInit) / length from the
-   payload areas of the three keepalive entries (128 // length frames each). The firmware adds the length to the
+   payload areas of the three keepalive entries and the three wake pattern entries (128 // length frames each). The firmware adds the length to the
    sequence for each acknowledged frame; the IP ID also counts acknowledgements and is no frame index. It is placed at 0x0900A3C8, in the UDP keepalive
    (0x0900A3C6), which is only used for servers with the UDP flag; ESPHome uses TCP only.
 3. The receive filter (0x0900A012) acknowledged data from the peer itself and dropped it, so a command from Home

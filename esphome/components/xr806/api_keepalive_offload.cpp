@@ -26,9 +26,15 @@ extern "C" {
 
 namespace {
 
-// Three keepalive entries with a 128-byte payload area each; the patched firmware takes the frames from all three.
+// The patched firmware takes the frames from six areas of 128 bytes: the payloads of the three keepalive entries,
+// then those of the three wake pattern entries. These stay disabled, so the firmware never reads them otherwise; the
+// host writes them through the WLAN RAM window (WLAN 0x0900BE04 + e * 0x84).
 constexpr size_t ENTRY_COUNT = IPC_P2P_SERVER_MAX;
 constexpr size_t ENTRY_PAYLOAD = IPC_P2P_KPALIVE_PAYLOAD_LEN_MAX;
+constexpr size_t AREA_COUNT = 2 * ENTRY_COUNT;
+constexpr uint32_t WAKE_PAYLOAD_ADDRESS = 0x0900BE04;
+constexpr uintptr_t WAKE_PAYLOAD_APP_ADDRESS = 0x6800C000 + (WAKE_PAYLOAD_ADDRESS - 0x09000000);
+constexpr size_t WAKE_ENTRY_SIZE = 0x84;
 
 // The build links with --wrap=lwip_write --wrap=lwip_writev when the experiment is enabled. While a capture is open
 // on the main loop, what the API writes is kept here instead of going out, so the API's own Noise code encrypts the
@@ -38,7 +44,7 @@ struct FrameCapture {
   int fd{-1};
   uint16_t len{0};
   bool overflow{false};
-  uint8_t data[ENTRY_COUNT * ENTRY_PAYLOAD];
+  uint8_t data[AREA_COUNT * ENTRY_PAYLOAD];
 };
 FrameCapture frame_capture;
 // millis() of the last write that went out through lwIP, on any socket.
@@ -153,7 +159,7 @@ bool XR806APIKeepaliveOffload::capture_frames_(api::APIConnection *client) {
     len = written;
     ++count;
     // Every entry holds a whole number of frames.
-    if (count == (ENTRY_PAYLOAD / len) * ENTRY_COUNT)
+    if (count == (ENTRY_PAYLOAD / len) * AREA_COUNT)
       break;
   }
   frame_capture.task = nullptr;
@@ -199,7 +205,7 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
       return false;
   }
 
-  // Server 0 sends from all three payload areas; entries 1 and 2 only hold frames and stay disabled.
+  // Server 0 sends from all six areas; keepalive entries 1 and 2 only hold frames and stay disabled.
   auto &kpalive = offload_cmd.kpalive;
   memset(&kpalive, 0, sizeof(kpalive));
   kpalive.KeepAlivePeriod_s = this->period_s_;
@@ -214,6 +220,25 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
     if (first < this->frame_count_) {
       const size_t frames = std::min(per_entry, this->frame_count_ - first);
       memcpy(slot.Payload, frame_capture.data + first * this->frame_len_, frames * this->frame_len_);
+    }
+  }
+  // After the wake pattern MIB, which clears disabled entries. The window takes 32-bit accesses.
+  for (size_t e = 0; e < ENTRY_COUNT; ++e) {
+    uint32_t words[ENTRY_PAYLOAD / 4]{};
+    const size_t first = (ENTRY_COUNT + e) * per_entry;
+    if (first < this->frame_count_) {
+      const size_t frames = std::min(per_entry, this->frame_count_ - first);
+      memcpy(words, frame_capture.data + first * this->frame_len_, frames * this->frame_len_);
+    }
+    auto *area = reinterpret_cast<volatile uint32_t *>(WAKE_PAYLOAD_APP_ADDRESS + e * WAKE_ENTRY_SIZE);
+    for (size_t w = 0; w < ENTRY_PAYLOAD / 4; ++w)
+      area[w] = words[w];
+    // Read the last word back through the firmware, which also confirms the window mapping.
+    uint32_t check = 0;
+    if (wlan_read_words(WAKE_PAYLOAD_ADDRESS + e * WAKE_ENTRY_SIZE + ENTRY_PAYLOAD - 4, &check, 1) != 0 ||
+        check != words[ENTRY_PAYLOAD / 4 - 1]) {
+      ESP_LOGW(TAG, "Not armed: frame area %u reads back %08" PRIX32, static_cast<unsigned>(ENTRY_COUNT + e), check);
+      return false;
     }
   }
   if (request(WLAN_EXT_CMD_SET_P2P_KPALIVE_CFG, reinterpret_cast<uint32_t>(&kpalive)) != 0)

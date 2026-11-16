@@ -3,8 +3,10 @@
 @ Called with BL from 0x09009E0C instead of "ldr r1,[sp,#0x34]; ldrh r2,[r1,#6]; adds r1,#8",
 @ right before the payload memcpy. Returns r1 = source of the payload, r2 = its length; r0 (destination) kept.
 @ Server 0 sends frame k = (sequence - TcpSeqInit) / length, the number of frames HA has acknowledged (the
-@ firmware adds the length to the sequence for each acknowledged frame), from the payload areas of the three
-@ keepalive entries (128 / length frames each, entries 0x84 apart). Other servers keep one payload.
+@ firmware adds the length to the sequence for each acknowledged frame). The frames lie in six areas of 128 bytes,
+@ 128 / length frames each: the payloads of the three keepalive entries (0x0900BC78, 0x84 apart), then the
+@ payloads of the three wake pattern entries (0x0900BE04, 0x84 apart), which the host writes directly and whose
+@ Enable stays 0, so the firmware never reads them. Other servers keep one payload.
     .syntax unified
     .thumb
     .text
@@ -30,14 +32,14 @@ cave:
     subs    r6, r6, r2
     adds    r5, r5, r2
     b       1b
-2:  movs    r6, #0                  @ entry e = bytes / area, r4 = bytes % area
+2:  movs    r6, #0                  @ area index a = bytes / area, r4 = bytes % area
 3:  cmp     r4, r5
     blo     4f
     subs    r4, r4, r5
     adds    r6, #1
-    cmp     r6, #2
+    cmp     r6, #5
     bls     3b
-    movs    r6, #2                  @ list exhausted: stay on the last frame (the host wakes before this)
+    movs    r6, #5                  @ list exhausted: stay on the last frame (the host wakes before this)
     subs    r4, r5, r2
     b       6f
 4:  movs    r3, r4                  @ round r4 down to a frame start
@@ -46,7 +48,11 @@ cave:
     subs    r3, r3, r2
     b       5b
 7:  subs    r4, r4, r3
-6:  movs    r3, #0x84
+6:  cmp     r6, #3
+    blo     8f
+    subs    r6, #3
+    ldr     r1, =0x0900BE00 - 4     @ wake pattern entry 0, so that "adds r1, #8" points at its payload
+8:  movs    r3, #0x84
     muls    r3, r6
     adds    r1, r1, r3
     adds    r1, r1, r4

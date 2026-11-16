@@ -617,6 +617,21 @@ def test_wifi_fw_standby_patch(
     assert "-DUSE_XR806_API_KEEPALIVE_OFFLOAD" in CORE.build_flags
     assert "set_keepalive_offload(8, true, false)" in generated
     assert "XR806WlanFirmwareSwap" in generated
+    assert not any(d.name == "USE_XR806_WLAN_FW_LOAD_AT_BOOT" for d in CORE.defines)
+
+
+def test_wifi_fw_standby_patch_load_at_boot(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+) -> None:
+    config = component_config_path("wifi_fw_standby_patch.yaml").read_text()
+    path = tmp_path / "wifi_fw_standby_patch.yaml"
+    path.write_text(config.replace("    keepalive_period: 8s\n", "    keepalive_period: 8s\n    load_at_boot: true\n"))
+
+    generate_main(path)
+
+    assert any(d.name == "USE_XR806_WLAN_FW_LOAD_AT_BOOT" for d in CORE.defines)
 
 
 @pytest.mark.parametrize(

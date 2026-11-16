@@ -59,6 +59,7 @@ CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH = "experimental_wifi_fw_standby_patch"
 CONF_KEEPALIVE_PERIOD = "keepalive_period"
 CONF_HOST_SLEEP = "host_sleep"
 CONF_WAKE_ON_PEER = "wake_on_peer"
+CONF_LOAD_AT_BOOT = "load_at_boot"
 CONF_DIAGNOSE_WLAN_ROM_DUMP = "diagnose_wlan_rom_dump"
 CONF_WLAN_ROM_DUMP_ID = "wlan_rom_dump_id"
 CONF_WLAN_FW_SWAP_ID = "wlan_fw_swap_id"
@@ -125,6 +126,10 @@ EXPERIMENTAL_WIFI_FW_STANDBY_PATCH_SCHEMA = cv.Schema(
         ),
         cv.Optional(CONF_HOST_SLEEP, default=True): cv.boolean,
         cv.Optional(CONF_WAKE_ON_PEER, default=False): cv.boolean,
+        # False: boot with the stock WLAN firmware and load the patched one a minute later, so a broken patch
+        # still leaves time for an OTA update. True: load it at boot; after three starts without a confirmed
+        # connection the stock firmware is used until the next update.
+        cv.Optional(CONF_LOAD_AT_BOOT, default=False): cv.boolean,
     }
 )
 
@@ -446,6 +451,8 @@ async def to_code(config: ConfigType) -> None:
                         '#include "esphome/components/xr806/wlan_fw_swap.h"'
                     )
                 )
+                if patch[CONF_LOAD_AT_BOOT]:
+                    cg.add_define("USE_XR806_WLAN_FW_LOAD_AT_BOOT")
                 fw_swap = cg.new_Pvariable(config[CONF_WLAN_FW_SWAP_ID])
                 await cg.register_component(fw_swap, {})
                 cg.add(
@@ -654,7 +661,7 @@ def run_compile(args: object, config: ConfigType) -> bool:
 
     if CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH in CORE.config.get(DOMAIN, {}):
         # The keepalive frame list needs the patched WLAN firmware. It goes into the application; the flash image
-        # keeps the stock one, and XR806WlanFirmwareSwap loads the patched one a minute after boot.
+        # keeps the stock one, and XR806WlanFirmwareSwap serves the patched one at boot or a minute later.
         from .build_support import wlan_fw_patch
 
         try:
@@ -667,7 +674,7 @@ def run_compile(args: object, config: ConfigType) -> bool:
             raise EsphomeError(f"XR806 WLAN firmware patch failed: {err}") from err
         variables["XR806_WLAN_FW_PATCHED"] = str(patched)
         print(
-            "[XR806] Patched WLAN firmware built; the stock one stays in flash for boot",
+            "[XR806] Patched WLAN firmware built; the stock one stays in flash",
             flush=True,
         )
 
