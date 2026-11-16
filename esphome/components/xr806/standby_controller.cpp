@@ -30,6 +30,7 @@ extern "C" {
 #include "driver/chip/hal_prcm.h"
 #include "driver/chip/hal_wakeup.h"
 #include "pm/pm.h"
+#include "kernel/os/os_thread.h"
 #include "sys/xr_debug.h"
 }
 
@@ -256,6 +257,77 @@ bool XR806StandbyController::wake_input_active_() const {
   return this->wake_falling_ ? level == GPIO_PIN_LOW : level == GPIO_PIN_HIGH;
 }
 
+#ifdef USE_XR806_STANDBY_FAKE_SLEEP
+// Diagnostics: everything up to the PM call runs as for a real standby, so the MCU has its consent, but the CPU
+// stays on and records every edge on the wake input with a time stamp. Ends 50 ms after the first edge or after
+// the wake timer, and reports the matching wake event.
+int XR806StandbyController::fake_sleep_(int wake_io, uint32_t &event) {
+  struct Edge {
+    uint32_t at_us;
+    uint8_t level;
+  };
+  static constexpr size_t MAX_EDGES = 32;
+  static constexpr uint32_t TAIL_MS = 50;
+  Edge edges[MAX_EDGES];
+  size_t count = 0;
+  const auto pin = static_cast<GPIO_Pin>(this->wake_pin_);
+  const uint32_t start_us = micros();
+  const uint32_t start_ms = millis();
+  const GPIO_PinState initial = HAL_GPIO_ReadPin(GPIO_PORT_A, pin);
+  GPIO_PinState last = initial;
+  uint32_t first_edge_ms = 0;
+  bool edge_seen = false;
+  bool timer = false;
+  uint32_t prcm_event = 0;
+  for (uint32_t i = 0;; ++i) {
+    const GPIO_PinState level = HAL_GPIO_ReadPin(GPIO_PORT_A, pin);
+    if (level != last) {
+      if (count < MAX_EDGES)
+        edges[count] = {micros() - start_us, static_cast<uint8_t>(level)};
+      ++count;
+      last = level;
+      if (!edge_seen) {
+        edge_seen = true;
+        first_edge_ms = millis();
+      }
+    }
+    if ((i & 0x3FF) == 0) {
+      const uint32_t now = millis();
+      if (prcm_event == 0)
+        prcm_event = HAL_Wakeup_GetEvent();
+      if (edge_seen && now - first_edge_ms > TAIL_MS)
+        break;
+      if (prcm_event != 0 && !edge_seen && now - start_ms > 1) {
+        // The wake logic saw something the sampling missed: keep sampling for the tail, then stop.
+        edge_seen = true;
+        first_edge_ms = now;
+      }
+      if (now - start_ms >= this->wake_after_ms_) {
+        timer = true;
+        break;
+      }
+      arch_feed_wdt();
+      OS_ThreadYield();
+    }
+  }
+  if (prcm_event == 0)
+    prcm_event = HAL_Wakeup_GetEvent();
+  ESP_LOGI(TAG, "Fake sleep %" PRIu32 " ms: PA%u started %s, %u edges, wake logic event 0x%08" PRIX32 "%s",
+           millis() - start_ms, static_cast<unsigned>(this->wake_pin_), initial == GPIO_PIN_LOW ? "LOW" : "HIGH",
+           static_cast<unsigned>(count), prcm_event, timer ? ", ended by the wake timer" : "");
+  for (size_t k = 0; k < count && k < MAX_EDGES; ++k) {
+    ESP_LOGI(TAG, "  edge %u: +%" PRIu32 " us -> %s", static_cast<unsigned>(k), edges[k].at_us,
+             edges[k].level == GPIO_PIN_LOW ? "LOW" : "HIGH");
+  }
+  if (timer) {
+    event = XR806StandbyCoordinatorState::WAKE_TIMER;
+  } else if (wake_io >= 0) {
+    event = 1u << wake_io;
+  }
+  return 0;
+}
+#endif
+
 void XR806StandbyController::attempt_standby_() {
   if (this->busy_)
     return;
@@ -395,9 +467,15 @@ void XR806StandbyController::attempt_standby_() {
   {
     // Time spent asleep is not a main loop stall.
     UnavoidableBlockingScope sleeping;
+#ifdef USE_XR806_STANDBY_FAKE_SLEEP
+    result = this->fake_sleep_(wake_io, event);
+#else
     result = pm_enter_mode_timeout(PM_MODE_STANDBY, 500);
+#endif
   }
+#ifndef USE_XR806_STANDBY_FAKE_SLEEP
   event = HAL_Wakeup_GetEvent();
+#endif
 
 abort:
   p.end_commit();
