@@ -8,6 +8,7 @@
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
+#include "wlan_mib.h"
 
 extern "C" {
 // The network framework declarations depend on the project configuration.
@@ -32,18 +33,20 @@ extern "C" {
 uint32_t __real_image_rw(uint32_t id, image_seg_t seg, uint32_t offset, void *buf, uint32_t size, int do_write);
 
 // The driver reads the WLAN firmware with image_rw() (from wlan_bin_read(), which calls itself inside the vendor
-// library and so cannot be wrapped). Body reads of that section come from the patched copy; it has the same size
-// as the stock firmware, so the section header stays valid.
+// library and so cannot be wrapped) and expects exactly the body size of the section header, which can be larger
+// than the file. So the flash is read as usual and the patched bytes, same length as the stock file, are laid over
+// it; padding and return value stay those of the flash.
 uint32_t __wrap_image_rw(uint32_t id, image_seg_t seg, uint32_t offset, void *buf, uint32_t size, int do_write) {
+  const uint32_t result = __real_image_rw(id, seg, offset, buf, size, do_write);
   if (!serve_patched || do_write || seg != IMAGE_SEG_BODY || id != WLAN_FW_SECTION_ID)
-    return __real_image_rw(id, seg, offset, buf, size, do_write);
+    return result;
   const auto total = static_cast<uint32_t>(xr806_wlan_fw_keepalive_end - xr806_wlan_fw_keepalive);
-  if (offset >= total)
-    return 0;
-  const uint32_t count = std::min(size, total - offset);
-  memcpy(buf, xr806_wlan_fw_keepalive + offset, count);
-  served_bytes = served_bytes + count;
-  return count;
+  if (offset < total) {
+    const uint32_t count = std::min(result, total - offset);
+    memcpy(buf, xr806_wlan_fw_keepalive + offset, count);
+    served_bytes = served_bytes + count;
+  }
+  return result;
 }
 }
 
@@ -55,7 +58,17 @@ static constexpr uint32_t SWAP_AFTER_MS = 60000;
 static constexpr uint32_t VERIFY_MS = 120000;
 static constexpr uint32_t RESTART_DELAY_MS = 500;
 
+// The first patched instruction pair (two Thumb NOPs where the stock firmware calls the keepalive send), read back
+// from the running WLAN core to confirm the patched firmware was loaded.
+static constexpr uint32_t PATCH_CHECK_ADDRESS = 0x0900A374;
+static constexpr uint32_t PATCH_CHECK_VALUE = 0x46C046C0;
+
 static bool patched_active = false;
+
+static bool patched_code_running() {
+  uint32_t word = 0;
+  return wlan_read_words(PATCH_CHECK_ADDRESS, &word, 1) == 0 && word == PATCH_CHECK_VALUE;
+}
 
 bool wlan_fw_patched_active() { return patched_active; }
 
@@ -106,9 +119,17 @@ void XR806WlanFirmwareSwap::loop() {
       return;
     case Phase::VERIFY:
       if (connected) {
-        patched_active = true;
-        ESP_LOGI(TAG, "Station connected with the patched WLAN firmware");
-        this->phase_ = Phase::ACTIVE;
+        if (patched_code_running()) {
+          patched_active = true;
+          ESP_LOGI(TAG, "Station connected; the WLAN core runs the patched firmware");
+          this->phase_ = Phase::ACTIVE;
+          return;
+        }
+        ESP_LOGW(TAG, "The WLAN core does not run the patched code; stock firmware until the next boot");
+        wifi->disable();
+        this->restart_wlan_(false);
+        wifi->enable();
+        this->phase_ = Phase::STOCK;
         return;
       }
       if (now - this->since_ms_ < VERIFY_MS)
