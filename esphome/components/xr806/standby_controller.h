@@ -89,6 +89,7 @@ class XR806StandbyController final : public Component {
   void attempt_standby_();
   void cancel_prepared_(size_t prepared);
   bool is_any_transport_unowned_() const;
+  bool wake_input_active_() const;
 
   // MCU UART + WLAN + Native API + OTA + mDNS + HTTP + MQTT, plus one future board owner.
   static constexpr size_t MAX_PARTICIPANTS = 8;
