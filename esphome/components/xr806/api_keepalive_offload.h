@@ -42,7 +42,7 @@ class XR806APIKeepaliveOffload {
   bool ready_for_standby();
 
  protected:
-  bool capture_frames_(api::APIConnection *client);
+  bool capture_frames_(api::APIConnection *client, uint32_t max_frames);
   bool configure_firmware_();
   void stop_firmware_();
   void send_unsent_(uint32_t from);

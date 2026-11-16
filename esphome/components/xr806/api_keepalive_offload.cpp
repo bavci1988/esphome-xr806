@@ -142,7 +142,7 @@ static bool read_state(FirmwareState &state) {
   return true;
 }
 
-bool XR806APIKeepaliveOffload::capture_frames_(api::APIConnection *client) {
+bool XR806APIKeepaliveOffload::capture_frames_(api::APIConnection *client, uint32_t max_frames) {
   frame_capture.fd = -1;
   frame_capture.len = 0;
   frame_capture.overflow = false;
@@ -158,8 +158,8 @@ bool XR806APIKeepaliveOffload::capture_frames_(api::APIConnection *client) {
       break;
     len = written;
     ++count;
-    // Every entry holds a whole number of frames.
-    if (count == (ENTRY_PAYLOAD / len) * AREA_COUNT)
+    // Every area holds a whole number of frames.
+    if (count == (ENTRY_PAYLOAD / len) * AREA_COUNT || count >= max_frames)
       break;
   }
   frame_capture.task = nullptr;
@@ -322,7 +322,10 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   if (client == nullptr)
     return;
 
-  if (!this->capture_frames_(client)) {
+  // Every frame takes a Noise nonce, and the host sends those the firmware did not, so encrypt only what the
+  // firmware can send before the wake timer, plus one: frame k goes out k + 1 periods after arming.
+  const uint32_t max_frames = wake_after_ms / (this->period_s_ * 1000U) + 2;
+  if (!this->capture_frames_(client, max_frames)) {
     if (this->frame_count_ == 0 && frame_capture.len == 0)
       return;  // Nothing reached the socket, so no nonce was used.
     this->client_ = client;
