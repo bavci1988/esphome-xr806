@@ -46,8 +46,6 @@ namespace esphome::xr806 {
 ESPHOME_LOG_TAG(TAG, "xr806.standby");
 
 static XR806StandbyController *active_controller = nullptr;
-// A wake line the MCU does not drive needs time after the pull resistor is switched on before it reads idle.
-static constexpr uint32_t WAKE_INPUT_SETTLE_US = 100;
 
 #ifdef USE_LOGGER
 // The SDK UART suspend does not wait for the transmitter, so the last log line would be cut off.
@@ -224,25 +222,6 @@ void XR806StandbyController::cancel_prepared_(size_t prepared) {
   }
 }
 
-bool XR806StandbyController::wake_input_active_() const {
-  if (!this->has_wake_pin_)
-    return false;
-  const auto pin = static_cast<GPIO_Pin>(this->wake_pin_);
-  GPIO_InitParam previous{};
-  HAL_GPIO_GetConfig(GPIO_PORT_A, pin, &previous);
-  // An output or another component's interrupt is refused later in attempt_standby_().
-  if (previous.mode == GPIOx_Pn_F1_OUTPUT || previous.mode == GPIOx_Pn_F6_EINT)
-    return false;
-  GPIO_InitParam input = previous;
-  input.mode = GPIOx_Pn_F0_INPUT;
-  input.pull = this->wake_falling_ ? GPIO_PULL_UP : GPIO_PULL_DOWN;
-  HAL_GPIO_Init(GPIO_PORT_A, pin, &input);
-  delayMicroseconds(WAKE_INPUT_SETTLE_US);
-  const GPIO_PinState level = HAL_GPIO_ReadPin(GPIO_PORT_A, pin);
-  HAL_GPIO_Init(GPIO_PORT_A, pin, &previous);
-  return this->wake_falling_ ? level == GPIO_PIN_LOW : level == GPIO_PIN_HIGH;
-}
-
 void XR806StandbyController::attempt_standby_() {
   if (this->busy_)
     return;
@@ -252,12 +231,6 @@ void XR806StandbyController::attempt_standby_() {
     return;
   }
 #endif
-  // Right after asking to sleep the MCU may still hold its wake line for a moment. Wait one more quiet
-  // interval instead of refusing, which would withdraw the MCU's consent until it is active again.
-  if (this->wake_input_active_()) {
-    this->state_.postpone();
-    return;
-  }
   this->busy_ = true;
   auto &p = lowpower_policy();
   p.set_scheduler_idle(false);
@@ -329,7 +302,6 @@ void XR806StandbyController::attempt_standby_() {
     gpio_armed = true;
     // An already asserted MCU wake level must not trigger an immediate
     // suspend/resume loop or hide pending UART work.
-    delayMicroseconds(WAKE_INPUT_SETTLE_US);
     const GPIO_PinState level = HAL_GPIO_ReadPin(GPIO_PORT_A, pin);
     if ((this->wake_falling_ && level == GPIO_PIN_LOW) || (!this->wake_falling_ && level == GPIO_PIN_HIGH)) {
       ESP_LOGW(TAG, "Wake input already active; standby refused");
