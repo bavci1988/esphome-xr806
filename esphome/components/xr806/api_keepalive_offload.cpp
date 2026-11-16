@@ -341,8 +341,9 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
     return;
 
   // Every frame takes a Noise nonce, and the host sends those the firmware did not, so encrypt only what the
-  // firmware can send before the wake timer, plus one: frame k goes out k + 1 periods after arming.
-  const uint32_t max_frames = wake_after_ms / (this->period_s_ * 1000U) + 2;
+  // firmware can send before the wake timer (frame k goes out k + 1 periods after arming), plus one for a late wake;
+  // a list that runs out would repeat its last frame and nonce.
+  const uint32_t max_frames = wake_after_ms / (this->period_s_ * 1000U) + 1;
   if (!this->capture_frames_(client, max_frames)) {
     if (this->frame_count_ == 0 && frame_capture.len == 0)
       return;  // Nothing reached the socket, so no nonce was used.
