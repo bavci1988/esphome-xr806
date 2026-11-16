@@ -27,7 +27,9 @@ static constexpr uint32_t WORDS_PER_READ = 16;
 static constexpr uint32_t START_DELAY_MS = 60000;  // time for an OTA update before the dump
 // Patch RAM of the WLAN core and its first words in bin/xradio_v3/wlan_fw.bin.
 static constexpr uint32_t CHECK_ADDRESS = 0xFFF00000;
+// Word 0 (a NOP in the file) is rewritten by the firmware at run time, so the check starts at word 1.
 static constexpr uint32_t CHECK_WORDS[] = {0xE1A00000, 0xE59F20A4, 0xEE012F10, 0xE59F00A0};
+static constexpr size_t CHECK_FIRST = 1;
 // ROM of the WLAN core: the patch's function table points up to 0x1F46B.
 static constexpr uint32_t ROM_END = 0x20000;
 
@@ -61,7 +63,7 @@ void XR806WlanRomDump::check_() {
     return;
   }
   bool match = true;
-  for (size_t i = 0; i < sizeof(CHECK_WORDS) / sizeof(CHECK_WORDS[0]); ++i)
+  for (size_t i = CHECK_FIRST; i < sizeof(CHECK_WORDS) / sizeof(CHECK_WORDS[0]); ++i)
     match = match && words[i] == CHECK_WORDS[i];
   ESP_LOGI(TAG, "Check 0x%08" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " -> %s", CHECK_ADDRESS,
            words[0], words[1], words[2], words[3], match ? "memory is readable" : "NO MATCH");
