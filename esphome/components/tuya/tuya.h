@@ -326,6 +326,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_mcu_wake_pulse_until_{0};
   uint32_t lp_mcu_woken_ms_{0};      // End of the last wake pulse
+  bool lp_mcu_wake_fresh_{false};    // The last wake pulse is not answered yet
   uint32_t lp_product_probe_ms_{0};  // Last product query of a recovery
   enum class ProductProbe : uint8_t { PRODUCT_PROBE_NONE, PRODUCT_PROBE_QUEUED, PRODUCT_PROBE_DIRECT };
   // A product query waiting for the wake pulse to end.

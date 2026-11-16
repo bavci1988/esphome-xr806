@@ -242,6 +242,7 @@ void Tuya::handle_low_power_frame_(uint8_t command, uint8_t version, const uint8
   }
   if (this->lp_wire_.complete(command, len) && this->expected_response_ == command_type)
     this->expected_response_.reset();
+  this->lp_mcu_wake_fresh_ = false;  // The MCU answered; a version-0 MCU may now fall asleep again.
   this->handle_low_power_command_(command, version, buffer, len);
   // A frame shows that the MCU is awake right now: during a recovery, ask for the product info at once instead
   // of waiting for a retry that may reach it asleep.
@@ -368,6 +369,7 @@ bool Tuya::mcu_wake_pulse_running_() {
   this->lp_mcu_wake_pulse_active_ = false;
   // Counted from the end of the pulse, so the command goes out before the MCU falls asleep again.
   this->lp_mcu_woken_ms_ = millis();
+  this->lp_mcu_wake_fresh_ = true;
   if (this->lp_awake_notification_pending_) {
     this->lp_awake_notification_pending_ = false;
     this->send_low_power_awake_frame_();
@@ -1125,11 +1127,13 @@ void Tuya::process_low_power_queue_() {
   });
   if (next == this->command_queue_.end())
     return;
-  // A low-power MCU sleeps whenever it is idle and listens only after a pulse on its wake line, so
-  // wake it before a command when it has been silent; the command goes out once the pulse is over.
-  if (this->mcu_wake_pin_ != nullptr &&
-      (this->lp_mcu_asleep_ || (wire_now - this->last_rx_char_timestamp_ > LP_MCU_SILENT_MS &&
-                                wire_now - this->lp_mcu_woken_ms_ > LP_MCU_SILENT_MS))) {
+  // A low-power MCU sleeps whenever it is idle and listens only after a pulse on its wake line; the command goes
+  // out once the pulse is over. A version-0 MCU can fall asleep right after its own answer, so for it neither a
+  // recent byte nor a pulse that it has already answered counts: only a fresh, unanswered pulse.
+  const bool awake = this->lp_v3_ ? wire_now - this->last_rx_char_timestamp_ <= LP_MCU_SILENT_MS ||
+                                        wire_now - this->lp_mcu_woken_ms_ <= LP_MCU_SILENT_MS
+                                  : this->lp_mcu_wake_fresh_ && wire_now - this->lp_mcu_woken_ms_ <= LP_MCU_SILENT_MS;
+  if (this->mcu_wake_pin_ != nullptr && (this->lp_mcu_asleep_ || !awake)) {
     this->begin_mcu_wake_pulse_();
     return;
   }
