@@ -1100,8 +1100,10 @@ void Tuya::process_low_power_queue_() {
     return;
   // A low-power MCU sleeps whenever it is idle and listens only after a pulse on its wake line, so
   // wake it before a command when it has been silent; the command goes out once the pulse is over.
-  if (this->mcu_wake_pin_ != nullptr && wire_now - this->last_rx_char_timestamp_ > LP_MCU_SILENT_MS &&
-      wire_now - this->lp_mcu_woken_ms_ > LP_MCU_SILENT_MS) {
+  if (this->mcu_wake_pin_ != nullptr &&
+      (this->lp_mcu_asleep_ || (wire_now - this->last_rx_char_timestamp_ > LP_MCU_SILENT_MS &&
+                                wire_now - this->lp_mcu_woken_ms_ > LP_MCU_SILENT_MS))) {
+    this->lp_mcu_asleep_ = false;
     this->lp_mcu_woken_ms_ = wire_now;
     this->begin_mcu_wake_pulse_();
     return;
@@ -1209,8 +1211,10 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
     return;
   }
   // The MCU is active again and asks for sleep itself once it is done.
-  if (command != 0x38)
+  if (command != 0x38) {
     this->lp_cmd38_deferred_ = false;
+    this->lp_mcu_asleep_ = false;
+  }
   // Once CMD38 is provisionally accepted, any new MCU traffic invalidates
   // the quiet interval. Do not race a report burst against CPU standby.
   if (command != 0x38 && command != LP_V3_SLEEP_CMD && this->lp_standby_.requested())
@@ -1432,6 +1436,16 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       // A version-0 MCU ignores the answer, sleeps anyway and asks again only after its next activity:
       // a request that cannot be granted now is granted later.
       this->lp_cmd38_deferred_ = !this->lp_v3_;
+      if (!this->lp_v3_) {
+        // It also sleeps right after asking, so the next command needs a wake pulse, and a network state
+        // that crossed the request is lost: send it again instead of resynchronizing everything.
+        this->lp_mcu_asleep_ = true;
+        if (this->lp_wire_.abandon_network()) {
+          ESP_LOGD(LP_TAG, "MCU went to sleep before answering CMD02; sending it again");
+          this->expected_response_.reset();
+          this->lp_network_status_ = 0xFF;
+        }
+      }
       if (this->lp_standby_.requested() ||
           static_cast<int32_t>(App.get_loop_component_start_time() - this->lp_cmd38_cooldown_until_) < 0) {
         this->cancel_low_power_standby_();

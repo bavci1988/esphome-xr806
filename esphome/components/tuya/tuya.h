@@ -332,6 +332,8 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool lp_cmd38_pending_{false};
   // A version-0 MCU asked for sleep and was told busy; it does not ask again until its next activity.
   bool lp_cmd38_deferred_{false};
+  // A version-0 MCU asked for sleep and sleeps now: the next command needs a wake pulse.
+  bool lp_mcu_asleep_{false};
   uint32_t lp_cmd38_deadline_ms_{0};
   uint32_t lp_cmd38_cooldown_until_{0};
   uint8_t lp_network_status_{0xFF};
