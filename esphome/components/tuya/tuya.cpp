@@ -64,7 +64,7 @@ void Tuya::setup() {
 void Tuya::loop() {
 #ifdef USE_TUYA_LOW_POWER
   if (this->is_low_power_() && this->init_failed_) {
-    // The MCU cannot be used: no valid product info, or that of another product. Act on none of its frames.
+    // The MCU UART could not be set to a scanned baud rate. Act on none of its frames.
     this->discard_available();
     return;
   }

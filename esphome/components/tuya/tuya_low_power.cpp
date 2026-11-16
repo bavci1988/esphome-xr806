@@ -3,11 +3,11 @@
 #ifdef USE_TUYA_LOW_POWER
 
 #include <cctype>
+#include <algorithm>
 #include <cstring>
 
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
-#include "esphome/core/util.h"
 
 #ifdef USE_NETWORK
 #include "esphome/components/network/util.h"
@@ -38,6 +38,15 @@ static constexpr uint8_t LP_V3_BUSY_UPGRADE = 0x04;
 // there, because a hub runs one protocol only.
 static constexpr uint32_t LP_NETWORK_STATUS_INTERVAL_ID = 1;
 static constexpr uint32_t LP_PREPROBE_WAKE_TIMEOUT_ID = 4;
+// After the quick CMD01 retries fail, ask again every 30 s until the MCU answers.
+static constexpr uint32_t LP_PRODUCT_SLOW_RETRY_MS = 30000;
+// Pending writes; a newer write to the same datapoint replaces the queued one.
+static constexpr size_t LP_MAX_QUEUED_COMMANDS = 8;
+
+// A datapoint write: CMD09 for version 0, CMD06 for version 3 (version 0 uses CMD06 only for direct time replies).
+static bool is_low_power_write(const TuyaCommand &command) {
+  return command.cmd == static_cast<TuyaCommandType>(0x09) || command.cmd == static_cast<TuyaCommandType>(0x06);
+}
 
 void Tuya::setup_low_power_() {
   this->init_state_ = TuyaInitState::INIT_PRODUCT;
@@ -128,6 +137,8 @@ void Tuya::loop_low_power_() {
     }
     if (this->lp_host_ != nullptr)
       this->lp_host_->request_standby(false);
+    // Once the UART is back, the product query restores the MCU link.
+    this->lp_product_retry_.begin(App.get_loop_component_start_time());
     this->update_low_power_sleep_lock_();
     return;  // No further CMD09 or autobaud probes on a failed transport.
   }
@@ -225,13 +236,8 @@ void Tuya::handle_low_power_frame_(uint8_t command, uint8_t version, const uint8
     ESP_LOGW(LP_TAG, "Discarding overdue MCU ACK CMD 0x%02X; recovery required", command);
     return;
   }
-  if (this->lp_wire_.complete(command, len) && this->expected_response_.has_value() &&
-      this->expected_response_ == command_type) {
+  if (this->lp_wire_.complete(command, len) && this->expected_response_ == command_type)
     this->expected_response_.reset();
-    if (!this->command_queue_.empty())
-      this->command_queue_.erase(this->command_queue_.begin());
-    this->init_retries_ = 0;
-  }
   this->handle_low_power_command_(command, version, buffer, len);
 }
 
@@ -253,6 +259,7 @@ bool Tuya::begin_low_power_command_(const TuyaCommand &command) {
       ESP_LOGE(LP_TAG, "Refusing overlapping/ambiguous low-power MCU wire transaction");
       this->lp_session_.command_timeout();
       this->lp_wire_.transport_fault();
+      this->lp_product_retry_.begin(App.get_loop_component_start_time());
       return false;
     }
     this->expected_response_ = command.cmd;
@@ -290,10 +297,8 @@ void Tuya::send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType dat
     }
     this->update_low_power_sleep_lock_();
   }
-  if (!this->lp_session_.ready() || !this->lp_wire_.idle() || this->lp_standby_.requested() ||
-      this->lp_mcu_update_ != McuUpdate::MCU_UPDATE_IDLE) {
-    ESP_LOGW(LP_TAG, "Refusing DP%u write before MCU synchronization or while another transaction owns UART",
-             static_cast<unsigned>(datapoint_id));
+  if (this->lp_mcu_update_ != McuUpdate::MCU_UPDATE_IDLE) {
+    ESP_LOGW(LP_TAG, "Refusing DP%u write while the MCU firmware is updated", static_cast<unsigned>(datapoint_id));
     return;
   }
   // The original MCU DP102 handler blindly reads four bytes even for
@@ -310,15 +315,24 @@ void Tuya::send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType dat
     this->lp_sleep_window_.on_write(datapoint_id);
     this->invalidate_low_power_mode_epoch_();
   }
-  std::vector<uint8_t> buffer;
-  buffer.reserve(data.size() + 4);
-  buffer.push_back(datapoint_id);
-  buffer.push_back(static_cast<uint8_t>(datapoint_type));
-  buffer.push_back(data.size() >> 8);
-  buffer.push_back(data.size() >> 0);
+  std::vector<uint8_t> buffer{datapoint_id, static_cast<uint8_t>(datapoint_type),
+                              static_cast<uint8_t>(data.size() >> 8), static_cast<uint8_t>(data.size())};
   buffer.insert(buffer.end(), data.begin(), data.end());
+  // Writes wait in the queue until the MCU's state is known; a newer value replaces a queued one.
+  for (auto &queued : this->command_queue_) {
+    if (is_low_power_write(queued) && queued.payload[0] == datapoint_id) {
+      queued.payload = std::move(buffer);
+      return;
+    }
+  }
+  if (this->command_queue_.size() >= LP_MAX_QUEUED_COMMANDS) {
+    ESP_LOGW(LP_TAG, "Too many pending MCU commands; dropping the DP%u write", static_cast<unsigned>(datapoint_id));
+    return;
+  }
   // The HC32 low-power firmware 1.3.1 expects DP writes as CMD09; version-3 MCUs take the standard CMD06.
-  this->send_command_(TuyaCommand{.cmd = static_cast<TuyaCommandType>(this->lp_v3_ ? 0x06 : 0x09), .payload = buffer});
+  this->command_queue_.push_back(
+      TuyaCommand{.cmd = static_cast<TuyaCommandType>(this->lp_v3_ ? 0x06 : 0x09), .payload = std::move(buffer)});
+  this->update_low_power_sleep_lock_();
 }
 
 void Tuya::begin_mcu_wake_pulse_() {
@@ -426,12 +440,16 @@ void Tuya::poll_low_power_product_recovery_() {
       return;
     }
     if (this->lp_product_retry_.exhausted()) {
-      this->init_failed_ = true;
+      // The MCU may sleep without a wake line, or be gone: keep asking, more slowly, and keep listening.
       this->lp_mode_requery_pending_ = false;
       this->lp_session_.command_timeout();
-      ESP_LOGE(LP_TAG, "No valid MCU product info after the bounded CMD01 retries");
-      this->status_set_warning(LOG_STR("Malformed MCU product info"));
+      if (!this->status_has_warning()) {
+        ESP_LOGW(LP_TAG, "MCU does not answer the product query; asking again every %u s",
+                 static_cast<unsigned>(LP_PRODUCT_SLOW_RETRY_MS / 1000));
+      }
+      this->status_set_warning(LOG_STR("MCU does not answer"));
       this->lp_product_retry_.success();
+      this->lp_product_retry_.begin(now + LP_PRODUCT_SLOW_RETRY_MS - TuyaLowPowerProductRetry::RETRY_MS);
       return;
     }
     this->lp_product_retry_.query_sent(now);
@@ -993,8 +1011,6 @@ void Tuya::process_low_power_queue_() {
   if (this->lp_wire_.expire(now)) {
     const bool product_query = product_in_flight;
     this->expected_response_.reset();
-    if (!this->command_queue_.empty())
-      this->command_queue_.erase(this->command_queue_.begin());
     this->lp_session_.command_timeout();
     this->lp_network_status_ = 0xFF;
     this->invalidate_low_power_mode_epoch_();
@@ -1013,10 +1029,18 @@ void Tuya::process_low_power_queue_() {
   }
 
   if (this->lp_session_.busy() || this->lp_wire_.active() || this->lp_wire_.faulted() ||
-      this->expected_response_.has_value() || !this->rx_message_.empty() || this->command_queue_.empty() ||
+      this->expected_response_.has_value() || !this->rx_message_.empty() ||
       static_cast<uint32_t>(wire_now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS)
     return;
-  if (!this->lp_session_.has_product() && this->command_queue_.front().cmd != TuyaCommandType::PRODUCT_QUERY)
+  // Before the product info only CMD01 may go out. Writes wait until the MCU's state is known, while the MCU
+  // sleeps under its standby consent, and during an MCU firmware update.
+  auto next = std::find_if(this->command_queue_.begin(), this->command_queue_.end(), [this](const TuyaCommand &c) {
+    if (!this->lp_session_.has_product())
+      return c.cmd == TuyaCommandType::PRODUCT_QUERY;
+    return !is_low_power_write(c) || (this->lp_session_.ready() && !this->lp_standby_.requested() &&
+                                      this->lp_mcu_update_ == McuUpdate::MCU_UPDATE_IDLE);
+  });
+  if (next == this->command_queue_.end())
     return;
   // A low-power MCU sleeps whenever it is idle and listens only after a pulse on its wake line, so
   // wake it before a command when it has been silent; the command goes out once the pulse is over.
@@ -1027,9 +1051,9 @@ void Tuya::process_low_power_queue_() {
     return;
   }
 
-  this->send_raw_command_(this->command_queue_.front());
-  if (!this->expected_response_.has_value())
-    this->command_queue_.erase(this->command_queue_.begin());
+  const TuyaCommand command = std::move(*next);
+  this->command_queue_.erase(next);
+  this->send_raw_command_(command);
 }
 
 void Tuya::send_low_power_direct_(uint8_t command, const std::vector<uint8_t> &payload) {
@@ -1062,8 +1086,10 @@ void Tuya::send_low_power_network_() {
     return;
   uint8_t status = 0x02;
 #ifdef USE_NETWORK
+  // The MCU reports its state only to a module that is "connected to the cloud" (0x04), so that is what the
+  // module reports while the network is up, whether or not a client is connected.
   if (network::is_connected())
-    status = remote_is_connected() ? 0x04 : 0x03;
+    status = 0x04;
 #endif
   if (status == this->lp_network_status_)
     return;
@@ -1185,6 +1211,7 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
                  this->lp_v3_ ? LOG_STR_LITERAL("CMD06") : LOG_STR_LITERAL("CMD09"));
       }
       this->lp_product_retry_.success();
+      this->status_clear_warning();
       this->lp_mode_requery_pending_ = false;
       this->lp_sleep_window_.product_validated();
       if (had_product) {
@@ -1263,8 +1290,7 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         }
         ESP_LOGI(LP_TAG, "MCU status synchronized (version-3 MCU)");
       }
-      if (this->lp_v3_pushes_)
-        this->notify_mcu_ready_();
+      this->notify_mcu_ready_();
       this->update_low_power_sleep_lock_();
       return;
     }
