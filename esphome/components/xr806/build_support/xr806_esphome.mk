@@ -336,6 +336,11 @@ endif
 
 
 
+# WLAN ROM dump diagnostics; the source is empty unless USE_XR806_WLAN_ROM_DUMP is defined.
+XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_wlan_rom_dump.o
+$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_wlan_rom_dump.o
+$(eval $(call XR806_COMPILE_CPP,xr_wlan_rom_dump,$(XR806_SRC)/esphome/components/xr806/wlan_rom_dump.cpp))
+
 # Flash-backed preferences manager (FDCM journal in two reserved sectors).
 
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr806_preferences.o

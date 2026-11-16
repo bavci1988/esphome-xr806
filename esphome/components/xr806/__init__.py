@@ -59,6 +59,8 @@ CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH = "experimental_wifi_fw_standby_patch"
 CONF_KEEPALIVE_PERIOD = "keepalive_period"
 CONF_HOST_SLEEP = "host_sleep"
 CONF_WAKE_ON_PEER = "wake_on_peer"
+CONF_DIAGNOSE_WLAN_ROM_DUMP = "diagnose_wlan_rom_dump"
+CONF_WLAN_ROM_DUMP_ID = "wlan_rom_dump_id"
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
 XR806WiFiStandby = xr806_ns.class_("XR806WiFiStandby", cg.Component)
@@ -68,6 +70,7 @@ XR806OTAStandbyGuard = xr806_ns.class_("XR806OTAStandbyGuard", cg.Component)
 XR806HTTPStandby = xr806_ns.class_("XR806HTTPStandby", cg.Component)
 XR806MQTTStandby = xr806_ns.class_("XR806MQTTStandby", cg.Component)
 XR806TuyaLowPowerHost = xr806_ns.class_("XR806TuyaLowPowerHost", cg.Component)
+XR806WlanRomDump = xr806_ns.class_("XR806WlanRomDump", cg.Component)
 
 
 # Radio settings for the standard wifi: component. DTIM and the listen interval
@@ -255,6 +258,7 @@ CONFIG_SCHEMA = cv.All(
             # Former switch for power management, now implied by standby
             cv.Optional(CONF_LOWPOWER): cv.boolean,
             cv.GenerateID(CONF_TUYA_HOST_ID): cv.declare_id(XR806TuyaLowPowerHost),
+            cv.GenerateID(CONF_WLAN_ROM_DUMP_ID): cv.declare_id(XR806WlanRomDump),
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
             cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
             cv.Optional(CONF_STANDBY): cv.All(
@@ -267,6 +271,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(
                 CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH
             ): EXPERIMENTAL_WIFI_FW_STANDBY_PATCH_SCHEMA,
+            # Diagnostics: print the WLAN core's ROM to the log, read through the stock firmware.
+            cv.Optional(CONF_DIAGNOSE_WLAN_ROM_DUMP, default=False): cv.boolean,
             cv.Optional(CONF_TOOLCHAIN): cv.toolchain_enum(_TOOLCHAINS),
         }
     ),
@@ -475,6 +481,14 @@ async def to_code(config: ConfigType) -> None:
     cg.add_define("ESPHOME_BOARD", config[CONF_BOARD])
     # Chip name for the API and for the chipFamily of http_request update manifests.
     cg.add_define("ESPHOME_VARIANT", "XR806")
+
+    if config[CONF_DIAGNOSE_WLAN_ROM_DUMP] and "wifi" in CORE.config:
+        cg.add_define("USE_XR806_WLAN_ROM_DUMP")
+        cg.add_global(
+            cg.RawStatement('#include "esphome/components/xr806/wlan_rom_dump.h"')
+        )
+        rom_dump = cg.new_Pvariable(config[CONF_WLAN_ROM_DUMP_ID])
+        await cg.register_component(rom_dump, {})
 
     if "wifi" in CORE.config:
         wlan = config[CONF_WLAN]

@@ -660,6 +660,25 @@ def test_wifi_fw_standby_patch_rejects_invalid_configs(
     assert message in capsys.readouterr().out
 
 
+def test_wlan_rom_dump(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+) -> None:
+    config = component_config_path("stay_connected_standby.yaml").read_text()
+    path = tmp_path / "wlan_rom_dump.yaml"
+    path.write_text(
+        config.replace(
+            "  board: wxu\n", "  board: wxu\n  diagnose_wlan_rom_dump: true\n"
+        )
+    )
+
+    generated = generate_main(path)
+
+    assert "USE_XR806_WLAN_ROM_DUMP" in defines()
+    assert "XR806WlanRomDump" in generated
+
+
 def test_former_lowpower_key_is_ignored_with_a_warning(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
