@@ -17,6 +17,8 @@ extern "C" {
 #endif
 
 #include "standby_controller.h"
+
+#include <cinttypes>
 #include "lowpower_policy.h"
 
 #include "esphome/core/application.h"
@@ -46,6 +48,7 @@ namespace esphome::xr806 {
 ESPHOME_LOG_TAG(TAG, "xr806.standby");
 
 static XR806StandbyController *active_controller = nullptr;
+static constexpr uint32_t WAKE_INPUT_SETTLE_US = 100;
 
 #ifdef USE_LOGGER
 // The SDK UART suspend does not wait for the transmitter, so the last log line would be cut off.
@@ -211,6 +214,17 @@ void XR806StandbyController::loop() {
   constexpr uint32_t OWNED_BY_COORDINATOR =
       XR806LowPowerPolicy::SCHEDULER_BUSY | XR806LowPowerPolicy::WAKE_NOT_READY | XR806LowPowerPolicy::NOT_REQUESTED;
   const bool all_owners_idle = (blockers & ~OWNED_BY_COORDINATOR) == 0;
+  // Diagnostics for the TRV16 bring-up: which owners keep a requested standby waiting.
+  if (p.standby_requested() && !all_owners_idle) {
+    const uint32_t now = millis();
+    if (now - this->blocked_log_ms_ >= BLOCKED_LOG_INTERVAL_MS) {
+      this->blocked_log_ms_ = now;
+      ESP_LOGD(TAG,
+               "Standby requested, waiting for owners 0x%03" PRIX32
+               " (UART=1 NET=2 OTA=4 MCU=8 API=80 MDNS=100 HTTP=200 MQTT=400)",
+               blockers & ~OWNED_BY_COORDINATOR);
+    }
+  }
   if (this->state_.due(millis(), p.generation(), p.standby_requested(), all_owners_idle))
     this->attempt_standby_();
 }
@@ -235,6 +249,8 @@ bool XR806StandbyController::wake_input_active_() const {
   input.mode = GPIOx_Pn_F0_INPUT;
   input.pull = this->wake_falling_ ? GPIO_PULL_UP : GPIO_PULL_DOWN;
   HAL_GPIO_Init(GPIO_PORT_A, pin, &input);
+  // A line the MCU does not drive needs the pull resistor to settle before it reads high.
+  delayMicroseconds(WAKE_INPUT_SETTLE_US);
   const GPIO_PinState level = HAL_GPIO_ReadPin(GPIO_PORT_A, pin);
   HAL_GPIO_Init(GPIO_PORT_A, pin, &previous);
   return this->wake_falling_ ? level == GPIO_PIN_LOW : level == GPIO_PIN_HIGH;
@@ -252,9 +268,17 @@ void XR806StandbyController::attempt_standby_() {
   // Right after asking to sleep the MCU may still hold its wake line for a moment. Wait one more quiet
   // interval instead of refusing, which would withdraw the MCU's consent until it is active again.
   if (this->wake_input_active_()) {
-    ESP_LOGV(TAG, "Wake input still active; standby waits");
+    // Diagnostics for the TRV16 bring-up: the first wait and then every 20th.
+    if (this->wake_input_waits_++ % 20 == 0) {
+      ESP_LOGD(TAG, "Wake input PA%u still active; standby waits (%u times)", static_cast<unsigned>(this->wake_pin_),
+               static_cast<unsigned>(this->wake_input_waits_));
+    }
     this->state_.postpone();
     return;
+  }
+  if (this->wake_input_waits_ != 0) {
+    ESP_LOGD(TAG, "Wake input released after %u waits", static_cast<unsigned>(this->wake_input_waits_));
+    this->wake_input_waits_ = 0;
   }
   this->busy_ = true;
   auto &p = lowpower_policy();
@@ -327,6 +351,7 @@ void XR806StandbyController::attempt_standby_() {
     gpio_armed = true;
     // An already asserted MCU wake level must not trigger an immediate
     // suspend/resume loop or hide pending UART work.
+    delayMicroseconds(WAKE_INPUT_SETTLE_US);
     const GPIO_PinState level = HAL_GPIO_ReadPin(GPIO_PORT_A, pin);
     if ((this->wake_falling_ && level == GPIO_PIN_LOW) || (!this->wake_falling_ && level == GPIO_PIN_HIGH)) {
       ESP_LOGW(TAG, "Wake input already active; standby refused");

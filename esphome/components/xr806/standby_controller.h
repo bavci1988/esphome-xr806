@@ -116,6 +116,9 @@ class XR806StandbyController final : public Component {
   bool require_uart_participant_{false};
   bool stay_connected_{false};
   bool busy_{false};
+  uint32_t wake_input_waits_{0};
+  uint32_t blocked_log_ms_{0};
+  static constexpr uint32_t BLOCKED_LOG_INTERVAL_MS = 10000;
   uint32_t request_since_ms_{0};
   uint32_t preflight_since_ms_{0};
   bool preflight_requested_{false};
