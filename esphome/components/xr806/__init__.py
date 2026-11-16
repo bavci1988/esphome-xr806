@@ -641,6 +641,21 @@ def run_compile(args: object, config: ConfigType) -> bool:
     xr806_libraries.write_fragment(libraries, obj, libraries_mk)
     variables["XR806_LIBRARIES_MK"] = str(libraries_mk)
 
+    if CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH in CORE.config.get(DOMAIN, {}):
+        # The keepalive frame list needs the patched WLAN firmware; without the option the image keeps the stock one.
+        from .build_support import wlan_fw_patch
+
+        try:
+            patched = wlan_fw_patch.write_patched(
+                sdk_root / "bin/xradio_v3/wlan_fw.bin", obj / "wlan_fw_keepalive.bin"
+            )
+        except (OSError, wlan_fw_patch.WlanFirmwarePatchError) as err:
+            raise EsphomeError(f"XR806 WLAN firmware patch failed: {err}") from err
+        variables["XR806_WLAN_FW"] = str(patched)
+        print(
+            "[XR806] Using the patched WLAN firmware (keepalive frame list)", flush=True
+        )
+
     command = [
         "make",
         "-f",

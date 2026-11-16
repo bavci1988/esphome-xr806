@@ -195,9 +195,13 @@ $(XR806_FW_DIR)/wlan_bl.bin: $(ROOT_PATH)/bin/xradio_v3/wlan_bl.bin
 >@mkdir -p $(@D)
 >install -m 0644 $< $@
 
-$(XR806_FW_DIR)/wlan_fw.bin: $(ROOT_PATH)/bin/xradio_v3/wlan_fw.bin
+# The stock WLAN firmware, or the patched one from experimental_wifi_fw_standby_patch. Compared on every build,
+# because switching between the two must replace the copy even when it is newer than its source.
+XR806_WLAN_FW ?= $(ROOT_PATH)/bin/xradio_v3/wlan_fw.bin
+.PHONY: xr806-wlan-fw-check
+$(XR806_FW_DIR)/wlan_fw.bin: $(XR806_WLAN_FW) xr806-wlan-fw-check
 >@mkdir -p $(@D)
->install -m 0644 $< $@
+>@cmp -s $< $@ || install -m 0644 $< $@
 
 $(XR806_FW_DIR)/sys_sdd_40M.bin: $(ROOT_PATH)/bin/xradio_v3/sys_sdd_40M.bin
 >@mkdir -p $(@D)
