@@ -110,6 +110,7 @@ static constexpr uint32_t ACK_WAIT_MS = 500;
 static constexpr uint32_t PEER_PING_LIMIT_MS = 17000;
 // The WLAN driver refused to suspend right after the host sent the held frames; wait this long after such a burst.
 static constexpr uint32_t SETTLE_MS = 2000;
+static constexpr uint32_t PEER_ANSWER_WAIT_MS = 300;
 
 // The firmware commands take large structures; keep them off the main loop stack.
 static union {
@@ -270,6 +271,23 @@ void XR806APIKeepaliveOffload::send_unsent_(uint32_t from) {
   }
 }
 
+// Home Assistant sent no API message while the firmware kept the connection alive, only TCP ACKs. The API would
+// then send its own ping and, once the time since the last received message passed its disconnect limit, drop the
+// connection in the next loop before the answer arrives. A ping sent here gets its answer into the socket before the
+// API's next read, which comes before its keepalive check.
+void XR806APIKeepaliveOffload::await_peer_message_() {
+  if (!this->client_->send_message(api::PingRequest{}))
+    return;
+  const uint32_t start = millis();
+  while (millis() - start < PEER_ANSWER_WAIT_MS) {
+    int pending = 0;
+    if (lwip_ioctl(this->fd_, FIONREAD, &pending) != 0 || pending > 0)
+      return;
+    delay(5);
+  }
+  ESP_LOGD(TAG, "No answer to the ping within %" PRIu32 " ms", PEER_ANSWER_WAIT_MS);
+}
+
 void XR806APIKeepaliveOffload::close_(const char *reason) {
   ESP_LOGW(TAG, "Closing the API connection: %s", reason);
   for (const auto &conn : api::global_api_server->active_clients()) {
@@ -407,6 +425,7 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
   } else {
     this->send_unsent_(sent);
     this->burst_ms_ = millis();
+    this->await_peer_message_();
     ESP_LOGD(TAG, "Resynced: lwIP sequence +%" PRIu32 " bytes, %" PRIu32 " held frames sent by the host",
              sent * this->frame_len_, this->frame_count_ - sent);
   }

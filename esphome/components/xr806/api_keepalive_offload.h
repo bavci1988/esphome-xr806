@@ -46,6 +46,7 @@ class XR806APIKeepaliveOffload {
   bool configure_firmware_();
   void stop_firmware_();
   void send_unsent_(uint32_t from);
+  void await_peer_message_();
   void close_(const char *reason);
 
   api::APIConnection *client_{nullptr};
