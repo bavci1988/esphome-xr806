@@ -318,7 +318,10 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
   bool alive = false;
   for (const auto &conn : api::global_api_server->active_clients())
     alive = alive || conn.get() == this->client_;
-  const uint32_t sent = (state.ip_id - IP_ID_INIT) & 0xFFFF;
+  // The firmware adds the frame length to its sequence for every frame Home Assistant acknowledged; the IP ID
+  // also counts other frames, such as acknowledgements, so it is only logged.
+  const uint32_t advanced = state.seq - this->snd_nxt_;
+  const uint32_t sent = this->frame_len_ != 0 ? advanced / this->frame_len_ : 0;
   ESP_LOGI(TAG,
            "Woke after %" PRIu32 " ms (wlan=%d timer=%d gpio=%d): firmware sent %" PRIu32
            " of %u frames, seq %08" PRIX32 "%s",
@@ -331,7 +334,7 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
     this->close_("could not read the firmware state");
   } else if (state.in_flight) {
     this->close_("a frame is still unacknowledged");
-  } else if (sent > this->frame_count_ || state.seq != this->snd_nxt_ + sent * this->frame_len_) {
+  } else if (sent > this->frame_count_ || advanced != sent * this->frame_len_) {
     this->close_("the firmware state does not match the frames");
   } else if (xr806_offload_advance(this->fd_, sent * this->frame_len_) != 0) {
     this->close_("lwIP could not take over the sequence numbers");
