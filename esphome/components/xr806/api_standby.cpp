@@ -57,16 +57,19 @@ bool XR806APIStandby::clients_idle_() const {
 }
 
 void XR806APIStandby::standby_preflight(bool requested) {
-  lowpower_policy().set_api_idle(requested && this->may_quiesce() && this->clients_idle_());
+  bool idle = requested && this->may_quiesce() && this->clients_idle_();
+#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
+  // Holding the API vote delays the attempt; refusing in prepare_for_standby() would cancel it, and the MCU
+  // would withdraw its sleep request.
+  if (idle && !this->offload_.ready_for_standby())
+    idle = false;
+#endif
+  lowpower_policy().set_api_idle(idle);
 }
 
 bool XR806APIStandby::prepare_for_standby() {
   // With the keepalive experiment the connection is handed to the WLAN firmware in standby_committing(),
   // once nothing can refuse standby any more.
-#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
-  if (this->may_quiesce() && this->clients_idle_() && !this->offload_.ready_for_standby())
-    return false;
-#endif
   return this->may_quiesce() && this->clients_idle_();
 }
 

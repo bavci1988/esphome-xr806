@@ -301,7 +301,7 @@ bool XR806APIKeepaliveOffload::ready_for_standby() {
   if (now - last_write_ms + this->period_s_ * 1000U <= PEER_PING_LIMIT_MS)
     return true;
   // Home Assistant would ping before the first firmware frame; restart its timer and try again shortly.
-  ESP_LOGD(TAG, "Standby postponed: %" PRIu32 " ms since the last write, sending a ping response first",
+  ESP_LOGD(TAG, "Standby waits: %" PRIu32 " ms since the last write, sending a ping response first",
            now - last_write_ms);
   if (!client->send_message(api::PingResponse{}))
     return true;
