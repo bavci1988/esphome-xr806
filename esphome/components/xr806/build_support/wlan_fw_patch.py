@@ -18,9 +18,6 @@ server 0 sends a different, pre-encrypted frame each time Home Assistant acknowl
 3. The receive filter (0x0900A012) acknowledged data from the peer itself and dropped it, so a command from Home
    Assistant never reached the host. Data segments are now passed to the host, which wakes it (0x0900A14E);
    segments without data are still handled by the firmware.
-4. While the host sleeps the receive filter dropped every IPv4 packet from anyone but the keepalive peer, so the
-   web server or OTA could not wake the host. A TCP SYN without ACK is now passed to the host (0x0900A216, code
-   in the same place as the frame chooser).
 
 Only the firmware with the known SHA-256 is patched; see docs/WLAN_FIRMWARE_NOTES.md in the xr806-sdk repository.
 Nothing patched is stored: the stock file comes from the SDK and the patch is applied in the build directory.
@@ -39,9 +36,6 @@ STOCK_SHA256 = "0d08b6c6d0c9bcf3af7b3ebdab55cb623f28feb8392343585255be17c98e59c8
 # It overwrites the UDP keepalive from 0x0900A3C6 up to its literal pool at 0x0900A4A8.
 CAVE_SOURCE = Path(__file__).with_name("wlan_fw_keepalive.S")
 CAVE_ADDRESS = 0x0900A3C8
-# wlan_fw_keepalive.S starts with two branches: the frame chooser at CAVE_ADDRESS, the receive filter decision at +2.
-CAVE_PAYLOAD_ENTRY = CAVE_ADDRESS
-CAVE_FILTER_ENTRY = CAVE_ADDRESS + 2
 CAVE_MAX_SIZE = 0x0900A4A8 - CAVE_ADDRESS
 IMMEDIATE_SEND_ADDRESS = 0x0900A374
 IMMEDIATE_SEND_STOCK = bytes.fromhex("00f0a8f9")  # bl 0x0900A6C8
@@ -54,9 +48,6 @@ THUMB_NOP = bytes.fromhex("c046")  # mov r8, r8
 PEER_DATA_ADDRESS = 0x0900A14E
 PEER_DATA_STOCK = bytes.fromhex("0022")  # movs r2,#0: start of the acknowledgement
 PEER_DATA_PATCHED = bytes.fromhex("67e0")  # b 0x0900A220: return 0, the frame goes to the host
-FILTER_DROP_ADDRESS = 0x0900A216
-# ldr r0,[sp,#0x14]; cmp r0,#0; bne 0x0900A220; movs r0,#1 (then str r0,[sp,#0x18])
-FILTER_DROP_STOCK = bytes.fromhex("0598002801d10120")
 
 # Layout the host needs, as WLAN core addresses.
 FRAMES_PER_ENTRY_AREA = 128
@@ -168,12 +159,7 @@ def patch(stock: bytes, cave: bytes, verify_hash: bool = True) -> bytes:
         (
             PAYLOAD_SOURCE_ADDRESS,
             PAYLOAD_SOURCE_STOCK,
-            thumb_bl(PAYLOAD_SOURCE_ADDRESS, CAVE_PAYLOAD_ENTRY) + THUMB_NOP,
-        ),
-        (
-            FILTER_DROP_ADDRESS,
-            FILTER_DROP_STOCK,
-            thumb_bl(FILTER_DROP_ADDRESS, CAVE_FILTER_ENTRY) + THUMB_NOP * 2,
+            thumb_bl(PAYLOAD_SOURCE_ADDRESS, CAVE_ADDRESS) + THUMB_NOP,
         ),
         (CAVE_ADDRESS, None, cave),
         (PEER_DATA_ADDRESS, PEER_DATA_STOCK, PEER_DATA_PATCHED),
