@@ -1264,7 +1264,10 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
       if (this->lp_host_ != nullptr)
         this->lp_host_->request_standby(false);
       if (!this->lp_session_.has_product()) {
-        this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
+        // During a recovery the frame handler already sends the product query directly; a queued one would
+        // follow its answer and run the full resynchronization a second time.
+        if (!this->lp_product_retry_.active())
+          this->send_empty_command_(TuyaCommandType::PRODUCT_QUERY);
       } else {
         this->lp_session_.reset_status();
         this->lp_network_status_ = 0xFF;
