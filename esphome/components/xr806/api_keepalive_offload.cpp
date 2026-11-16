@@ -110,7 +110,52 @@ static constexpr uint32_t ACK_WAIT_MS = 500;
 static constexpr uint32_t PEER_PING_LIMIT_MS = 17000;
 // The WLAN driver refused to suspend right after the host sent the held frames; wait this long after such a burst.
 static constexpr uint32_t SETTLE_MS = 2000;
-static constexpr uint32_t PEER_ANSWER_WAIT_MS = 300;
+// lwIP holds the small ping back (Nagle) until the frames sent before it are acknowledged.
+static constexpr uint32_t PEER_ANSWER_WAIT_MS = 1000;
+
+// Diagnostics for a hung WLAN core: its mode stacks (set up below 0xFFF0C000 by the reset code in wlan_fw.bin) and
+// the patch's data with the keepalive state, read through the WLAN RAM window right after every wake and printed
+// only when the firmware no longer answers, before the driver reloads it.
+struct WlanRamRegion {
+  uint32_t wlan_address;
+  uint32_t size;
+};
+static constexpr WlanRamRegion CRASH_REGIONS[] = {
+    {0xFFF0B200, 0x0E00},  // UND, SYS, ABT, FIQ, SVC and IRQ stacks
+    {0x0900BB80, 0x0480},  // server, state, keepalive and wake tables
+};
+static constexpr size_t CRASH_SNAPSHOT_WORDS = (0x0E00 + 0x0480) / 4;
+static uint32_t crash_snapshot[CRASH_SNAPSHOT_WORDS];
+
+static uintptr_t wlan_ram_window(uint32_t wlan_address) {
+  // FW_ADDR_TO_APP_ADDR of the driver: 0xFFF0xxxx -> 0x6800xxxx, 0x0900xxxx -> 0x6800C000 + offset.
+  if ((wlan_address & 0xFFFF0000) == 0xFFF00000)
+    return 0x68000000 + (wlan_address & 0xFFFF);
+  return 0x6800C000 + (wlan_address - 0x09000000);
+}
+
+static void take_crash_snapshot() {
+  size_t out = 0;
+  for (const auto &region : CRASH_REGIONS) {
+    const auto *src = reinterpret_cast<const volatile uint32_t *>(wlan_ram_window(region.wlan_address));
+    for (uint32_t w = 0; w < region.size / 4; ++w)
+      crash_snapshot[out++] = src[w];
+  }
+}
+
+static void print_crash_snapshot() {
+  ESP_LOGW(TAG, "WLAN core RAM at the wake (WRAM <WLAN address> <8 words>):");
+  size_t index = 0;
+  for (const auto &region : CRASH_REGIONS) {
+    for (uint32_t offset = 0; offset < region.size; offset += 32, index += 8) {
+      const uint32_t *w = crash_snapshot + index;
+      ESP_LOGW(TAG, "WRAM %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
+                    " %08" PRIX32 " %08" PRIX32,
+               region.wlan_address + offset, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+      delay(2);
+    }
+  }
+}
 
 // The firmware commands take large structures; keep them off the main loop stack.
 static union {
@@ -377,6 +422,7 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
 void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
   if (this->client_ == nullptr)
     return;
+  take_crash_snapshot();
   const uint32_t elapsed = millis() - this->armed_ms_;
   if (this->host_sleep_)
     request(WLAN_EXT_CMD_SET_P2P_HOST_SLEEP, 0);
@@ -416,6 +462,7 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
   if (!alive) {
     ESP_LOGI(TAG, "The API connection is gone");
   } else if (!ok) {
+    print_crash_snapshot();
     this->close_("could not read the firmware state");
   } else if (state.in_flight) {
     this->close_("a frame is still unacknowledged");
