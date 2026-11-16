@@ -8,6 +8,7 @@
 
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
+#include "esphome/core/util.h"
 
 #ifdef USE_NETWORK
 #include "esphome/components/network/util.h"
@@ -1086,10 +1087,10 @@ void Tuya::send_low_power_network_() {
     return;
   uint8_t status = 0x02;
 #ifdef USE_NETWORK
-  // The MCU reports its state only to a module that is "connected to the cloud" (0x04), so that is what the
-  // module reports while the network is up, whether or not a client is connected.
+  // 0x04 ("connected to the cloud") only with a client. Each change sends CMD02, also after a standby: the
+  // HC32 relies on that traffic after its own wake; a constant 0x04 left its reports unanswered.
   if (network::is_connected())
-    status = 0x04;
+    status = remote_is_connected() ? 0x04 : 0x03;
 #endif
   if (status == this->lp_network_status_)
     return;
