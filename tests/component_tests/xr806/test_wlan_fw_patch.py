@@ -14,9 +14,10 @@ SECTION_SIZE = 0x1000
 CAVE = bytes(range(0x20, 0x20 + 92))
 # wlan_fw_keepalive.S as assembled with GNU as and checked in Unicorn against the firmware's data layout.
 CAVE_CHECKED = bytes.fromhex(
-    "70b51199ca88139b002b25d1002a23d0124c2468124d2d68641b00258026964202d3b61aad18fae70026ac42"
-    "06d3641b0136052ef9d90526ac1a05e02300934201d39b1afbe7e41a032e01d3033e054984237343c9180919"
-    "083170bd04bc000998bb0009fcbd0009"
+    "0fe0ffe70598002807d1707a062806d1687b12210840022801d1069870470120704770b51199ca88139b002b"
+    "25d1002a23d0134c2468134d2d68641b00258026964202d3b61aad18fae70026ac4206d3641b0136052ef9d9"
+    "0526ac1a05e02300934201d39b1afbe7e41a032e01d3033e054984237343c9180919083170bd000004bc0009"
+    "98bb0009fcbd0009"
 )
 
 
@@ -27,6 +28,7 @@ def _image() -> bytes:
         (patch_mod.IMMEDIATE_SEND_ADDRESS, patch_mod.IMMEDIATE_SEND_STOCK),
         (patch_mod.PAYLOAD_SOURCE_ADDRESS, patch_mod.PAYLOAD_SOURCE_STOCK),
         (patch_mod.PEER_DATA_ADDRESS, patch_mod.PEER_DATA_STOCK),
+        (patch_mod.FILTER_DROP_ADDRESS, patch_mod.FILTER_DROP_STOCK),
     ):
         data[address - SECTION : address - SECTION + len(code)] = code
     image = bytearray(b"XR01")
@@ -50,7 +52,7 @@ def test_thumb_bl_encoding() -> None:
     assert patch_mod.thumb_bl(0x0900A374, 0x0900A6C8) == patch_mod.IMMEDIATE_SEND_STOCK
 
 
-def test_patch_changes_the_three_places_and_keeps_the_checksum() -> None:
+def test_patch_changes_the_code_and_keeps_the_checksum() -> None:
     stock = _image()
     patched = patch_mod.patch(stock, CAVE, verify_hash=False)
 
@@ -63,6 +65,10 @@ def test_patch_changes_the_three_places_and_keeps_the_checksum() -> None:
     )
     assert _at(patched, patch_mod.CAVE_ADDRESS, len(CAVE)) == CAVE
     assert _at(patched, patch_mod.PEER_DATA_ADDRESS, 2) == patch_mod.PEER_DATA_PATCHED
+    # bl 0x0900A3CA at 0x0900A216, as assembled by GNU as
+    assert _at(patched, patch_mod.FILTER_DROP_ADDRESS, 8) == bytes.fromhex(
+        "00f0d8f8"
+    ) + (patch_mod.THUMB_NOP * 2)
 
 
 def test_patch_refuses_other_code() -> None:

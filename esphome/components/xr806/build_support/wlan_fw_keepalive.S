@@ -1,6 +1,6 @@
 @ Keepalive frame list for the XR806 WLAN firmware patch (wlan_fw.bin); see wlan_fw_patch.py.
 @ Assembled at build time with the ARM toolchain and linked at 0x0900A3C8 (WLAN core address).
-@ Called with BL from 0x09009E0C instead of "ldr r1,[sp,#0x34]; ldrh r2,[r1,#6]; adds r1,#8",
+@ Frame chooser, called with BL from 0x09009E0C instead of "ldr r1,[sp,#0x34]; ldrh r2,[r1,#6]; adds r1,#8",
 @ right before the payload memcpy. Returns r1 = source of the payload, r2 = its length; r0 (destination) kept.
 @ Server 0 sends frame k = (sequence - TcpSeqInit) / length, the number of frames HA has acknowledged (the
 @ firmware adds the length to the sequence for each acknowledged frame). The frames lie in six areas of 128 bytes,
@@ -12,6 +12,35 @@
     .text
     .global cave
 cave:
+    b       payload                 @ CAVE_ADDRESS: frame chooser
+    b       receive_filter          @ CAVE_ADDRESS + 2: drop decision of the receive filter
+
+@ Receive filter (0x0900A012), called with BL from 0x0900A216 instead of
+@ "ldr r0,[sp,#0x14]; cmp r0,#0; bne 0x0900A220; movs r0,#1", followed by "str r0,[sp,#0x18]".
+@ While the host sleeps the stock firmware drops every IPv4 packet that matched no wake filter ([sp,#0x14] == 0);
+@ ACKs and data of the keepalive connection are handled before. A TCP SYN without ACK, someone opening a new
+@ connection (web server, OTA, a second API client), is now passed to the host too, which wakes it.
+@ r6 = IPv4 header, r5 = transport header. Returns r0 = the new [sp,#0x18]: 1 drops, the old value keeps.
+receive_filter:
+    ldr     r0, [sp, #0x14]
+    cmp     r0, #0
+    bne     keep
+    ldrb    r0, [r6, #9]            @ protocol
+    cmp     r0, #6
+    bne     drop
+    ldrb    r0, [r5, #13]           @ TCP flags
+    movs    r1, #0x12               @ SYN | ACK
+    ands    r0, r1
+    cmp     r0, #2                  @ SYN only
+    bne     drop
+keep:
+    ldr     r0, [sp, #0x18]
+    bx      lr
+drop:
+    movs    r0, #1
+    bx      lr
+
+payload:
     push    {r4, r5, r6, lr}
     ldr     r1, [sp, #0x44]         @ caller's [sp,#0x34]: keepalive entry i
     ldrh    r2, [r1, #6]            @ frame length
