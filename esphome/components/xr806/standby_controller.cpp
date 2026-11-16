@@ -26,6 +26,7 @@ extern "C" {
 extern "C" {
 #include "driver/chip/hal_gpio.h"
 #include "driver/chip/hal_prcm.h"
+#include "driver/chip/hal_rtc.h"
 #include "driver/chip/hal_wakeup.h"
 #include "pm/pm.h"
 #include "sys/xr_debug.h"
@@ -48,6 +49,8 @@ ESPHOME_LOG_TAG(TAG, "xr806.standby");
 static XR806StandbyController *active_controller = nullptr;
 // A wake line the MCU does not drive needs time after the pull resistor is switched on before it reads idle.
 static constexpr uint32_t WAKE_INPUT_SETTLE_US = 100;
+// Shortest timer wake, for a period that ran out while the module was awake.
+static constexpr uint32_t MIN_TIMER_MS = 50;
 
 #ifdef USE_LOGGER
 // The SDK UART suspend does not wait for the transmitter, so the last log line would be cut off.
@@ -305,10 +308,20 @@ void XR806StandbyController::attempt_standby_() {
   uint32_t event = 0;
   uint32_t commit_epoch = 0;
 
-  // Always retain a hardware wake timer as fallback, including on PA20 wake.
-  if (HAL_Wakeup_SetTimer_mS(this->wake_after_ms_) != 0) {
-    ESP_LOGE(TAG, "No hardware timer wake source; standby refused");
-    goto abort;
+  // Always retain a hardware wake timer as fallback, including on PA20 wake. Its period runs on the RTC counter,
+  // which keeps counting in standby, so frequent network wakes do not restart it. Only a timer wake does.
+  {
+    const uint64_t now_us = HAL_RTC_GetFreeRunTime();
+    if (this->timer_deadline_us_ == 0)
+      this->timer_deadline_us_ = now_us + static_cast<uint64_t>(this->wake_after_ms_) * 1000;
+    const int64_t left_us = static_cast<int64_t>(this->timer_deadline_us_ - now_us);
+    const uint32_t timer_ms = left_us <= static_cast<int64_t>(MIN_TIMER_MS) * 1000
+                                  ? MIN_TIMER_MS
+                                  : static_cast<uint32_t>(static_cast<uint64_t>(left_us) / 1000);
+    if (HAL_Wakeup_SetTimer_mS(timer_ms) != 0) {
+      ESP_LOGE(TAG, "No hardware timer wake source; standby refused");
+      goto abort;
+    }
   }
   timer_armed = true;
 
@@ -414,6 +427,8 @@ abort:
     resume.pm_return = result;
     resume.expected_source = expected;
     resume.wake_timer = (event & XR806StandbyCoordinatorState::WAKE_TIMER) != 0;
+    if (resume.wake_timer)
+      this->timer_deadline_us_ = 0;
     resume.wake_gpio = wake_io >= 0 && (event & (1u << wake_io)) != 0;
     resume.wake_wlan = (event & XR806StandbyCoordinatorState::WAKE_WLAN) != 0;
     for (size_t i = 0; i < this->participant_count_; ++i)

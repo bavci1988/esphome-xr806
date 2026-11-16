@@ -173,7 +173,7 @@ class XR806TuyaLowPowerHost final : public Component,
   bool prepare_for_standby() override { return this->tuya_->low_power_prepare_for_standby(); }
   void standby_cancelled() override { this->tuya_->low_power_standby_cancelled(); }
   void standby_resumed(const XR806StandbyResume &event) override {
-    this->tuya_->low_power_standby_resumed(event.expected_source, event.wake_gpio);
+    this->tuya_->low_power_standby_resumed(event.expected_source, event.wake_gpio, event.wake_timer);
   }
 #else
   bool standby_supported() const override { return false; }

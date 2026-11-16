@@ -98,6 +98,8 @@ class XR806StandbyController final : public Component {
   XR806StandbyCoordinatorState state_{};
 
   uint32_t wake_after_ms_{3000};
+  // RTC time of the next timer wake; 0 until the next standby starts a new period.
+  uint64_t timer_deadline_us_{0};
   uint32_t quiet_ms_{250};
   uint32_t min_awake_ms_{5000};
   uint8_t wake_pin_{20};
