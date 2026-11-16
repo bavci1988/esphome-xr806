@@ -195,8 +195,8 @@ $(XR806_FW_DIR)/wlan_bl.bin: $(ROOT_PATH)/bin/xradio_v3/wlan_bl.bin
 >@mkdir -p $(@D)
 >install -m 0644 $< $@
 
-# The stock WLAN firmware, or the patched one from experimental_wifi_fw_standby_patch. Compared on every build,
-# because switching between the two must replace the copy even when it is newer than its source.
+# The flash image always holds the stock WLAN firmware; the driver loads it at boot. Compared on every build, so a
+# copy left by an older build that packed a patched firmware is replaced.
 XR806_WLAN_FW ?= $(ROOT_PATH)/bin/xradio_v3/wlan_fw.bin
 .PHONY: xr806-wlan-fw-check
 $(XR806_FW_DIR)/wlan_fw.bin: $(XR806_WLAN_FW) xr806-wlan-fw-check
@@ -333,17 +333,26 @@ $(XR806_API_OFFLOAD_OBJ): $(XR806_API_OFFLOAD_C) $(XR806_DEPS)
 >    -I$(XR806_SRC) -include $(XR806_DEFINES) -MMD -MP -c $< -o $@
 -include $(XR806_API_OFFLOAD_OBJ:.o=.d)
 endif
-# The experiment takes the frame the API writes, so the API component itself stays unchanged.
+# The experiment takes the frame the API writes, so the API component itself stays unchanged, and serves the
+# patched WLAN firmware to the driver's firmware reads once XR806WlanFirmwareSwap restarts the WLAN core.
 ifneq ($(filter -DUSE_XR806_API_KEEPALIVE_OFFLOAD,$(XR806_EXTRA_CXXFLAGS)),)
-$(XR806_OUTPUT): LD_FLAGS += -Wl,--wrap=lwip_write -Wl,--wrap=lwip_writev
+$(XR806_OUTPUT): LD_FLAGS += -Wl,--wrap=lwip_write -Wl,--wrap=lwip_writev -Wl,--wrap=image_rw
+XR806_WLAN_FW_PATCHED ?= $(error XR806_WLAN_FW_PATCHED must be provided by ESPHome)
+XR806_WLAN_FW_BLOB_OBJ := $(XR806_OBJDIR)/xr_wlan_fw_keepalive_blob.o
+XR806_ESPHOME_OBJECTS += $(XR806_WLAN_FW_BLOB_OBJ)
+$(XR806_OUTPUT): $(XR806_WLAN_FW_BLOB_OBJ)
+$(XR806_WLAN_FW_BLOB_OBJ): $(XR806_REPO_ROOT)/esphome/components/xr806/build_support/wlan_fw_keepalive_blob.S $(XR806_WLAN_FW_PATCHED)
+>@mkdir -p $(@D)
+>$(CC) -mcpu=cortex-m33 -mthumb -x assembler-with-cpp '-DWLAN_FW_PATCHED="$(XR806_WLAN_FW_PATCHED)"' -c $< -o $@
 endif
 
 
 
-# Keepalive experiment; the source is empty unless USE_XR806_API_KEEPALIVE_OFFLOAD is defined.
-XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_api_keepalive_offload.o
-$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_api_keepalive_offload.o
+# Keepalive experiment; the sources are empty unless USE_XR806_API_KEEPALIVE_OFFLOAD is defined.
+XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_api_keepalive_offload.o $(XR806_OBJDIR)/xr_wlan_fw_swap.o
+$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_api_keepalive_offload.o $(XR806_OBJDIR)/xr_wlan_fw_swap.o
 $(eval $(call XR806_COMPILE_CPP,xr_api_keepalive_offload,$(XR806_SRC)/esphome/components/xr806/api_keepalive_offload.cpp))
+$(eval $(call XR806_COMPILE_CPP,xr_wlan_fw_swap,$(XR806_SRC)/esphome/components/xr806/wlan_fw_swap.cpp))
 
 # WLAN ROM dump diagnostics; the source is empty unless USE_XR806_WLAN_ROM_DUMP is defined.
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_wlan_rom_dump.o

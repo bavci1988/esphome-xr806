@@ -3,6 +3,7 @@
 #if defined(USE_XR806) && defined(USE_API) && defined(USE_XR806_STANDBY_CONTROLLER) && \
     defined(USE_XR806_API_KEEPALIVE_OFFLOAD)
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstring>
 
@@ -10,6 +11,7 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "api_offload_lwip.h"
+#include "wlan_fw_swap.h"
 #include "wlan_mib.h"
 
 extern "C" {
@@ -107,6 +109,7 @@ struct FirmwareState {
   uint32_t seq;
   uint32_t ack;
   uint32_t ip_id;
+  uint8_t retries;
   bool in_flight;
 };
 
@@ -117,6 +120,7 @@ static bool read_state(FirmwareState &state) {
   state.seq = words[0];
   state.ack = words[1];
   state.ip_id = words[2];
+  state.retries = words[3] & 0xFF;
   state.in_flight = ((words[3] >> 8) & 0xFF) != 0;
   return true;
 }
@@ -243,6 +247,10 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   auto *controller = standby_controller();
   if (!this->enabled() || controller == nullptr || !controller->stay_connected())
     return;
+  if (!wlan_fw_patched_active()) {
+    ESP_LOGD(TAG, "Not armed: the patched WLAN firmware is not running yet");
+    return;
+  }
   api::APIConnection *client = nullptr;
   size_t count = 0;
   for (const auto &conn : api::global_api_server->active_clients()) {
@@ -277,6 +285,8 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
                            (static_cast<uint32_t>(this->period_s_) * 500);
   if (list_ms < wake_after_ms)
     HAL_Wakeup_SetTimer_mS(list_ms);
+  ESP_LOGD(TAG, "Armed details: seq %08" PRIX32 " ack %08" PRIX32 " IP ID %u, wake timer %" PRIu32 " ms",
+           this->snd_nxt_, this->rcv_nxt_, IP_ID_INIT, std::min(list_ms, wake_after_ms));
 }
 
 void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
@@ -300,6 +310,11 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
   request(WLAN_EXT_CMD_SET_P2P_SVR, reinterpret_cast<uint32_t>(&offload_cmd.svr));
   wlan_ext_p2p_state_set(WLAN_EXT_P2P_STATE_INIT);
 
+  ESP_LOGD(TAG,
+           "Firmware state: seq %08" PRIX32 " (lwIP %08" PRIX32 ") ack %08" PRIX32 " (lwIP %08" PRIX32
+           ") IP ID %" PRIu32 " retries %u in flight %d, read %s",
+           state.seq, this->snd_nxt_, state.ack, this->rcv_nxt_, state.ip_id, state.retries, state.in_flight,
+           ok ? LOG_STR_LITERAL("ok") : LOG_STR_LITERAL("failed"));
   bool alive = false;
   for (const auto &conn : api::global_api_server->active_clients())
     alive = alive || conn.get() == this->client_;
@@ -322,6 +337,8 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
     this->close_("lwIP could not take over the sequence numbers");
   } else {
     this->send_unsent_(sent);
+    ESP_LOGD(TAG, "Resynced: lwIP sequence +%" PRIu32 " bytes, %" PRIu32 " held frames sent by the host",
+             sent * this->frame_len_, this->frame_count_ - sent);
   }
   this->client_ = nullptr;
 }

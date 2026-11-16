@@ -61,6 +61,7 @@ CONF_HOST_SLEEP = "host_sleep"
 CONF_WAKE_ON_PEER = "wake_on_peer"
 CONF_DIAGNOSE_WLAN_ROM_DUMP = "diagnose_wlan_rom_dump"
 CONF_WLAN_ROM_DUMP_ID = "wlan_rom_dump_id"
+CONF_WLAN_FW_SWAP_ID = "wlan_fw_swap_id"
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
 XR806WiFiStandby = xr806_ns.class_("XR806WiFiStandby", cg.Component)
@@ -71,6 +72,7 @@ XR806HTTPStandby = xr806_ns.class_("XR806HTTPStandby", cg.Component)
 XR806MQTTStandby = xr806_ns.class_("XR806MQTTStandby", cg.Component)
 XR806TuyaLowPowerHost = xr806_ns.class_("XR806TuyaLowPowerHost", cg.Component)
 XR806WlanRomDump = xr806_ns.class_("XR806WlanRomDump", cg.Component)
+XR806WlanFirmwareSwap = xr806_ns.class_("XR806WlanFirmwareSwap", cg.Component)
 
 
 # Radio settings for the standard wifi: component. DTIM and the listen interval
@@ -259,6 +261,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_LOWPOWER): cv.boolean,
             cv.GenerateID(CONF_TUYA_HOST_ID): cv.declare_id(XR806TuyaLowPowerHost),
             cv.GenerateID(CONF_WLAN_ROM_DUMP_ID): cv.declare_id(XR806WlanRomDump),
+            cv.GenerateID(CONF_WLAN_FW_SWAP_ID): cv.declare_id(XR806WlanFirmwareSwap),
             cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
             cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
             cv.Optional(CONF_STANDBY): cv.All(
@@ -437,6 +440,13 @@ async def to_code(config: ConfigType) -> None:
             ) is not None:
                 # A build flag, not a define: the XR806 makefile links lwip_write wrappers only with it.
                 cg.add_build_flag("-DUSE_XR806_API_KEEPALIVE_OFFLOAD")
+                cg.add_global(
+                    cg.RawStatement(
+                        '#include "esphome/components/xr806/wlan_fw_swap.h"'
+                    )
+                )
+                fw_swap = cg.new_Pvariable(config[CONF_WLAN_FW_SWAP_ID])
+                await cg.register_component(fw_swap, {})
                 cg.add(
                     api_standby.set_keepalive_offload(
                         patch[CONF_KEEPALIVE_PERIOD].total_seconds,
@@ -642,7 +652,8 @@ def run_compile(args: object, config: ConfigType) -> bool:
     variables["XR806_LIBRARIES_MK"] = str(libraries_mk)
 
     if CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH in CORE.config.get(DOMAIN, {}):
-        # The keepalive frame list needs the patched WLAN firmware; without the option the image keeps the stock one.
+        # The keepalive frame list needs the patched WLAN firmware. It goes into the application; the flash image
+        # keeps the stock one, and XR806WlanFirmwareSwap loads the patched one a minute after boot.
         from .build_support import wlan_fw_patch
 
         try:
@@ -653,9 +664,10 @@ def run_compile(args: object, config: ConfigType) -> bool:
             )
         except (OSError, wlan_fw_patch.WlanFirmwarePatchError) as err:
             raise EsphomeError(f"XR806 WLAN firmware patch failed: {err}") from err
-        variables["XR806_WLAN_FW"] = str(patched)
+        variables["XR806_WLAN_FW_PATCHED"] = str(patched)
         print(
-            "[XR806] Using the patched WLAN firmware (keepalive frame list)", flush=True
+            "[XR806] Patched WLAN firmware built; the stock one stays in flash for boot",
+            flush=True,
         )
 
     command = [

@@ -616,6 +616,7 @@ def test_wifi_fw_standby_patch(
 
     assert "-DUSE_XR806_API_KEEPALIVE_OFFLOAD" in CORE.build_flags
     assert "set_keepalive_offload(8, true, false)" in generated
+    assert "XR806WlanFirmwareSwap" in generated
 
 
 @pytest.mark.parametrize(
