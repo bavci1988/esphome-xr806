@@ -71,6 +71,7 @@ class XR806StandbyController final : public Component {
   uint8_t wake_pin() const { return this->wake_pin_; }
   bool requires_external_sync() const { return this->external_sync_required_; }
   bool stay_connected() const { return this->stay_connected_; }
+  uint32_t wake_after_ms() const { return this->wake_after_ms_; }
 
   bool may_quiesce() const;
   bool services_quiesced() const;

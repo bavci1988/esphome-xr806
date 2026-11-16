@@ -17,6 +17,7 @@ server 0 sends a different, pre-encrypted frame each time Home Assistant acknowl
    Assistant never reached the host. Data segments are now passed to the host, which wakes it (0x0900A14C).
 
 Only the firmware with the known SHA-256 is patched; see docs/WLAN_FIRMWARE_NOTES.md in the xr806-sdk repository.
+Nothing patched is stored: the stock file comes from the SDK and the patch is applied in the build directory.
 """
 
 from __future__ import annotations
@@ -24,21 +25,15 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 import struct
+import subprocess
 
 STOCK_SHA256 = "0d08b6c6d0c9bcf3af7b3ebdab55cb623f28feb8392343585255be17c98e59c8"
 
-# Frame chooser, Thumb (ARMv5TE), linked at CAVE_ADDRESS. Source:
-#   push {r4-r6,lr}; ldr r1,[sp,#0x44]; ldrh r2,[r1,#6]; ldr r3,[sp,#0x4c]; cmp r3,#0; bne plain
-#   r4 = (u16)(*0x0900BC0C - *(u16 *)0x0900BB96)      ; k = IP ID - IPIdInit of server 0
-#   r5 = 128 / r2 (by subtraction); r6 = r4 / r5, r4 = r4 % r5; if r6 > 2: r6 = 2, r4 = r5 - 1
-#   r1 += r6 * 0x84 + r4 * r2
-#   plain: r1 += 8; pop {r4-r6,pc}
+# Frame chooser, Thumb (ARMv5TE), assembled from wlan_fw_keepalive.S at build time and linked at CAVE_ADDRESS.
+# It overwrites the UDP keepalive from 0x0900A3C6 up to its literal pool at 0x0900A4A8.
+CAVE_SOURCE = Path(__file__).with_name("wlan_fw_keepalive.S")
 CAVE_ADDRESS = 0x0900A3C8
-CAVE = bytes.fromhex(
-    "70b51199ca88139b002b20d1114c2468114d2d88641b2404240c00258026002a15d0964202d3b61a0135fae7"
-    "002d0ed00026ac4202d3641b0136fae7022e01d902266c1e84237343c91854430919083170bd0000"
-    "0cbc000996bb0009"
-)
+CAVE_MAX_SIZE = 0x0900A4A8 - CAVE_ADDRESS
 IMMEDIATE_SEND_ADDRESS = 0x0900A374
 IMMEDIATE_SEND_STOCK = bytes.fromhex("00f0a8f9")  # bl 0x0900A6C8
 PAYLOAD_SOURCE_ADDRESS = 0x09009E0C
@@ -108,8 +103,49 @@ def _fix_checksum(image: bytearray) -> None:
     struct.pack_into("<I", image, len(image) - 4, (-total) & 0xFFFFFFFF)
 
 
-def patch(stock: bytes, verify_hash: bool = True) -> bytes:
-    """The patched firmware for the stock image."""
+def assemble_cave(toolchain_bin: Path, work_dir: Path) -> bytes:
+    """Assemble wlan_fw_keepalive.S with the ARM toolchain and return its code linked at CAVE_ADDRESS."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    obj = work_dir / "wlan_fw_keepalive.o"
+    elf = work_dir / "wlan_fw_keepalive.elf"
+    binary = work_dir / "wlan_fw_keepalive.bin"
+    prefix = str(toolchain_bin / "arm-none-eabi-")
+    steps = (
+        [
+            prefix + "as",
+            "-mcpu=arm926ej-s",
+            "-mthumb",
+            str(CAVE_SOURCE),
+            "-o",
+            str(obj),
+        ],
+        [
+            prefix + "ld",
+            f"-Ttext=0x{CAVE_ADDRESS:08X}",
+            "-e",
+            "cave",
+            str(obj),
+            "-o",
+            str(elf),
+        ],
+        [prefix + "objcopy", "-O", "binary", str(elf), str(binary)],
+    )
+    for step in steps:
+        result = subprocess.run(step, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            raise WlanFirmwarePatchError(
+                f"{Path(step[0]).name} failed: {result.stderr.strip()}"
+            )
+    code = binary.read_bytes()
+    if not code or len(code) > CAVE_MAX_SIZE:
+        raise WlanFirmwarePatchError(
+            f"frame chooser is {len(code)} bytes, at most {CAVE_MAX_SIZE} fit"
+        )
+    return code
+
+
+def patch(stock: bytes, cave: bytes, verify_hash: bool = True) -> bytes:
+    """The patched firmware for the stock image, with the assembled frame chooser."""
     if verify_hash and hashlib.sha256(stock).hexdigest() != STOCK_SHA256:
         raise WlanFirmwarePatchError(
             "wlan_fw.bin is not the known stock firmware; the keepalive patch fits only that version"
@@ -123,7 +159,7 @@ def patch(stock: bytes, verify_hash: bool = True) -> bytes:
             PAYLOAD_SOURCE_STOCK,
             thumb_bl(PAYLOAD_SOURCE_ADDRESS, CAVE_ADDRESS) + THUMB_NOP,
         ),
-        (CAVE_ADDRESS, None, CAVE),
+        (CAVE_ADDRESS, None, cave),
         (PEER_DATA_ADDRESS, PEER_DATA_STOCK, PEER_DATA_PATCHED),
     )
     for address, expected, new in changes:
@@ -138,9 +174,10 @@ def patch(stock: bytes, verify_hash: bool = True) -> bytes:
     return bytes(image)
 
 
-def write_patched(stock_path: Path, output_path: Path) -> Path:
-    """Write the patched firmware unless an identical file is already there."""
-    patched = patch(stock_path.read_bytes())
+def write_patched(stock_path: Path, output_path: Path, toolchain_bin: Path) -> Path:
+    """Patch the stock firmware at build time and write it unless an identical file is already there."""
+    cave = assemble_cave(toolchain_bin, output_path.parent / "wlan_fw_keepalive")
+    patched = patch(stock_path.read_bytes(), cave)
     if not output_path.is_file() or output_path.read_bytes() != patched:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(patched)

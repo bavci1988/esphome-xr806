@@ -25,6 +25,11 @@ struct xr806_offload_tcp {
 /// 0 on success. -1: no such TCP socket; -2: not IPv4 or no IPv4 address; -3: next hop MAC not in the ARP table.
 int xr806_offload_read_tcp(int fd, struct netif *nif, struct xr806_offload_tcp *out);
 
+/// Counts bytes the WLAN firmware sent on the connection and the peer acknowledged as sent and acknowledged by
+/// lwIP. Runs in the tcpip thread. 0 on success, -1 without an established connection, -2 with data of lwIP's own
+/// still unsent or unacknowledged.
+int xr806_offload_advance(int fd, uint32_t bytes);
+
 #ifdef __cplusplus
 }
 #endif

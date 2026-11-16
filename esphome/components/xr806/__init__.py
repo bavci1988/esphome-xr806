@@ -647,7 +647,9 @@ def run_compile(args: object, config: ConfigType) -> bool:
 
         try:
             patched = wlan_fw_patch.write_patched(
-                sdk_root / "bin/xradio_v3/wlan_fw.bin", obj / "wlan_fw_keepalive.bin"
+                sdk_root / "bin/xradio_v3/wlan_fw.bin",
+                obj / "wlan_fw_keepalive.bin",
+                paths.toolchain_bin,
             )
         except (OSError, wlan_fw_patch.WlanFirmwarePatchError) as err:
             raise EsphomeError(f"XR806 WLAN firmware patch failed: {err}") from err

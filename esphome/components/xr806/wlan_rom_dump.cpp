@@ -10,19 +10,12 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
-extern "C" {
-// Vendor WLAN driver (libxrwireless.a). xr_drv_common is the driver's xradio_common instance; the register debug
-// request of DBG_BH_FW_RW_REGS sends it as MIB 9: {u16 flag, u16 size, u32 address[16]}, flag bit 0 clear for a
-// read, and the firmware returns the values in place of the addresses.
-extern char xr_drv_common[];
-int xr_msg_mib_read(void *hw_priv, uint16_t mib_id, void *buf, size_t buf_size, size_t arg_size);
-}
+#include "wlan_mib.h"
 
 namespace esphome::xr806 {
 
 ESPHOME_LOG_TAG(TAG, "xr806.wlan_rom_dump");
 
-static constexpr uint16_t MIB_FW_RW_REGS = 9;
 static constexpr uint32_t WORDS_PER_READ = 16;
 static constexpr uint32_t START_DELAY_MS = 60000;  // time for an OTA update before the dump
 // Patch RAM of the WLAN core and its first words in bin/xradio_v3/wlan_fw.bin.
@@ -38,21 +31,11 @@ void XR806WlanRomDump::dump_config() {
 }
 
 bool XR806WlanRomDump::read_words_(uint32_t address, uint32_t *words, uint32_t count) {
-  struct {
-    uint16_t flag;
-    uint16_t size;
-    uint32_t value[WORDS_PER_READ];
-  } request{};
-  request.flag = 0;
-  request.size = static_cast<uint16_t>(4 + 4 * count);
-  for (uint32_t i = 0; i < count; ++i)
-    request.value[i] = address + 4 * i;
-  const int err = xr_msg_mib_read(xr_drv_common, MIB_FW_RW_REGS, &request, sizeof(request), request.size);
+  const int err = wlan_read_words(address, words, count);
   if (err != 0) {
     ESP_LOGE(TAG, "MIB 9 read at 0x%08" PRIX32 " failed (%d)", address, err);
     return false;
   }
-  memcpy(words, request.value, 4 * count);
   return true;
 }
 

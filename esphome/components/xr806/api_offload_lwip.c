@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "lwip/api.h"
+#include "lwip/priv/tcpip_priv.h"
 #include "lwip/etharp.h"
 #include "lwip/netif.h"
 #include "lwip/priv/sockets_priv.h"
@@ -50,6 +51,45 @@ int xr806_offload_read_tcp(int fd, struct netif *nif, struct xr806_offload_tcp *
     return -3;
   memcpy(out->next_hop_mac, mac.addr, sizeof(out->next_hop_mac));
   return 0;
+}
+
+struct xr806_advance_call {
+  struct tcpip_api_call_data base;
+  struct tcp_pcb *pcb;
+  uint32_t bytes;
+  int result;
+};
+
+static err_t xr806_do_advance(struct tcpip_api_call_data *call) {
+  struct xr806_advance_call *advance = (struct xr806_advance_call *) call;
+  struct tcp_pcb *pcb = advance->pcb;
+  if (pcb->state != ESTABLISHED) {
+    advance->result = -1;
+  } else if (pcb->unsent != NULL || pcb->unacked != NULL) {
+    advance->result = -2;
+  } else {
+    pcb->snd_nxt += advance->bytes;
+    pcb->snd_lbb += advance->bytes;
+    pcb->lastack += advance->bytes;
+    pcb->snd_wl2 = pcb->lastack;
+    advance->result = 0;
+  }
+  return ERR_OK;
+}
+
+int xr806_offload_advance(int fd, uint32_t bytes) {
+  struct lwip_sock *sock = lwip_socket_dbg_get_socket(fd);
+  if (sock == NULL || sock->conn == NULL || NETCONNTYPE_GROUP(sock->conn->type) != NETCONN_TCP ||
+      sock->conn->pcb.tcp == NULL)
+    return -1;
+  struct xr806_advance_call call;
+  memset(&call, 0, sizeof(call));
+  call.pcb = sock->conn->pcb.tcp;
+  call.bytes = bytes;
+  call.result = -1;
+  if (tcpip_api_call(xr806_do_advance, &call.base) != ERR_OK)
+    return -1;
+  return call.result;
 }
 
 #endif  // USE_XR806_API_KEEPALIVE_OFFLOAD

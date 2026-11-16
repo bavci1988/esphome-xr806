@@ -340,6 +340,11 @@ endif
 
 
 
+# Keepalive experiment; the source is empty unless USE_XR806_API_KEEPALIVE_OFFLOAD is defined.
+XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_api_keepalive_offload.o
+$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_api_keepalive_offload.o
+$(eval $(call XR806_COMPILE_CPP,xr_api_keepalive_offload,$(XR806_SRC)/esphome/components/xr806/api_keepalive_offload.cpp))
+
 # WLAN ROM dump diagnostics; the source is empty unless USE_XR806_WLAN_ROM_DUMP is defined.
 XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_wlan_rom_dump.o
 $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_wlan_rom_dump.o
