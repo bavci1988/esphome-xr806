@@ -144,7 +144,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   /// Standby steps, called by the platform's power management bridge.
   bool low_power_prepare_for_standby();
   void low_power_standby_cancelled();
-  void low_power_standby_resumed(bool expected_source, bool wake_gpio);
+  void low_power_standby_resumed(bool expected_source, bool wake_gpio, bool wake_timer = false);
 #endif  // USE_TUYA_LOW_POWER
   void set_string_datapoint_value(uint8_t datapoint_id, const std::string &value);
   void set_string_datapoint_value(uint8_t datapoint_id, const char *value);
@@ -219,6 +219,9 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool low_power_ready_for_sleep_(bool in_cmd38_handler = false) const;
   void cancel_low_power_standby_();
   void poll_low_power_sleep_preflight_();
+  /// Grants a sleep request, or starts preparing for it; otherwise returns the busy flags of the CMD38 answer.
+  uint8_t grant_low_power_sleep_();
+  void poll_low_power_deferred_sleep_();
   void cancel_low_power_preflight_(bool notify_mcu);
   void send_low_power_awake_notification_();
   void send_low_power_awake_frame_();
@@ -327,6 +330,10 @@ class Tuya final : public Component, public uart::UARTDevice {
   TuyaLowPowerStandbyState lp_standby_{};
   TuyaLowPowerWireTransactions lp_wire_{};
   bool lp_cmd38_pending_{false};
+  // A version-0 MCU asked for sleep and was told busy; it does not ask again until its next activity.
+  bool lp_cmd38_deferred_{false};
+  // A version-0 MCU asked for sleep and sleeps now: the next command needs a wake pulse.
+  bool lp_mcu_asleep_{false};
   uint32_t lp_cmd38_deadline_ms_{0};
   uint32_t lp_cmd38_cooldown_until_{0};
   uint8_t lp_network_status_{0xFF};

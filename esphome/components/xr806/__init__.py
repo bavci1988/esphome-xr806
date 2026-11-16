@@ -59,7 +59,6 @@ CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH = "experimental_wifi_fw_standby_patch"
 CONF_KEEPALIVE_PERIOD = "keepalive_period"
 CONF_HOST_SLEEP = "host_sleep"
 CONF_WAKE_ON_PEER = "wake_on_peer"
-CONF_DIAGNOSE_FAKE_SLEEP = "diagnose_fake_sleep"
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
 XR806WiFiStandby = xr806_ns.class_("XR806WiFiStandby", cg.Component)
@@ -161,8 +160,6 @@ STANDBY_SCHEMA = cv.Schema(
         cv.Optional(CONF_WAKE_PIN): validate_wake_pin,
         cv.Optional(CONF_WAKE_EDGE): cv.one_of("falling", "rising", lower=True),
         cv.Optional(CONF_REQUIRE_EXTERNAL_SYNC, default=False): cv.boolean,
-        # Bring-up diagnostics: run the whole standby sequence, but keep the CPU on and log the wake input's edges.
-        cv.Optional(CONF_DIAGNOSE_FAKE_SLEEP, default=False): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -386,8 +383,6 @@ async def to_code(config: ConfigType) -> None:
             cg.RawStatement('#include "esphome/components/xr806/standby_controller.h"')
         )
         controller = cg.new_Pvariable(cfg["id"])
-        if cfg[CONF_DIAGNOSE_FAKE_SLEEP]:
-            cg.add_build_flag("-DUSE_XR806_STANDBY_FAKE_SLEEP")
         cg.add(controller.set_wake_after_ms(cfg[CONF_WAKE_AFTER].total_milliseconds))
         cg.add(controller.set_quiet_ms(cfg[CONF_QUIET_TIME].total_milliseconds))
         cg.add(controller.set_min_awake_ms(cfg[CONF_MIN_AWAKE_TIME].total_milliseconds))

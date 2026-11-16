@@ -17,8 +17,6 @@ extern "C" {
 #endif
 
 #include "standby_controller.h"
-
-#include <cinttypes>
 #include "lowpower_policy.h"
 
 #include "esphome/core/application.h"
@@ -28,9 +26,9 @@ extern "C" {
 extern "C" {
 #include "driver/chip/hal_gpio.h"
 #include "driver/chip/hal_prcm.h"
+#include "driver/chip/hal_rtc.h"
 #include "driver/chip/hal_wakeup.h"
 #include "pm/pm.h"
-#include "kernel/os/os_thread.h"
 #include "sys/xr_debug.h"
 }
 
@@ -49,7 +47,10 @@ namespace esphome::xr806 {
 ESPHOME_LOG_TAG(TAG, "xr806.standby");
 
 static XR806StandbyController *active_controller = nullptr;
+// A wake line the MCU does not drive needs time after the pull resistor is switched on before it reads idle.
 static constexpr uint32_t WAKE_INPUT_SETTLE_US = 100;
+// Shortest timer wake, for a period that ran out while the module was awake.
+static constexpr uint32_t MIN_TIMER_MS = 50;
 
 #ifdef USE_LOGGER
 // The SDK UART suspend does not wait for the transmitter, so the last log line would be cut off.
@@ -215,17 +216,6 @@ void XR806StandbyController::loop() {
   constexpr uint32_t OWNED_BY_COORDINATOR =
       XR806LowPowerPolicy::SCHEDULER_BUSY | XR806LowPowerPolicy::WAKE_NOT_READY | XR806LowPowerPolicy::NOT_REQUESTED;
   const bool all_owners_idle = (blockers & ~OWNED_BY_COORDINATOR) == 0;
-  // Diagnostics for the TRV16 bring-up: which owners keep a requested standby waiting.
-  if (p.standby_requested() && !all_owners_idle) {
-    const uint32_t now = millis();
-    if (now - this->blocked_log_ms_ >= BLOCKED_LOG_INTERVAL_MS) {
-      this->blocked_log_ms_ = now;
-      ESP_LOGD(TAG,
-               "Standby requested, waiting for owners 0x%03" PRIX32
-               " (UART=1 NET=2 OTA=4 MCU=8 API=80 MDNS=100 HTTP=200 MQTT=400)",
-               blockers & ~OWNED_BY_COORDINATOR);
-    }
-  }
   if (this->state_.due(millis(), p.generation(), p.standby_requested(), all_owners_idle))
     this->attempt_standby_();
 }
@@ -250,83 +240,11 @@ bool XR806StandbyController::wake_input_active_() const {
   input.mode = GPIOx_Pn_F0_INPUT;
   input.pull = this->wake_falling_ ? GPIO_PULL_UP : GPIO_PULL_DOWN;
   HAL_GPIO_Init(GPIO_PORT_A, pin, &input);
-  // A line the MCU does not drive needs the pull resistor to settle before it reads high.
   delayMicroseconds(WAKE_INPUT_SETTLE_US);
   const GPIO_PinState level = HAL_GPIO_ReadPin(GPIO_PORT_A, pin);
   HAL_GPIO_Init(GPIO_PORT_A, pin, &previous);
   return this->wake_falling_ ? level == GPIO_PIN_LOW : level == GPIO_PIN_HIGH;
 }
-
-#ifdef USE_XR806_STANDBY_FAKE_SLEEP
-// Diagnostics: everything up to the PM call runs as for a real standby, so the MCU has its consent, but the CPU
-// stays on and records every edge on the wake input with a time stamp. Ends 50 ms after the first edge or after
-// the wake timer, and reports the matching wake event.
-int XR806StandbyController::fake_sleep_(int wake_io, uint32_t &event) {
-  struct Edge {
-    uint32_t at_us;
-    uint8_t level;
-  };
-  static constexpr size_t MAX_EDGES = 32;
-  static constexpr uint32_t TAIL_MS = 50;
-  Edge edges[MAX_EDGES];
-  size_t count = 0;
-  const auto pin = static_cast<GPIO_Pin>(this->wake_pin_);
-  const uint32_t start_us = micros();
-  const uint32_t start_ms = millis();
-  const GPIO_PinState initial = HAL_GPIO_ReadPin(GPIO_PORT_A, pin);
-  GPIO_PinState last = initial;
-  uint32_t first_edge_ms = 0;
-  bool edge_seen = false;
-  bool timer = false;
-  uint32_t prcm_event = 0;
-  for (uint32_t i = 0;; ++i) {
-    const GPIO_PinState level = HAL_GPIO_ReadPin(GPIO_PORT_A, pin);
-    if (level != last) {
-      if (count < MAX_EDGES)
-        edges[count] = {micros() - start_us, static_cast<uint8_t>(level)};
-      ++count;
-      last = level;
-      if (!edge_seen) {
-        edge_seen = true;
-        first_edge_ms = millis();
-      }
-    }
-    if ((i & 0x3FF) == 0) {
-      const uint32_t now = millis();
-      if (prcm_event == 0)
-        prcm_event = HAL_Wakeup_GetEvent();
-      if (edge_seen && now - first_edge_ms > TAIL_MS)
-        break;
-      if (prcm_event != 0 && !edge_seen && now - start_ms > 1) {
-        // The wake logic saw something the sampling missed: keep sampling for the tail, then stop.
-        edge_seen = true;
-        first_edge_ms = now;
-      }
-      if (now - start_ms >= this->wake_after_ms_) {
-        timer = true;
-        break;
-      }
-      arch_feed_wdt();
-      OS_ThreadYield();
-    }
-  }
-  if (prcm_event == 0)
-    prcm_event = HAL_Wakeup_GetEvent();
-  ESP_LOGI(TAG, "Fake sleep %" PRIu32 " ms: PA%u started %s, %u edges, wake logic event 0x%08" PRIX32 "%s",
-           millis() - start_ms, static_cast<unsigned>(this->wake_pin_), initial == GPIO_PIN_LOW ? "LOW" : "HIGH",
-           static_cast<unsigned>(count), prcm_event, timer ? ", ended by the wake timer" : "");
-  for (size_t k = 0; k < count && k < MAX_EDGES; ++k) {
-    ESP_LOGI(TAG, "  edge %u: +%" PRIu32 " us -> %s", static_cast<unsigned>(k), edges[k].at_us,
-             edges[k].level == GPIO_PIN_LOW ? "LOW" : "HIGH");
-  }
-  if (timer) {
-    event = XR806StandbyCoordinatorState::WAKE_TIMER;
-  } else if (wake_io >= 0) {
-    event = 1u << wake_io;
-  }
-  return 0;
-}
-#endif
 
 void XR806StandbyController::attempt_standby_() {
   if (this->busy_)
@@ -340,17 +258,8 @@ void XR806StandbyController::attempt_standby_() {
   // Right after asking to sleep the MCU may still hold its wake line for a moment. Wait one more quiet
   // interval instead of refusing, which would withdraw the MCU's consent until it is active again.
   if (this->wake_input_active_()) {
-    // Diagnostics for the TRV16 bring-up: the first wait and then every 20th.
-    if (this->wake_input_waits_++ % 20 == 0) {
-      ESP_LOGD(TAG, "Wake input PA%u still active; standby waits (%u times)", static_cast<unsigned>(this->wake_pin_),
-               static_cast<unsigned>(this->wake_input_waits_));
-    }
     this->state_.postpone();
     return;
-  }
-  if (this->wake_input_waits_ != 0) {
-    ESP_LOGD(TAG, "Wake input released after %u waits", static_cast<unsigned>(this->wake_input_waits_));
-    this->wake_input_waits_ = 0;
   }
   this->busy_ = true;
   auto &p = lowpower_policy();
@@ -399,10 +308,20 @@ void XR806StandbyController::attempt_standby_() {
   uint32_t event = 0;
   uint32_t commit_epoch = 0;
 
-  // Always retain a hardware wake timer as fallback, including on PA20 wake.
-  if (HAL_Wakeup_SetTimer_mS(this->wake_after_ms_) != 0) {
-    ESP_LOGE(TAG, "No hardware timer wake source; standby refused");
-    goto abort;
+  // Always retain a hardware wake timer as fallback, including on PA20 wake. Its period runs on the RTC counter,
+  // which keeps counting in standby, so frequent network wakes do not restart it. Only a timer wake does.
+  {
+    const uint64_t now_us = HAL_RTC_GetFreeRunTime();
+    if (this->timer_deadline_us_ == 0)
+      this->timer_deadline_us_ = now_us + static_cast<uint64_t>(this->wake_after_ms_) * 1000;
+    const int64_t left_us = static_cast<int64_t>(this->timer_deadline_us_ - now_us);
+    const uint32_t timer_ms = left_us <= static_cast<int64_t>(MIN_TIMER_MS) * 1000
+                                  ? MIN_TIMER_MS
+                                  : static_cast<uint32_t>(static_cast<uint64_t>(left_us) / 1000);
+    if (HAL_Wakeup_SetTimer_mS(timer_ms) != 0) {
+      ESP_LOGE(TAG, "No hardware timer wake source; standby refused");
+      goto abort;
+    }
   }
   timer_armed = true;
 
@@ -467,15 +386,9 @@ void XR806StandbyController::attempt_standby_() {
   {
     // Time spent asleep is not a main loop stall.
     UnavoidableBlockingScope sleeping;
-#ifdef USE_XR806_STANDBY_FAKE_SLEEP
-    result = this->fake_sleep_(wake_io, event);
-#else
     result = pm_enter_mode_timeout(PM_MODE_STANDBY, 500);
-#endif
   }
-#ifndef USE_XR806_STANDBY_FAKE_SLEEP
   event = HAL_Wakeup_GetEvent();
-#endif
 
 abort:
   p.end_commit();
@@ -521,6 +434,8 @@ abort:
     resume.pm_return = result;
     resume.expected_source = expected;
     resume.wake_timer = (event & XR806StandbyCoordinatorState::WAKE_TIMER) != 0;
+    if (resume.wake_timer)
+      this->timer_deadline_us_ = 0;
     resume.wake_gpio = wake_io >= 0 && (event & (1u << wake_io)) != 0;
     resume.wake_wlan = (event & XR806StandbyCoordinatorState::WAKE_WLAN) != 0;
     for (size_t i = 0; i < this->participant_count_; ++i)

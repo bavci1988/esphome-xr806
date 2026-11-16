@@ -92,9 +92,6 @@ class XR806StandbyController final : public Component {
   void cancel_prepared_(size_t prepared);
   bool is_any_transport_unowned_() const;
   bool wake_input_active_() const;
-#ifdef USE_XR806_STANDBY_FAKE_SLEEP
-  int fake_sleep_(int wake_io, uint32_t &event);
-#endif
 
   // MCU UART + WLAN + Native API + OTA + mDNS + HTTP + MQTT, plus one future board owner.
   static constexpr size_t MAX_PARTICIPANTS = 8;
@@ -103,6 +100,8 @@ class XR806StandbyController final : public Component {
   XR806StandbyCoordinatorState state_{};
 
   uint32_t wake_after_ms_{3000};
+  // RTC time of the next timer wake; 0 until the next standby starts a new period.
+  uint64_t timer_deadline_us_{0};
   uint32_t quiet_ms_{250};
   uint32_t min_awake_ms_{5000};
   uint8_t wake_pin_{20};
@@ -119,9 +118,6 @@ class XR806StandbyController final : public Component {
   bool require_uart_participant_{false};
   bool stay_connected_{false};
   bool busy_{false};
-  uint32_t wake_input_waits_{0};
-  uint32_t blocked_log_ms_{0};
-  static constexpr uint32_t BLOCKED_LOG_INTERVAL_MS = 10000;
   uint32_t request_since_ms_{0};
   uint32_t preflight_since_ms_{0};
   bool preflight_requested_{false};

@@ -8,6 +8,7 @@
 
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
+#include "esphome/core/util.h"
 
 #ifdef USE_NETWORK
 #include "esphome/components/network/util.h"
@@ -118,6 +119,7 @@ void Tuya::loop_low_power_() {
   if (this->check_low_power_uart_rx_errors_())
     this->discard_available();
   this->poll_low_power_sleep_preflight_();
+  this->poll_low_power_deferred_sleep_();
   if (this->lp_standby_.requested()) {
     auto *host = this->lp_host_;
     if (host == nullptr || !host->standby_requested() || host->ota_busy() || !host->standby_supported() ||
@@ -488,8 +490,14 @@ void Tuya::update_low_power_sleep_lock_() {
 
 bool Tuya::request_low_power_refresh() {
   if (this->protocol_ != TuyaProtocol::TUYA_PROTOCOL_LOW_POWER || !this->lp_session_.ready() ||
-      !this->lp_wire_.idle() || this->lp_standby_.requested() || this->expected_response_.has_value())
+      !this->lp_wire_.idle() || this->expected_response_.has_value())
     return false;
+  if (this->lp_standby_.requested()) {
+    // A version-0 MCU sleeping under its standby consent is woken first; the refresh waits for the pulse.
+    if (this->lp_v3_ || this->lp_host_ == nullptr)
+      return false;
+    this->wake_low_power_mcu_();
+  }
   if (this->lp_v3_) {
     // A version-3 MCU answers the standard status query; DP106 is the HC32's refresh trigger.
     this->lp_v3_last_poll_ms_ = App.get_loop_component_start_time();
@@ -513,6 +521,7 @@ bool Tuya::low_power_probe_mcu_update(uint32_t image_size) {
 
 // Wakes the MCU for a command of our own; when it sleeps under its standby consent, the consent ends first.
 void Tuya::wake_low_power_mcu_() {
+  this->lp_cmd38_deferred_ = false;
   if (this->lp_standby_.requested() && this->lp_host_ != nullptr) {
     const bool compensate = this->lp_standby_.force_cancel();
     this->lp_host_->request_standby(false);
@@ -898,6 +907,7 @@ void Tuya::poll_low_power_sleep_preflight_() {
   // Never grant CMD38 while network owners still have live sockets, OTA,
   // mDNS callbacks or a WLAN wakelock. The MCU receives its ACK only NOW.
   this->lp_cmd38_pending_ = false;
+  this->lp_cmd38_deferred_ = false;
   this->send_low_power_direct_(0x38, {0x00, 0x00});
   if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
     host->request_standby(true);
@@ -906,6 +916,46 @@ void Tuya::poll_low_power_sleep_preflight_() {
     this->update_low_power_sleep_lock_();
   }
   host->request_preflight(false);
+}
+
+uint8_t Tuya::grant_low_power_sleep_() {
+  auto *host = this->lp_host_;
+  const bool ota_veto = host != nullptr && host->ota_busy();
+  const bool supported = host != nullptr && host->standby_supported() && host->standby_wake_pin() >= 0 &&
+                         host->standby_requires_external_sync() && host->standby_wake_pin() == this->lp_wake_input_ &&
+                         this->lp_product_.sleep_mode == 1 && host->standby_may_quiesce();
+  const bool transport_ready = this->low_power_ready_for_sleep_(true) && this->available() == 0;
+  if (supported && !ota_veto && transport_ready) {
+    if (!host->standby_services_quiesced()) {
+      // Start *service* preparation without requesting CPU PM. Do not
+      // tell HC32 that WXU accepted sleep before every network owner
+      // has actually closed/drained its resources.
+      this->lp_cmd38_pending_ = true;
+      this->lp_cmd38_deadline_ms_ = App.get_loop_component_start_time() + 1800;
+      host->request_preflight(true);
+      return 0;  // A bounded later busy/accept response will be sent.
+    }
+    if (this->lp_standby_.accept_request(true, true, true, true)) {
+      this->lp_cmd38_deferred_ = false;
+      this->send_low_power_direct_(0x38, {0x00, 0x00});
+      if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
+        host->request_standby(true);
+      } else {
+        this->lp_standby_.transport_fault();
+      }
+      this->update_low_power_sleep_lock_();
+      return 0;
+    }
+  }
+  return ota_veto ? 0x03 : 0x01;  // Default is *busy*, not a provisional grant.
+}
+
+void Tuya::poll_low_power_deferred_sleep_() {
+  if (!this->lp_cmd38_deferred_ || this->lp_cmd38_pending_ || this->lp_standby_.requested() ||
+      static_cast<int32_t>(App.get_loop_component_start_time() - this->lp_cmd38_cooldown_until_) < 0 ||
+      this->grant_low_power_sleep_() != 0)
+    return;
+  ESP_LOGD(LP_TAG, "Granting the MCU's earlier sleep request");
 }
 
 void Tuya::cancel_low_power_standby_() {
@@ -966,13 +1016,19 @@ void Tuya::low_power_standby_cancelled() {
   this->update_low_power_sleep_lock_();
 }
 
-void Tuya::low_power_standby_resumed(bool expected_source, bool wake_gpio) {
+void Tuya::low_power_standby_resumed(bool expected_source, bool wake_gpio, bool wake_timer) {
   const bool keep = this->lp_host_ != nullptr && this->lp_host_->standby_keeps_network();
   // A version-3 MCU is told about every wake that ends its consent (91 01 01 after a wake pulse),
   // not only about one it caused itself; its state is then read again.
   const bool notify_wake = wake_gpio || (this->lp_v3_ && !keep);
   const auto action = this->lp_standby_.resumed(expected_source, notify_wake, keep);
   if (action == TuyaLowPowerStandbyState::ResumeAction::KEEP_CONSENT) {
+    if (wake_timer && !this->lp_v3_) {
+      // The MCU's own changes can be lost while the module sleeps, so read its state on every timer wake.
+      ESP_LOGD(LP_TAG, "Timer wake: reading the MCU state");
+      if (this->request_low_power_refresh())
+        return;
+    }
     // The MCU did not wake us and still sleeps: no CMD12/00, no wake guard, sleep again once idle.
     this->lp_host_->request_standby(true);
     this->update_low_power_sleep_lock_();
@@ -1044,8 +1100,10 @@ void Tuya::process_low_power_queue_() {
     return;
   // A low-power MCU sleeps whenever it is idle and listens only after a pulse on its wake line, so
   // wake it before a command when it has been silent; the command goes out once the pulse is over.
-  if (this->mcu_wake_pin_ != nullptr && wire_now - this->last_rx_char_timestamp_ > LP_MCU_SILENT_MS &&
-      wire_now - this->lp_mcu_woken_ms_ > LP_MCU_SILENT_MS) {
+  if (this->mcu_wake_pin_ != nullptr &&
+      (this->lp_mcu_asleep_ || (wire_now - this->last_rx_char_timestamp_ > LP_MCU_SILENT_MS &&
+                                wire_now - this->lp_mcu_woken_ms_ > LP_MCU_SILENT_MS))) {
+    this->lp_mcu_asleep_ = false;
     this->lp_mcu_woken_ms_ = wire_now;
     this->begin_mcu_wake_pulse_();
     return;
@@ -1086,10 +1144,10 @@ void Tuya::send_low_power_network_() {
     return;
   uint8_t status = 0x02;
 #ifdef USE_NETWORK
-  // The MCU reports its state only to a module that is "connected to the cloud" (0x04), so that is what the
-  // module reports while the network is up, whether or not a client is connected.
+  // 0x04 ("connected to the cloud") only with a client. Each change sends CMD02, also after a standby: the
+  // HC32 relies on that traffic after its own wake; a constant 0x04 left its reports unanswered.
   if (network::is_connected())
-    status = 0x04;
+    status = remote_is_connected() ? 0x04 : 0x03;
 #endif
   if (status == this->lp_network_status_)
     return;
@@ -1151,6 +1209,11 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
     // Standard Tuya answer: one byte, the packet size (0 = 256, 1 = 512, 2 = 1024 bytes).
     ESP_LOGI(LP_TAG, "MCU update probe: answer CMD%02X len %u: %s", command, static_cast<unsigned>(len), hex);
     return;
+  }
+  // The MCU is active again and asks for sleep itself once it is done.
+  if (command != 0x38) {
+    this->lp_cmd38_deferred_ = false;
+    this->lp_mcu_asleep_ = false;
   }
   // Once CMD38 is provisionally accepted, any new MCU traffic invalidates
   // the quiet interval. Do not race a report burst against CPU standby.
@@ -1370,44 +1433,28 @@ void Tuya::handle_low_power_command_(uint8_t command, uint8_t version, const uin
         this->lp_cmd38_cooldown_until_ = App.get_loop_component_start_time() + 500;
         return;
       }
+      // A version-0 MCU ignores the answer, sleeps anyway and asks again only after its next activity:
+      // a request that cannot be granted now is granted later.
+      this->lp_cmd38_deferred_ = !this->lp_v3_;
+      if (!this->lp_v3_) {
+        // It also sleeps right after asking, so the next command needs a wake pulse, and a network state
+        // that crossed the request is lost: send it again instead of resynchronizing everything.
+        this->lp_mcu_asleep_ = true;
+        if (this->lp_wire_.abandon_network()) {
+          ESP_LOGD(LP_TAG, "MCU went to sleep before answering CMD02; sending it again");
+          this->expected_response_.reset();
+          this->lp_network_status_ = 0xFF;
+        }
+      }
       if (this->lp_standby_.requested() ||
           static_cast<int32_t>(App.get_loop_component_start_time() - this->lp_cmd38_cooldown_until_) < 0) {
         this->cancel_low_power_standby_();
         this->send_low_power_direct_(0x38, {0x00, 0x01});
         return;
       }
-      uint8_t flags = 0x01;  // Default is *busy*, not a provisional grant.
-      auto *host = this->lp_host_;
-      const bool ota_veto = host != nullptr && host->ota_busy();
-      const bool supported = host != nullptr && host->standby_supported() && host->standby_wake_pin() >= 0 &&
-                             host->standby_requires_external_sync() &&
-                             host->standby_wake_pin() == this->lp_wake_input_ && this->lp_product_.sleep_mode == 1 &&
-                             host->standby_may_quiesce();
-      const bool transport_ready = this->low_power_ready_for_sleep_(true) && this->available() == 0;
-      if (supported && !ota_veto && transport_ready) {
-        if (!host->standby_services_quiesced()) {
-          // Start *service* preparation without requesting CPU PM. Do not
-          // tell HC32 that WXU accepted sleep before every network owner
-          // has actually closed/drained its resources.
-          this->lp_cmd38_pending_ = true;
-          this->lp_cmd38_deadline_ms_ = App.get_loop_component_start_time() + 1800;
-          host->request_preflight(true);
-          return;  // A bounded later busy/accept response will be sent.
-        }
-        const bool accepted = this->lp_standby_.accept_request(true, true, true, true);
-        if (accepted) {
-          this->send_low_power_direct_(0x38, {0x00, 0x00});
-          if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS)
-            host->request_standby(true);
-          else
-            this->lp_standby_.transport_fault();
-          this->update_low_power_sleep_lock_();
-          return;
-        }
-      }
-      if (ota_veto)
-        flags |= 0x02;
-      this->send_low_power_direct_(0x38, {0x00, flags});
+      const uint8_t flags = this->grant_low_power_sleep_();
+      if (flags != 0)
+        this->send_low_power_direct_(0x38, {0x00, flags});
       return;
     }
 

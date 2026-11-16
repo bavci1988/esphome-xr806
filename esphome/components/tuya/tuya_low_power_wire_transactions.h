@@ -70,6 +70,16 @@ class TuyaLowPowerWireTransactions {
     return true;
   }
 
+  /// The waiting network-state command was not answered and will be sent again; it changes nothing on the MCU.
+  bool abandon_network() {
+    if (!active_ || kind_ != Kind::NETWORK)
+      return false;
+    active_ = false;
+    kind_ = Kind::NONE;
+    ++generation_;
+    return true;
+  }
+
   void transport_fault() {
     active_ = false;
     kind_ = Kind::NONE;
