@@ -23,6 +23,8 @@ static constexpr uint32_t LP_V3_STATUS_POLL_MS = 60000;
 static constexpr uint32_t LP_COMMAND_DELAY_MS = 10;
 // The HC32 sleeps within a second of its last byte; after this long without one it is woken before a command.
 static constexpr uint32_t LP_MCU_SILENT_MS = 200;
+// Pause between attempts to grant an earlier sleep request while the network services stay busy.
+static constexpr uint32_t LP_DEFERRED_SLEEP_RETRY_MS = 10000;
 // sm=2: quiet time before the module offers sleep with 0x91, and how long it waits for the answer.
 // The original T3-U firmware uses the same 5 s.
 static constexpr uint32_t LP_V3_SLEEP_IDLE_MS = 5000;
@@ -907,6 +909,8 @@ void Tuya::poll_low_power_sleep_preflight_() {
   // Never grant CMD38 while network owners still have live sockets, OTA,
   // mDNS callbacks or a WLAN wakelock. The MCU receives its ACK only NOW.
   this->lp_cmd38_pending_ = false;
+  if (this->lp_cmd38_deferred_)
+    ESP_LOGD(LP_TAG, "Granting the MCU's earlier sleep request");
   this->lp_cmd38_deferred_ = false;
   this->send_low_power_direct_(0x38, {0x00, 0x00});
   if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
@@ -936,6 +940,8 @@ uint8_t Tuya::grant_low_power_sleep_() {
       return 0;  // A bounded later busy/accept response will be sent.
     }
     if (this->lp_standby_.accept_request(true, true, true, true)) {
+      if (this->lp_cmd38_deferred_)
+        ESP_LOGD(LP_TAG, "Granting the MCU's earlier sleep request");
       this->lp_cmd38_deferred_ = false;
       this->send_low_power_direct_(0x38, {0x00, 0x00});
       if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
@@ -951,11 +957,14 @@ uint8_t Tuya::grant_low_power_sleep_() {
 }
 
 void Tuya::poll_low_power_deferred_sleep_() {
+  const uint32_t now = App.get_loop_component_start_time();
   if (!this->lp_cmd38_deferred_ || this->lp_cmd38_pending_ || this->lp_standby_.requested() ||
-      static_cast<int32_t>(App.get_loop_component_start_time() - this->lp_cmd38_cooldown_until_) < 0 ||
-      this->grant_low_power_sleep_() != 0)
+      static_cast<int32_t>(now - this->lp_cmd38_cooldown_until_) < 0 ||
+      static_cast<int32_t>(now - this->lp_cmd38_retry_at_) < 0 || this->grant_low_power_sleep_() != 0)
     return;
-  ESP_LOGD(LP_TAG, "Granting the MCU's earlier sleep request");
+  // Preparing the network services failed this time (an open connection, for example): try again later.
+  if (this->lp_cmd38_pending_)
+    this->lp_cmd38_retry_at_ = now + LP_DEFERRED_SLEEP_RETRY_MS;
 }
 
 void Tuya::cancel_low_power_standby_() {

@@ -336,6 +336,7 @@ class Tuya final : public Component, public uart::UARTDevice {
   bool lp_mcu_asleep_{false};
   uint32_t lp_cmd38_deadline_ms_{0};
   uint32_t lp_cmd38_cooldown_until_{0};
+  uint32_t lp_cmd38_retry_at_{0};
   uint8_t lp_network_status_{0xFF};
 #endif  // USE_TUYA_LOW_POWER
   TuyaInitState init_state_ = TuyaInitState::INIT_HEARTBEAT;
