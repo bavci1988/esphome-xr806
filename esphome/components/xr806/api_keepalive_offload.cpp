@@ -41,6 +41,8 @@ struct FrameCapture {
   uint8_t data[ENTRY_COUNT * ENTRY_PAYLOAD];
 };
 FrameCapture frame_capture;
+// millis() of the last write that went out through lwIP, on any socket.
+volatile uint32_t last_write_ms = 0;
 
 bool capturing_here() { return frame_capture.task != nullptr && frame_capture.task == OS_ThreadGetCurrentHandle(); }
 
@@ -64,14 +66,18 @@ ssize_t __real_lwip_write(int s, const void *data, size_t size);
 ssize_t __real_lwip_writev(int s, const struct iovec *iov, int iovcnt);
 
 ssize_t __wrap_lwip_write(int s, const void *data, size_t size) {
-  if (!capturing_here())
+  if (!capturing_here()) {
+    last_write_ms = esphome::millis();
     return __real_lwip_write(s, data, size);
+  }
   return capture_write(s, data, size);
 }
 
 ssize_t __wrap_lwip_writev(int s, const struct iovec *iov, int iovcnt) {
-  if (!capturing_here())
+  if (!capturing_here()) {
+    last_write_ms = esphome::millis();
     return __real_lwip_writev(s, iov, iovcnt);
+  }
   ssize_t total = 0;
   for (int i = 0; i < iovcnt; ++i)
     total += capture_write(s, iov[i].iov_base, iov[i].iov_len);
@@ -93,6 +99,11 @@ static constexpr uint16_t PROTOCOL_TCP = 0x01;
 static constexpr uint32_t STATE_ADDRESS = 0x0900BC04;
 static constexpr uint32_t STATE_WORDS = 4;
 static constexpr uint32_t ACK_WAIT_MS = 500;
+// Home Assistant pings when it received nothing for 20 s. The first firmware frame goes out one period after
+// arming, so the time since the last write plus one period must stay below this.
+static constexpr uint32_t PEER_PING_LIMIT_MS = 17000;
+// The WLAN driver refused to suspend right after the host sent the held frames; wait this long after such a burst.
+static constexpr uint32_t SETTLE_MS = 2000;
 
 // The firmware commands take large structures; keep them off the main loop stack.
 static union {
@@ -242,6 +253,36 @@ void XR806APIKeepaliveOffload::close_(const char *reason) {
   }
 }
 
+static api::APIConnection *single_client() {
+  api::APIConnection *client = nullptr;
+  size_t count = 0;
+  for (const auto &conn : api::global_api_server->active_clients()) {
+    client = conn.get();
+    ++count;
+  }
+  return count == 1 && client->is_authenticated() ? client : nullptr;
+}
+
+bool XR806APIKeepaliveOffload::ready_for_standby() {
+  auto *controller = standby_controller();
+  if (!this->enabled() || controller == nullptr || !controller->stay_connected() || !wlan_fw_patched_active())
+    return true;
+  const uint32_t now = millis();
+  if (now - this->burst_ms_ < SETTLE_MS)
+    return false;
+  auto *client = single_client();
+  if (client == nullptr)
+    return true;
+  if (now - last_write_ms + this->period_s_ * 1000U <= PEER_PING_LIMIT_MS)
+    return true;
+  // Home Assistant would ping before the first firmware frame; restart its timer and try again shortly.
+  ESP_LOGD(TAG, "Standby postponed: %" PRIu32 " ms since the last write, sending a ping response first",
+           now - last_write_ms);
+  client->send_message(api::PingResponse{});
+  this->burst_ms_ = now;
+  return false;
+}
+
 void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   this->client_ = nullptr;
   auto *controller = standby_controller();
@@ -251,13 +292,8 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
     ESP_LOGD(TAG, "Not armed: the patched WLAN firmware is not running yet");
     return;
   }
-  api::APIConnection *client = nullptr;
-  size_t count = 0;
-  for (const auto &conn : api::global_api_server->active_clients()) {
-    client = conn.get();
-    ++count;
-  }
-  if (count != 1 || !client->is_authenticated())
+  api::APIConnection *client = single_client();
+  if (client == nullptr)
     return;
 
   if (!this->capture_frames_(client)) {
@@ -277,6 +313,7 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
     memset(&offload_cmd.svr, 0, sizeof(offload_cmd.svr));
     request(WLAN_EXT_CMD_SET_P2P_SVR, reinterpret_cast<uint32_t>(&offload_cmd.svr));
     this->send_unsent_(0);
+    this->burst_ms_ = millis();
     this->client_ = nullptr;
     return;
   }
@@ -340,6 +377,7 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
     this->close_("lwIP could not take over the sequence numbers");
   } else {
     this->send_unsent_(sent);
+    this->burst_ms_ = millis();
     ESP_LOGD(TAG, "Resynced: lwIP sequence +%" PRIu32 " bytes, %" PRIu32 " held frames sent by the host",
              sent * this->frame_len_, this->frame_count_ - sent);
   }

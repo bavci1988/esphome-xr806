@@ -36,6 +36,9 @@ class XR806APIKeepaliveOffload {
   void arm(uint32_t wake_after_ms);
   /// After the wake, or when standby did not happen.
   void disarm(const XR806StandbyResume *event);
+  /// False while standby should wait: shortly after the host sent held frames, or when Home Assistant would ping
+  /// before the first firmware frame (then a ping response is sent first).
+  bool ready_for_standby();
 
  protected:
   bool capture_frames_(api::APIConnection *client);
@@ -47,6 +50,7 @@ class XR806APIKeepaliveOffload {
   api::APIConnection *client_{nullptr};
   int fd_{-1};
   uint32_t armed_ms_{0};
+  uint32_t burst_ms_{0};
   uint32_t snd_nxt_{0};
   uint32_t rcv_nxt_{0};
   uint16_t frame_len_{0};

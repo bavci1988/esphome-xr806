@@ -111,16 +111,17 @@ def validate_wake_pin(value: object) -> int:
     return number
 
 
-# The only switch for everything that changes how the WLAN firmware behaves during standby. Today the API
-# connection is handed to the firmware's TCP keepalive, which sends a pre-encrypted PingResponse while the CPU
-# sleeps; the connection is closed on every wake, because the firmware does not report what it sent.
+# The only switch for everything that changes how the WLAN firmware behaves during standby. The API connection
+# is handed to the patched firmware's TCP keepalive, which sends a list of pre-encrypted PingResponses while the
+# CPU sleeps; after the wake the host takes the connection back where the firmware left it.
 EXPERIMENTAL_WIFI_FW_STANDBY_PATCH_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_ENABLED): cv.boolean,
-        # Home Assistant pings after 20 s without a message from the device.
+        # Home Assistant pings after 20 s without a message from the device; the host also needs a few seconds
+        # before standby (api_keepalive_offload.cpp, PEER_PING_LIMIT_MS).
         cv.Optional(CONF_KEEPALIVE_PERIOD, default="8s"): cv.All(
             cv.positive_time_period_seconds,
-            cv.Range(min=cv.TimePeriod(seconds=1), max=cv.TimePeriod(seconds=255)),
+            cv.Range(min=cv.TimePeriod(seconds=1), max=cv.TimePeriod(seconds=12)),
         ),
         cv.Optional(CONF_HOST_SLEEP, default=True): cv.boolean,
         cv.Optional(CONF_WAKE_ON_PEER, default=False): cv.boolean,
