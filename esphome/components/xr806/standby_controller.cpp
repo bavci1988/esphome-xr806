@@ -330,6 +330,13 @@ void XR806StandbyController::attempt_standby_() {
   if (!p.commit_valid(commit_epoch))
     goto abort;
 
+  for (size_t i = 0; i < this->participant_count_; ++i)
+    this->participants_[i]->standby_committing();
+#ifdef USE_LOGGER
+  // A participant may have logged above; give that line time to leave the UART.
+  (void) drain_log_uart();
+#endif
+
   HAL_Wakeup_SetEvent(0);
   pm_called = true;
   // '500' is the SDK wakelock-touch deadline, NOT an upper bound on the

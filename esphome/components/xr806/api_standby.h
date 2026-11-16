@@ -34,6 +34,9 @@ class XR806APIStandby final : public Component, public XR806StandbyParticipant {
   uint32_t owned_services() const override { return XR806LowPowerPolicy::API_BUSY; }
   bool prepare_for_standby() override;
   void standby_cancelled() override;
+#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
+  void standby_committing() override { this->arm_offload_(); }
+#endif
   void standby_resumed(const XR806StandbyResume &event) override;
 #ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
   /// Experiment: while the CPU sleeps, the WLAN firmware sends one pre-encrypted PingResponse every period_s.

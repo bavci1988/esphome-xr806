@@ -36,6 +36,8 @@ class XR806StandbyParticipant {
   // A connected network owner can veto before acknowledging MCU CMD38.
   virtual bool may_quiesce() const { return true; }
   virtual bool prepare_for_standby() = 0;
+  // Called once every check has passed, right before the chip sleeps; nothing can refuse standby after it.
+  virtual void standby_committing() {}
   virtual void standby_cancelled() = 0;
   virtual void standby_resumed(const XR806StandbyResume &event) = 0;
 };

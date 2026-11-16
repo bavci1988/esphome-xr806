@@ -120,12 +120,9 @@ void XR806APIStandby::standby_preflight(bool requested) {
 }
 
 bool XR806APIStandby::prepare_for_standby() {
-  if (!this->may_quiesce() || !this->clients_idle_())
-    return false;
-#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
-  this->arm_offload_();
-#endif
-  return true;
+  // With the keepalive experiment the connection is handed to the WLAN firmware in standby_committing(),
+  // once nothing can refuse standby any more.
+  return this->may_quiesce() && this->clients_idle_();
 }
 
 void XR806APIStandby::standby_cancelled() {
