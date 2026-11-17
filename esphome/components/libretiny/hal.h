@@ -40,7 +40,7 @@
 #endif
 #define PROGMEM
 
-#ifdef USE_BK72XX
+#if defined(USE_BK72XX) && !defined(USE_LIBRETINY_VARIANT_BK7236)
 // Declared in the Beken FreeRTOS port (portmacro.h) and built in ARM mode so
 // it is callable from Thumb code via interworking. The MRS CPSR instruction
 // is ARM-only and user code here may be built in Thumb, so in_isr_context()
@@ -73,11 +73,11 @@ namespace esphome {
 
 /// Returns true when executing inside an interrupt handler.
 __attribute__((always_inline)) inline bool in_isr_context() {
-#if defined(USE_BK72XX)
+#if defined(USE_BK72XX) && !defined(USE_LIBRETINY_VARIANT_BK7236)
   // BK72xx is ARM968E-S (ARM9); see extern declaration above.
   return platform_is_in_interrupt_context() != 0;
 #else
-  // Cortex-M (AmebaZ, AmebaZ2, LN882H). IPSR is the active exception number;
+  // Cortex-M (AmebaZ, AmebaZ2, LN882H, BK7236). IPSR is the active exception number;
   // non-zero means we're in a handler.
   uint32_t ipsr;
   __asm__ volatile("mrs %0, ipsr" : "=r"(ipsr));

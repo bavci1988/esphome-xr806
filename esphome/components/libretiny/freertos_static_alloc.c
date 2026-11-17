@@ -10,7 +10,8 @@
  * allowing queue storage to live in BSS with zero runtime heap allocation.
  */
 
-#ifdef USE_BK72XX
+// BK7236: the ARMINO SDK already provides these callbacks
+#if defined(USE_BK72XX) && !defined(USE_LIBRETINY_VARIANT_BK7236)
 
 #include <FreeRTOS.h>
 #include <task.h>
