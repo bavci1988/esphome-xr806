@@ -18,6 +18,10 @@ server 0 sends a different, pre-encrypted frame each time Home Assistant acknowl
 3. The receive filter (0x0900A012) acknowledged data from the peer itself and dropped it, so a command from Home
    Assistant never reached the host. Data segments are now passed to the host, which wakes it (0x0900A14E);
    segments without data are still handled by the firmware.
+4. The ACK handler (0x0900A720) no longer stops the retransmit timer (0x0900A756). Stopping the earliest timer in
+   the ROM's list (0xEEB4) clears the pending-timer flag without programming the hardware timer for the next one,
+   so an ACK that arrived right when the timer fired left all later timers dead while the host slept. The
+   retransmit timer now simply expires; its handler (0x0900A7A6) does nothing when no frame is in flight.
 
 Only the firmware with the known SHA-256 is patched; see docs/WLAN_FIRMWARE_NOTES.md in the xr806-sdk repository.
 Nothing patched is stored: the stock file comes from the SDK and the patch is applied in the build directory.
@@ -47,7 +51,13 @@ THUMB_NOP = bytes.fromhex("c046")  # mov r8, r8
 # After "cmp r1,#0; beq 0x0900A15E" (no data: done), data is acknowledged by the firmware and dropped.
 PEER_DATA_ADDRESS = 0x0900A14E
 PEER_DATA_STOCK = bytes.fromhex("0022")  # movs r2,#0: start of the acknowledgement
-PEER_DATA_PATCHED = bytes.fromhex("67e0")  # b 0x0900A220: return 0, the frame goes to the host
+PEER_DATA_PATCHED = bytes.fromhex(
+    "67e0"
+)  # b 0x0900A220: return 0, the frame goes to the host
+ACK_TIMER_STOP_ADDRESS = 0x0900A756
+ACK_TIMER_STOP_STOCK = bytes.fromhex(
+    "01f046e9"
+)  # blx 0x0900B9E4: stop the retransmit timer
 
 # Layout the host needs, as WLAN core addresses.
 FRAMES_PER_ENTRY_AREA = 128
@@ -163,6 +173,7 @@ def patch(stock: bytes, cave: bytes, verify_hash: bool = True) -> bytes:
         ),
         (CAVE_ADDRESS, None, cave),
         (PEER_DATA_ADDRESS, PEER_DATA_STOCK, PEER_DATA_PATCHED),
+        (ACK_TIMER_STOP_ADDRESS, ACK_TIMER_STOP_STOCK, THUMB_NOP * 2),
     )
     for address, expected, new in changes:
         offset = _file_offset(records, address, len(new))

@@ -27,6 +27,7 @@ def _image() -> bytes:
         (patch_mod.IMMEDIATE_SEND_ADDRESS, patch_mod.IMMEDIATE_SEND_STOCK),
         (patch_mod.PAYLOAD_SOURCE_ADDRESS, patch_mod.PAYLOAD_SOURCE_STOCK),
         (patch_mod.PEER_DATA_ADDRESS, patch_mod.PEER_DATA_STOCK),
+        (patch_mod.ACK_TIMER_STOP_ADDRESS, patch_mod.ACK_TIMER_STOP_STOCK),
     ):
         data[address - SECTION : address - SECTION + len(code)] = code
     image = bytearray(b"XR01")
@@ -63,6 +64,7 @@ def test_patch_changes_the_three_places_and_keeps_the_checksum() -> None:
     )
     assert _at(patched, patch_mod.CAVE_ADDRESS, len(CAVE)) == CAVE
     assert _at(patched, patch_mod.PEER_DATA_ADDRESS, 2) == patch_mod.PEER_DATA_PATCHED
+    assert _at(patched, patch_mod.ACK_TIMER_STOP_ADDRESS, 4) == patch_mod.THUMB_NOP * 2
 
 
 def test_patch_refuses_other_code() -> None:
