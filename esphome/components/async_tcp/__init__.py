@@ -35,6 +35,14 @@ async def to_code(config: ConfigType) -> None:
     elif CORE.is_libretiny:
         # https://github.com/ESP32Async/AsyncTCP
         cg.add_library("ESP32Async/AsyncTCP", "3.4.5")
+        from esphome.components.libretiny import get_libretiny_family
+        from esphome.components.libretiny.const import FAMILY_BK7236
+
+        if get_libretiny_family() == FAMILY_BK7236:
+            # AsyncTCP's default task priority (10) is out of range on the
+            # ARMINO SDK (configMAX_PRIORITIES is 10). Stay below the main
+            # loop (6) and the TCP/IP thread (7), like on ESP32.
+            cg.add_build_flag("-DCONFIG_ASYNC_TCP_PRIORITY=5")
     elif CORE.is_esp8266:
         # https://github.com/ESP32Async/ESPAsyncTCP
         cg.add_library("ESP32Async/ESPAsyncTCP", "2.0.0")
