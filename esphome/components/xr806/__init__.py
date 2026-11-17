@@ -53,6 +53,8 @@ CONF_QUIET_TIME = "quiet_time"
 CONF_MIN_AWAKE_TIME = "min_awake_time"
 CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
 CONF_WAKE_AFTER = "wake_after"
+# safe_mode counts from its own setup(), a little after boot.
+BOOT_HOLD_MARGIN_MS = 2000
 CONF_WAKE_PIN = "wake_pin"
 CONF_WAKE_EDGE = "wake_edge"
 CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH = "experimental_wifi_fw_standby_patch"
@@ -401,6 +403,15 @@ async def to_code(config: ConfigType) -> None:
         cg.add(controller.set_wake_after_ms(cfg[CONF_WAKE_AFTER].total_milliseconds))
         cg.add(controller.set_quiet_ms(cfg[CONF_QUIET_TIME].total_milliseconds))
         cg.add(controller.set_min_awake_ms(cfg[CONF_MIN_AWAKE_TIME].total_milliseconds))
+        if (safe_mode := CORE.config.get("safe_mode")) is not None:
+            # Stay awake until safe_mode has seen the boot through, so a crash in the first standby counts
+            # as a failed boot only if it really is one, and OTA stays reachable after every restart.
+            cg.add(
+                controller.set_boot_hold_ms(
+                    safe_mode["boot_is_good_after"].total_milliseconds
+                    + BOOT_HOLD_MARGIN_MS
+                )
+            )
         if CONF_WAKE_PIN in cfg:
             cg.add(controller.set_wake_pin(cfg[CONF_WAKE_PIN]))
         cg.add(

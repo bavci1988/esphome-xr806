@@ -149,6 +149,9 @@ void XR806StandbyController::dump_config() {
   ESP_LOGCONFIG(TAG, "  Trigger: explicit application request only");
   ESP_LOGCONFIG(TAG, "  Timer: %u ms; quiet: %u ms; min awake: %u ms", static_cast<unsigned>(this->wake_after_ms_),
                 static_cast<unsigned>(this->quiet_ms_), static_cast<unsigned>(this->min_awake_ms_));
+  if (this->boot_hold_ms_ != 0)
+    ESP_LOGCONFIG(TAG, "  No standby before %u s after boot (safe_mode boot check)",
+                  static_cast<unsigned>(this->boot_hold_ms_ / 1000));
   ESP_LOGCONFIG(TAG, "  Network during standby: %s",
                 this->stay_connected_ ? LOG_STR_LITERAL("stays connected") : LOG_STR_LITERAL("parked"));
   ESP_LOGCONFIG(TAG, "  External sync: %s; required UART participant: %s",
@@ -193,6 +196,17 @@ bool XR806StandbyController::may_quiesce() const {
 void XR806StandbyController::loop() {
   if (this->busy_ || this->state_.disabled() || this->is_any_transport_unowned_())
     return;
+  if (this->boot_hold_ms_ != 0) {
+    const uint32_t now = millis();
+    if (now < this->boot_hold_ms_) {
+      // A request made meanwhile waits; its timeouts start when the hold ends.
+      this->request_since_ms_ = now;
+      this->preflight_since_ms_ = now;
+      return;
+    }
+    ESP_LOGD(TAG, "Boot hold of %" PRIu32 " s over; standby allowed", this->boot_hold_ms_ / 1000);
+    this->boot_hold_ms_ = 0;
+  }
 
   auto &p = lowpower_policy();
   if (this->preflight_requested_ &&

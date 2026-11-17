@@ -47,6 +47,8 @@ class XR806StandbyController final : public Component {
   void set_wake_after_ms(uint32_t value) { wake_after_ms_ = value; }
   void set_quiet_ms(uint32_t value) { quiet_ms_ = value; }
   void set_min_awake_ms(uint32_t value) { min_awake_ms_ = value; }
+  /// No standby before this uptime, so safe_mode can confirm the boot and OTA stays reachable after every restart.
+  void set_boot_hold_ms(uint32_t value) { boot_hold_ms_ = value; }
   void set_wake_pin(uint8_t pin) {
     wake_pin_ = pin;
     has_wake_pin_ = true;
@@ -105,6 +107,7 @@ class XR806StandbyController final : public Component {
   uint64_t timer_deadline_us_{0};
   uint32_t quiet_ms_{250};
   uint32_t min_awake_ms_{5000};
+  uint32_t boot_hold_ms_{0};
   uint8_t wake_pin_{20};
   bool has_wake_pin_{false};
   bool wake_falling_{true};

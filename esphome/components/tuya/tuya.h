@@ -210,6 +210,8 @@ class Tuya final : public Component, public uart::UARTDevice {
   void update_low_power_sleep_lock_();
   void poll_low_power_autobaud_();
   void send_low_power_product_query_(bool direct_probe);
+  void send_product_query_now_(bool direct_probe);
+  void poll_low_power_product_probe_();
   void begin_mcu_wake_pulse_();
   bool mcu_wake_pulse_running_();
   void poll_low_power_v3_status_();
@@ -323,7 +325,12 @@ class Tuya final : public Component, public uart::UARTDevice {
   uint32_t lp_mode_requery_after_ms_{0};
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_mcu_wake_pulse_until_{0};
-  uint32_t lp_mcu_woken_ms_{0};  // Last wake pulse before a queued command
+  uint32_t lp_mcu_woken_ms_{0};      // End of the last wake pulse
+  bool lp_mcu_wake_fresh_{false};    // The last wake pulse is not answered yet
+  uint32_t lp_product_probe_ms_{0};  // Last product query of a recovery
+  enum class ProductProbe : uint8_t { PRODUCT_PROBE_NONE, PRODUCT_PROBE_QUEUED, PRODUCT_PROBE_DIRECT };
+  // A product query waiting for the wake pulse to end.
+  ProductProbe lp_probe_pending_{ProductProbe::PRODUCT_PROBE_NONE};
   bool lp_mcu_wake_pulse_active_{false};
   bool lp_awake_notification_pending_{false};
   uint32_t lp_last_resync_ms_{0};
