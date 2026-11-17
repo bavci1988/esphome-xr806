@@ -511,6 +511,18 @@ def test_standby_times_accept_time_periods(
     assert "set_min_awake_ms(60000)" in generated
 
 
+def test_standby_waits_for_safe_mode_boot_check(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+) -> None:
+    config = component_config_path("native_ota_standby.yaml").read_text()
+    path = tmp_path / "standby_safe_mode.yaml"
+    path.write_text(config + "safe_mode:\n  boot_is_good_after: 30s\n")
+
+    assert "set_boot_hold_ms(32000)" in generate_main(path)
+
+
 def test_standby_old_millisecond_keys_still_work(
     generate_main: Callable[[str | Path], str],
     component_config_path: Callable[[str], Path],
