@@ -265,10 +265,13 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
       memcpy(slot.Payload, frame_capture.data + first * this->frame_len_, frames * this->frame_len_);
     }
   }
-  // After the wake pattern MIB, which clears disabled entries. The window takes 32-bit accesses.
+  // After the wake pattern MIB, which clears disabled entries. The window takes 32-bit accesses. Only areas that
+  // hold frames are written: the host touches the WLAN core's RAM only when the list needs them.
   for (size_t e = 0; e < ENTRY_COUNT; ++e) {
     uint32_t words[ENTRY_PAYLOAD / 4]{};
     const size_t first = (ENTRY_COUNT + e) * per_entry;
+    if (first >= this->frame_count_)
+      break;
     if (first < this->frame_count_) {
       const size_t frames = std::min(per_entry, this->frame_count_ - first);
       memcpy(words, frame_capture.data + first * this->frame_len_, frames * this->frame_len_);
