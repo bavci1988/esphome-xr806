@@ -40,6 +40,14 @@ async def to_code(config: ConfigType) -> None:
         # in by LibreTiny's debug level or CONFIG_ASYNC_TCP_DEBUG, so the call always expands to int(), which is 0
         # (a function-like -D does not survive PlatformIO's build flags)
         cg.add_build_flag("-DxPortGetCoreID=int")
+        from esphome.components.libretiny import get_libretiny_family
+        from esphome.components.libretiny.const import FAMILY_BK7236
+
+        if get_libretiny_family() == FAMILY_BK7236:
+            # AsyncTCP's default task priority (10) is out of range on the
+            # ARMINO SDK (configMAX_PRIORITIES is 10). Stay below the main
+            # loop (6) and the TCP/IP thread (7), like on ESP32.
+            cg.add_build_flag("-DCONFIG_ASYNC_TCP_PRIORITY=5")
     elif CORE.is_esp8266:
         # https://github.com/ESP32Async/ESPAsyncTCP
         cg.add_library("ESP32Async/ESPAsyncTCP", "2.0.0")

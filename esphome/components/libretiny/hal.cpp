@@ -31,8 +31,7 @@ void arch_init() {
 #ifdef USE_LIBRETINY_CRASH_HANDLER_VECTOR_PATCH
   libretiny::crash_handler_install();
 #endif
-// Not on BK7236: the ARMINO SDK runs the TCP/IP thread at priority 2, so priority 6 would starve it
-#if defined(USE_BK72XX) && !defined(USE_LIBRETINY_VARIANT_BK7236)
+#ifdef USE_BK72XX
   // BK72xx SDK creates the main Arduino task at priority 3, which is lower than
   // all WiFi (4-5), LwIP (4), and TCP/IP (7) tasks. This causes ~100ms loop
   // stalls whenever WiFi background processing runs, because the main task
