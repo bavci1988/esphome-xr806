@@ -60,8 +60,9 @@ void XR806APIStandby::standby_preflight(bool requested) {
   bool idle = requested && this->may_quiesce() && this->clients_idle_();
 #ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
   // Holding the API vote delays the attempt; refusing in prepare_for_standby() would cancel it, and the MCU
-  // would withdraw its sleep request.
-  if (idle && !this->offload_.ready_for_standby())
+  // would withdraw its sleep request. Only once standby is requested: in the MCU's preflight alone the vote must
+  // show the services as they are, or a ping sent to keep Home Assistant's timer in reach would hold it busy.
+  if (idle && lowpower_policy().standby_requested() && !this->offload_.ready_for_standby())
     idle = false;
 #endif
   lowpower_policy().set_api_idle(idle);
