@@ -10,7 +10,7 @@
 #include "lwip/err.h"
 #include "lwip/dns.h"
 
-#ifdef USE_BK72XX
+#if defined(USE_BK72XX) && !defined(USE_LIBRETINY_VARIANT_BK7236)
 extern "C" {
 // BDK 3.0.78 (required for BK7238) redeclares wifi_event_sta_disconnected_t,
 // which LibreTiny's Arduino WiFi API already defines. ESPHome doesn't use the
@@ -835,7 +835,8 @@ bssid_t WiFiComponent::wifi_bssid() {
   return bssid;
 }
 const char *WiFiComponent::wifi_ssid_to(std::span<char, SSID_BUFFER_SIZE> buffer) {
-#ifdef USE_BK72XX
+// BK7236 uses the ARMINO SDK instead of the BDK and takes the generic path below
+#if defined(USE_BK72XX) && !defined(USE_LIBRETINY_VARIANT_BK7236)
   LinkStatusTypeDef link_status{};
   bk_wlan_get_link_status(&link_status);
   size_t len = strnlen(reinterpret_cast<const char *>(link_status.ssid), SSID_BUFFER_SIZE - 1);
@@ -846,7 +847,7 @@ const char *WiFiComponent::wifi_ssid_to(std::span<char, SSID_BUFFER_SIZE> buffer
   size_t len = strnlen(reinterpret_cast<const char *>(setting.ssid), SSID_BUFFER_SIZE - 1);
   memcpy(buffer.data(), setting.ssid, len);
 #else
-  // LN882X: wifi_get_sta_conn_info() provides direct pointer access
+  // LN882X, BK7236: get the SSID from the Arduino WiFi API
   String ssid = WiFi.SSID();
   size_t len = std::min(static_cast<size_t>(ssid.length()), SSID_BUFFER_SIZE - 1);
   memcpy(buffer.data(), ssid.c_str(), len);
