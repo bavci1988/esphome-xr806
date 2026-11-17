@@ -119,19 +119,25 @@ static constexpr uint32_t PEER_ANSWER_WAIT_MS = 1000;
 static constexpr uint32_t TIMER_LIST_HEAD = 0xFFF01C6C;
 static constexpr uint32_t PERIOD_TIMER = 0x0900BBF0;
 static constexpr uint32_t RETRANSMIT_TIMER = 0x0900BC14;
+// Timer time as the ROM computes it: hardware counter plus an offset kept in RAM.
 static constexpr uint32_t WLAN_CLOCK = 0x0AC00004;
+static constexpr uint32_t WLAN_CLOCK_OFFSET = 0xFFF0560C;
 static constexpr uint32_t TIMER_WALK_MAX = 12;
 
 static void print_timer_diagnostics() {
   uint32_t head[6]{};
   uint32_t clock = 0;
+  uint32_t clock_offset = 0;
   uint32_t period[5]{};
   uint32_t retransmit[5]{};
   wlan_read_words(TIMER_LIST_HEAD, head, 6);
   wlan_read_words(WLAN_CLOCK, &clock, 1);
+  wlan_read_words(WLAN_CLOCK_OFFSET, &clock_offset, 1);
   wlan_read_words(PERIOD_TIMER, period, 5);
   wlan_read_words(RETRANSMIT_TIMER, retransmit, 5);
-  ESP_LOGW(TAG, "WLAN timers: clock %08" PRIX32 ", list head %08" PRIX32 " busy %" PRIu32, clock, head[0], head[5]);
+  ESP_LOGW(TAG, "WLAN timers: now %08" PRIX32 " (counter %08" PRIX32 " + %08" PRIX32 "), list head %08" PRIX32
+                " busy %" PRIu32 " flags %08" PRIX32,
+           clock + clock_offset, clock, clock_offset, head[0], head[5], head[1]);
   ESP_LOGW(TAG, "  period     %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32, period[0], period[1],
            period[2], period[3], period[4]);
   ESP_LOGW(TAG, "  retransmit %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32, retransmit[0],
