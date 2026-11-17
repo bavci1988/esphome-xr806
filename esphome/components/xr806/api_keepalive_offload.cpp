@@ -113,47 +113,38 @@ static constexpr uint32_t SETTLE_MS = 2000;
 // lwIP holds the small ping back (Nagle) until the frames sent before it are acknowledged.
 static constexpr uint32_t PEER_ANSWER_WAIT_MS = 1000;
 
-// Diagnostics for a hung WLAN core: its mode stacks (set up below 0xFFF0C000 by the reset code in wlan_fw.bin) and
-// the patch's data with the keepalive state, read through the WLAN RAM window right after every wake and printed
-// only when the firmware no longer answers, before the driver reloads it.
-struct WlanRamRegion {
-  uint32_t wlan_address;
-  uint32_t size;
-};
-static constexpr WlanRamRegion CRASH_REGIONS[] = {
-    {0xFFF0B200, 0x0E00},  // UND, SYS, ABT, FIQ, SVC and IRQ stacks
-    {0x0900BB80, 0x0480},  // server, state, keepalive and wake tables
-};
-static constexpr size_t CRASH_SNAPSHOT_WORDS = (0x0E00 + 0x0480) / 4;
-static uint32_t crash_snapshot[CRASH_SNAPSHOT_WORDS];
+// Diagnostics for keepalive timers that stopped firing while the WLAN core still answers: the ROM's timer list
+// (head at 0xFFF01C6C: first node, ..., +0x14 processing flag), the period and retransmit timers of server 0
+// ({next, prev, expiry, callback, argument}) and the WLAN core's microsecond clock.
+static constexpr uint32_t TIMER_LIST_HEAD = 0xFFF01C6C;
+static constexpr uint32_t PERIOD_TIMER = 0x0900BBF0;
+static constexpr uint32_t RETRANSMIT_TIMER = 0x0900BC14;
+static constexpr uint32_t WLAN_CLOCK = 0x0AC00004;
+static constexpr uint32_t TIMER_WALK_MAX = 12;
 
-static uintptr_t wlan_ram_window(uint32_t wlan_address) {
-  // FW_ADDR_TO_APP_ADDR of the driver: 0xFFF0xxxx -> 0x6800xxxx, 0x0900xxxx -> 0x6800C000 + offset.
-  if ((wlan_address & 0xFFFF0000) == 0xFFF00000)
-    return 0x68000000 + (wlan_address & 0xFFFF);
-  return 0x6800C000 + (wlan_address - 0x09000000);
-}
-
-static void take_crash_snapshot() {
-  size_t out = 0;
-  for (const auto &region : CRASH_REGIONS) {
-    const auto *src = reinterpret_cast<const volatile uint32_t *>(wlan_ram_window(region.wlan_address));
-    for (uint32_t w = 0; w < region.size / 4; ++w)
-      crash_snapshot[out++] = src[w];
-  }
-}
-
-static void print_crash_snapshot() {
-  ESP_LOGW(TAG, "WLAN core RAM at the wake (WRAM <WLAN address> <8 words>):");
-  size_t index = 0;
-  for (const auto &region : CRASH_REGIONS) {
-    for (uint32_t offset = 0; offset < region.size; offset += 32, index += 8) {
-      const uint32_t *w = crash_snapshot + index;
-      ESP_LOGW(TAG, "WRAM %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
-                    " %08" PRIX32 " %08" PRIX32,
-               region.wlan_address + offset, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
-      delay(2);
-    }
+static void print_timer_diagnostics() {
+  uint32_t head[6]{};
+  uint32_t clock = 0;
+  uint32_t period[5]{};
+  uint32_t retransmit[5]{};
+  wlan_read_words(TIMER_LIST_HEAD, head, 6);
+  wlan_read_words(WLAN_CLOCK, &clock, 1);
+  wlan_read_words(PERIOD_TIMER, period, 5);
+  wlan_read_words(RETRANSMIT_TIMER, retransmit, 5);
+  ESP_LOGW(TAG, "WLAN timers: clock %08" PRIX32 ", list head %08" PRIX32 " busy %" PRIu32, clock, head[0], head[5]);
+  ESP_LOGW(TAG, "  period     %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32, period[0], period[1],
+           period[2], period[3], period[4]);
+  ESP_LOGW(TAG, "  retransmit %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32, retransmit[0],
+           retransmit[1], retransmit[2], retransmit[3], retransmit[4]);
+  uint32_t node = head[0];
+  for (uint32_t i = 0; i < TIMER_WALK_MAX && node != 0; ++i) {
+    uint32_t t[5]{};
+    if (wlan_read_words(node, t, 5) != 0)
+      break;
+    ESP_LOGW(TAG, "  node %08" PRIX32 ": next %08" PRIX32 " prev %08" PRIX32 " expiry %08" PRIX32 " cb %08" PRIX32
+                  " arg %08" PRIX32,
+             node, t[0], t[1], t[2], t[3], t[4]);
+    node = t[0];
   }
 }
 
@@ -422,7 +413,6 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
 void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
   if (this->client_ == nullptr)
     return;
-  take_crash_snapshot();
   const uint32_t elapsed = millis() - this->armed_ms_;
   if (this->host_sleep_)
     request(WLAN_EXT_CMD_SET_P2P_HOST_SLEEP, 0);
@@ -434,6 +424,13 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
   while (ok && state.in_flight && millis() - wait_start < ACK_WAIT_MS) {
     delay(10);
     ok = read_state(state);
+  }
+  // Timers that stopped firing: read them before stop_firmware_() takes them out of the list.
+  if (ok && this->frame_len_ != 0) {
+    const uint32_t sent_so_far = (state.seq - this->snd_nxt_) / this->frame_len_;
+    const uint32_t expected = std::min<uint32_t>(elapsed / (this->period_s_ * 1000U), this->frame_count_);
+    if (state.in_flight || sent_so_far + 2 < expected)
+      print_timer_diagnostics();
   }
   this->stop_firmware_();
   ok = ok && read_state(state);
@@ -462,7 +459,6 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
   if (!alive) {
     ESP_LOGI(TAG, "The API connection is gone");
   } else if (!ok) {
-    print_crash_snapshot();
     this->close_("could not read the firmware state");
   } else if (state.in_flight) {
     this->close_("a frame is still unacknowledged");
