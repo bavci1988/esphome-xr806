@@ -7,6 +7,7 @@
 @ 128 / length frames each: the payloads of the three keepalive entries (0x0900BC78, 0x84 apart), then the
 @ payloads of the three wake pattern entries (0x0900BE04, 0x84 apart), which the host writes directly and whose
 @ Enable stays 0, so the firmware never reads them. Other servers keep one payload.
+@ Optionally reports state 2 to the host once W frames are acknowledged (see below).
     .syntax unified
     .thumb
     .text
@@ -25,6 +26,24 @@ cave:
     ldr     r5, =0x0900BB98         @ server table entry 0: TcpSeqInit
     ldr     r5, [r5]
     subs    r4, r4, r5              @ bytes acknowledged
+    @ Wake the host once W frames are acknowledged (W in the unused reserved1 byte of the keepalive table, 0 =
+    @ off): the host then wakes through the WLAN path, never through its own timer while this core sleeps.
+    ldr     r5, =0x0900BC73         @ keepalive table: reserved1
+    ldrb    r6, [r5]
+    cmp     r6, #0
+    beq     1f
+    muls    r6, r2                  @ W * length
+    cmp     r4, r6
+    blo     1f
+    movs    r6, #0
+    strb    r6, [r5]                @ once
+    push    {r0, r1, r2, r3}
+    movs    r0, #0                  @ server 0
+    movs    r1, #2                  @ state 2: wake the host (as for a matched wake pattern)
+    ldr     r3, =0x0900A5B9         @ state report to the host (Thumb)
+    blx     r3
+    pop     {r0, r1, r2, r3}
+1:
     movs    r5, #0                  @ area = 128 // length * length
     movs    r6, #128
 1:  cmp     r6, r2

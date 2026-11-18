@@ -135,8 +135,9 @@ static void print_timer_diagnostics() {
   wlan_read_words(WLAN_CLOCK_OFFSET, &clock_offset, 1);
   wlan_read_words(PERIOD_TIMER, period, 5);
   wlan_read_words(RETRANSMIT_TIMER, retransmit, 5);
-  ESP_LOGW(TAG, "WLAN timers: now %08" PRIX32 " (counter %08" PRIX32 " + %08" PRIX32 "), list head %08" PRIX32
-                " busy %" PRIu32 " flags %08" PRIX32,
+  ESP_LOGW(TAG,
+           "WLAN timers: now %08" PRIX32 " (counter %08" PRIX32 " + %08" PRIX32 "), list head %08" PRIX32
+           " busy %" PRIu32 " flags %08" PRIX32,
            clock + clock_offset, clock, clock_offset, head[0], head[5], head[1]);
   ESP_LOGW(TAG, "  period     %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32, period[0], period[1],
            period[2], period[3], period[4]);
@@ -147,8 +148,9 @@ static void print_timer_diagnostics() {
     uint32_t t[5]{};
     if (wlan_read_words(node, t, 5) != 0)
       break;
-    ESP_LOGW(TAG, "  node %08" PRIX32 ": next %08" PRIX32 " prev %08" PRIX32 " expiry %08" PRIX32 " cb %08" PRIX32
-                  " arg %08" PRIX32,
+    ESP_LOGW(TAG,
+             "  node %08" PRIX32 ": next %08" PRIX32 " prev %08" PRIX32 " expiry %08" PRIX32 " cb %08" PRIX32
+             " arg %08" PRIX32,
              node, t[0], t[1], t[2], t[3], t[4]);
     node = t[0];
   }
@@ -254,6 +256,8 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
   kpalive.KeepAlivePeriod_s = this->period_s_;
   kpalive.TxTimeOut_s = TX_TIMEOUT_S;
   kpalive.TxRetryLimit = TX_RETRIES;
+  // The patched firmware reports a wake (state 2) once this many frames are acknowledged.
+  kpalive.reserved1 = this->wake_frames_;
   const size_t per_entry = ENTRY_PAYLOAD / this->frame_len_;
   for (size_t e = 0; e < ENTRY_COUNT; ++e) {
     auto &slot = kpalive.P2PKeepAliveParamCfgs[e];
@@ -341,6 +345,17 @@ void XR806APIKeepaliveOffload::close_(const char *reason) {
   }
 }
 
+static XR806APIKeepaliveOffload *armed_instance = nullptr;
+
+bool XR806APIKeepaliveOffload::planned_wake() {
+  FirmwareState state{};
+  if (this->client_ == nullptr || this->frame_len_ == 0 || !read_state(state))
+    return false;
+  return (state.seq - this->snd_nxt_) / this->frame_len_ >= this->wake_frames_;
+}
+
+bool keepalive_offload_planned_wake() { return armed_instance != nullptr && armed_instance->planned_wake(); }
+
 static api::APIConnection *single_client() {
   api::APIConnection *client = nullptr;
   size_t count = 0;
@@ -385,11 +400,14 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   if (client == nullptr)
     return;
 
-  // Every frame takes a Noise nonce, and the host sends those the firmware did not, so encrypt only what the
-  // firmware can send before the wake timer (frame k goes out k + 1 periods after arming), plus one for a late wake;
-  // a list that runs out would repeat its last frame and nonce.
-  const uint32_t max_frames = wake_after_ms / (this->period_s_ * 1000U) + 1;
-  if (!this->capture_frames_(client, max_frames)) {
+  // A wake the host starts with its own timer while the WLAN core sleeps occasionally leaves the core unable to
+  // answer (driver: "Device cannot wakeup"), also with the stock firmware; wakes the core starts never did. So the
+  // firmware wakes the host once W frames are acknowledged, while sending frame W at (W + 1) periods, and the host
+  // timer only backs that up after the list. Every frame takes a Noise nonce and the host sends those the firmware
+  // did not, so the list holds W + 2 frames: the one in flight at the wake and one spare.
+  const uint32_t period_ms = this->period_s_ * 1000U;
+  const uint32_t wake_frames = std::max<uint32_t>(1, wake_after_ms / period_ms);
+  if (!this->capture_frames_(client, wake_frames + 2)) {
     if (this->frame_count_ == 0 && frame_capture.len == 0)
       return;  // Nothing reached the socket, so no nonce was used.
     this->client_ = client;
@@ -399,6 +417,8 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   }
   this->client_ = client;
   this->armed_ms_ = millis();
+  this->wake_frames_ =
+      static_cast<uint8_t>(std::min<uint32_t>(wake_frames, this->frame_count_ > 2 ? this->frame_count_ - 2 : 1));
   if (!this->configure_firmware_()) {
     // The frames hold Noise nonces: send them now so both sides stay in step.
     ESP_LOGW(TAG, "Firmware refused the keepalive configuration");
@@ -411,15 +431,18 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
     return;
   }
   // Wake before the firmware runs out of frames: frame n goes out n periods after arming.
-  const uint32_t list_ms = (static_cast<uint32_t>(this->frame_count_) * this->period_s_ * 1000) +
-                           (static_cast<uint32_t>(this->period_s_) * 500);
-  if (list_ms < wake_after_ms)
-    HAL_Wakeup_SetTimer_mS(list_ms);
-  ESP_LOGD(TAG, "Armed details: seq %08" PRIX32 " ack %08" PRIX32 " IP ID %u, wake timer %" PRIu32 " ms",
-           this->snd_nxt_, this->rcv_nxt_, IP_ID_INIT, std::min(list_ms, wake_after_ms));
+  // Backup timer: half a period before the firmware would run out of frames.
+  const uint32_t list_ms = (static_cast<uint32_t>(this->frame_count_) * period_ms) + (period_ms / 2);
+  HAL_Wakeup_SetTimer_mS(list_ms);
+  armed_instance = this;
+  ESP_LOGD(TAG,
+           "Armed details: seq %08" PRIX32 " ack %08" PRIX32 " IP ID %u, firmware wakes the host after %u frames, "
+           "backup timer %" PRIu32 " ms",
+           this->snd_nxt_, this->rcv_nxt_, IP_ID_INIT, this->wake_frames_, list_ms);
 }
 
 void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
+  armed_instance = nullptr;
   if (this->client_ == nullptr)
     return;
   const uint32_t elapsed = millis() - this->armed_ms_;

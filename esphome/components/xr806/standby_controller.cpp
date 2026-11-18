@@ -19,6 +19,9 @@ extern "C" {
 #include "standby_controller.h"
 #include "lowpower_policy.h"
 #include "wlan_sleep_diag.h"
+#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
+#include "api_keepalive_offload.h"
+#endif
 
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
@@ -455,10 +458,18 @@ abort:
     resume.pm_return = result;
     resume.expected_source = expected;
     resume.wake_timer = (event & XR806StandbyCoordinatorState::WAKE_TIMER) != 0;
-    if (resume.wake_timer)
-      this->timer_deadline_us_ = 0;
     resume.wake_gpio = wake_io >= 0 && (event & (1u << wake_io)) != 0;
     resume.wake_wlan = (event & XR806StandbyCoordinatorState::WAKE_WLAN) != 0;
+#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
+    // The patched WLAN firmware wakes the host in place of its timer (see api_keepalive_offload.cpp); the
+    // participants treat that wake as the periodic one.
+    if (resume.wake_wlan && !resume.wake_timer && keepalive_offload_planned_wake()) {
+      resume.wake_timer = true;
+      ESP_LOGD(TAG, "Planned wake by the WLAN firmware");
+    }
+#endif
+    if (resume.wake_timer)
+      this->timer_deadline_us_ = 0;
     for (size_t i = 0; i < this->participant_count_; ++i)
       this->participants_[i]->standby_resumed(resume);
     // With the link kept up every received packet ends a standby; keep those wakes out of the INFO log.
