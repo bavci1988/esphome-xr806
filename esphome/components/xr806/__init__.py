@@ -427,7 +427,8 @@ async def to_code(config: ConfigType) -> None:
             await cg.register_component(standby_wlan, {})
 
     tuya_config = CORE.config.get("tuya")
-    if tuya_config and tuya_config.get(CONF_PROTOCOL) == "low_power":
+    # An AutoLoad marker (tuya loaded only as a base class) is not a configuration.
+    if isinstance(tuya_config, dict) and tuya_config.get(CONF_PROTOCOL) == "low_power":
         await _tuya_low_power_host(config[CONF_TUYA_HOST_ID], tuya_config)
 
 

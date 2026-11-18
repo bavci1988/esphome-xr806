@@ -4,7 +4,7 @@
 
 #if defined(USE_XR806) && defined(USE_TUYA_LOW_POWER)
 
-#include "esphome/components/tuya/tuya.h"
+#include "esphome/components/tuya/tuya_uart.h"
 #include "esphome/components/uart/uart_component_xr806.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
@@ -36,7 +36,7 @@ class XR806TuyaLowPowerHost final : public Component,
 #endif
 {
  public:
-  XR806TuyaLowPowerHost(tuya::Tuya *tuya, uart::XR806UARTComponent *uart) : tuya_(tuya), uart_(uart) {
+  XR806TuyaLowPowerHost(tuya::TuyaUART *tuya, uart::XR806UARTComponent *uart) : tuya_(tuya), uart_(uart) {
     // Before Tuya::setup() runs, which already uses the host.
     tuya->set_low_power_host(this);
   }
@@ -187,7 +187,7 @@ class XR806TuyaLowPowerHost final : public Component,
 #endif
 
  protected:
-  tuya::Tuya *tuya_;
+  tuya::TuyaUART *tuya_;
   uart::XR806UARTComponent *uart_;
   struct WakeLinesPref {
     int8_t mcu_wake{-1};
