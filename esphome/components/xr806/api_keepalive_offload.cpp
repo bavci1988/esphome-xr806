@@ -20,6 +20,7 @@ extern "C" {
 #include "net/wlan/wlan.h"
 #include "net/wlan/wlan_ext_req.h"
 #include "lwip/sockets.h"
+#include "lwip/netif.h"
 #include "kernel/os/os_thread.h"
 #include "driver/chip/hal_wakeup.h"
 }
@@ -163,8 +164,16 @@ static union {
   wlan_ext_p2p_kpalive_param_set_t kpalive;
 } offload_cmd;
 
+// After a hang ("Device cannot wakeup") the driver sets bh_error, takes the link down and starts a task that deletes
+// and recreates its interface state; requests in that window fault the CPU. bh_error is cleared again early in that
+// recovery, so the link state is checked too: it stays down until the station has joined again.
+static bool wlan_unusable() {
+  struct netif *nif = wlan_netif_get(WLAN_MODE_STA);
+  return wlan_driver_failed() || nif == nullptr || !netif_is_link_up(nif);
+}
+
 static int request(wlan_ext_cmd_t cmd, uint32_t param) {
-  if (wlan_driver_failed())
+  if (wlan_unusable())
     return -1;
   return wlan_ext_request(wlan_netif_get(WLAN_MODE_STA), cmd, param);
 }
@@ -354,7 +363,7 @@ bool XR806APIKeepaliveOffload::planned_wake() {
   // The firmware counted reserved1 of the keepalive table (0x0900BC73, top byte of this word) down to zero.
   static constexpr uint32_t WAKE_COUNTDOWN_WORD = 0x0900BC70;
   uint32_t word = 0;
-  if (this->client_ == nullptr || wlan_driver_failed() || wlan_read_words(WAKE_COUNTDOWN_WORD, &word, 1) != 0)
+  if (this->client_ == nullptr || wlan_unusable() || wlan_read_words(WAKE_COUNTDOWN_WORD, &word, 1) != 0)
     return false;
   return (word >> 24) == 0;
 }
@@ -395,7 +404,7 @@ bool XR806APIKeepaliveOffload::ready_for_standby() {
 void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   this->client_ = nullptr;
   auto *controller = standby_controller();
-  if (!this->enabled() || controller == nullptr || !controller->stay_connected() || wlan_driver_failed())
+  if (!this->enabled() || controller == nullptr || !controller->stay_connected() || wlan_unusable())
     return;
   if (!wlan_fw_patched_active()) {
     ESP_LOGD(TAG, "Not armed: the patched WLAN firmware is not running yet");
@@ -451,7 +460,7 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
   if (this->client_ == nullptr)
     return;
   const uint32_t elapsed = millis() - this->armed_ms_;
-  if (wlan_driver_failed()) {
+  if (wlan_unusable()) {
     // The core hung during standby ("Device cannot wakeup"); the driver's recovery owns it now.
     ESP_LOGW(TAG, "Woke after %" PRIu32 " ms (wlan=%d timer=%d gpio=%d): the WLAN driver failed during standby",
              elapsed, event != nullptr && event->wake_wlan, event != nullptr && event->wake_timer,
