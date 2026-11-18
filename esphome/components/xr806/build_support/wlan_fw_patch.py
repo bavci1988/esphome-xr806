@@ -52,7 +52,9 @@ THUMB_NOP = bytes.fromhex("c046")  # mov r8, r8
 # After "cmp r1,#0; beq 0x0900A15E" (no data: done), data is acknowledged by the firmware and dropped.
 PEER_DATA_ADDRESS = 0x0900A14E
 PEER_DATA_STOCK = bytes.fromhex("0022")  # movs r2,#0: start of the acknowledgement
-PEER_DATA_PATCHED = bytes.fromhex("67e0")  # b 0x0900A220: return 0, the frame goes to the host
+PEER_DATA_PATCHED = bytes.fromhex(
+    "67e0"
+)  # b 0x0900A220: return 0, the frame goes to the host
 
 # Layout the host needs, as WLAN core addresses.
 FRAMES_PER_ENTRY_AREA = 128

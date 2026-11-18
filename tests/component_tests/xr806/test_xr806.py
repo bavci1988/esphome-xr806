@@ -639,7 +639,12 @@ def test_wifi_fw_standby_patch_load_at_boot(
 ) -> None:
     config = component_config_path("wifi_fw_standby_patch.yaml").read_text()
     path = tmp_path / "wifi_fw_standby_patch.yaml"
-    path.write_text(config.replace("    keepalive_period: 8s\n", "    keepalive_period: 8s\n    load_at_boot: true\n"))
+    path.write_text(
+        config.replace(
+            "    keepalive_period: 8s\n",
+            "    keepalive_period: 8s\n    load_at_boot: true\n",
+        )
+    )
 
     generate_main(path)
 
