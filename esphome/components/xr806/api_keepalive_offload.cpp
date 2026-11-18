@@ -164,6 +164,8 @@ static union {
 } offload_cmd;
 
 static int request(wlan_ext_cmd_t cmd, uint32_t param) {
+  if (wlan_driver_failed())
+    return -1;
   return wlan_ext_request(wlan_netif_get(WLAN_MODE_STA), cmd, param);
 }
 
@@ -256,8 +258,9 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
   kpalive.KeepAlivePeriod_s = this->period_s_;
   kpalive.TxTimeOut_s = TX_TIMEOUT_S;
   kpalive.TxRetryLimit = TX_RETRIES;
-  // The patched firmware reports a wake (state 2) once this many frames are acknowledged.
-  kpalive.reserved1 = this->wake_frames_;
+  // The patched firmware counts this byte down for every frame it builds and reports a wake (state 2) at zero:
+  // with the frame after the W planned ones.
+  kpalive.reserved1 = this->wake_frames_ + 1;
   const size_t per_entry = ENTRY_PAYLOAD / this->frame_len_;
   for (size_t e = 0; e < ENTRY_COUNT; ++e) {
     auto &slot = kpalive.P2PKeepAliveParamCfgs[e];
@@ -348,10 +351,12 @@ void XR806APIKeepaliveOffload::close_(const char *reason) {
 static XR806APIKeepaliveOffload *armed_instance = nullptr;
 
 bool XR806APIKeepaliveOffload::planned_wake() {
-  FirmwareState state{};
-  if (this->client_ == nullptr || this->frame_len_ == 0 || !read_state(state))
+  // The firmware counted reserved1 of the keepalive table (0x0900BC73, top byte of this word) down to zero.
+  static constexpr uint32_t WAKE_COUNTDOWN_WORD = 0x0900BC70;
+  uint32_t word = 0;
+  if (this->client_ == nullptr || wlan_driver_failed() || wlan_read_words(WAKE_COUNTDOWN_WORD, &word, 1) != 0)
     return false;
-  return (state.seq - this->snd_nxt_) / this->frame_len_ >= this->wake_frames_;
+  return (word >> 24) == 0;
 }
 
 bool keepalive_offload_planned_wake() { return armed_instance != nullptr && armed_instance->planned_wake(); }
@@ -390,7 +395,7 @@ bool XR806APIKeepaliveOffload::ready_for_standby() {
 void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   this->client_ = nullptr;
   auto *controller = standby_controller();
-  if (!this->enabled() || controller == nullptr || !controller->stay_connected())
+  if (!this->enabled() || controller == nullptr || !controller->stay_connected() || wlan_driver_failed())
     return;
   if (!wlan_fw_patched_active()) {
     ESP_LOGD(TAG, "Not armed: the patched WLAN firmware is not running yet");
@@ -402,9 +407,9 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
 
   // A wake the host starts with its own timer while the WLAN core sleeps occasionally leaves the core unable to
   // answer (driver: "Device cannot wakeup"), also with the stock firmware; wakes the core starts never did. So the
-  // firmware wakes the host once W frames are acknowledged, while sending frame W at (W + 1) periods, and the host
-  // timer only backs that up after the list. Every frame takes a Noise nonce and the host sends those the firmware
-  // did not, so the list holds W + 2 frames: the one in flight at the wake and one spare.
+  // firmware wakes the host when it builds frame W + 1 (retries count, so at the latest after W + 1 periods), and the
+  // host timer only backs that up after the list. Every frame takes a Noise nonce and the host sends those the
+  // firmware did not, so the list holds W + 2 frames: the one in flight at the wake and one spare.
   const uint32_t period_ms = this->period_s_ * 1000U;
   const uint32_t wake_frames = std::max<uint32_t>(1, wake_after_ms / period_ms);
   if (!this->capture_frames_(client, wake_frames + 2)) {
@@ -436,9 +441,9 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   HAL_Wakeup_SetTimer_mS(list_ms);
   armed_instance = this;
   ESP_LOGD(TAG,
-           "Armed details: seq %08" PRIX32 " ack %08" PRIX32 " IP ID %u, firmware wakes the host after %u frames, "
+           "Armed details: seq %08" PRIX32 " ack %08" PRIX32 " IP ID %u, firmware wakes the host with frame %u, "
            "backup timer %" PRIu32 " ms",
-           this->snd_nxt_, this->rcv_nxt_, IP_ID_INIT, this->wake_frames_, list_ms);
+           this->snd_nxt_, this->rcv_nxt_, IP_ID_INIT, this->wake_frames_ + 1, list_ms);
 }
 
 void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
@@ -446,6 +451,15 @@ void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
   if (this->client_ == nullptr)
     return;
   const uint32_t elapsed = millis() - this->armed_ms_;
+  if (wlan_driver_failed()) {
+    // The core hung during standby ("Device cannot wakeup"); the driver's recovery owns it now.
+    ESP_LOGW(TAG, "Woke after %" PRIu32 " ms (wlan=%d timer=%d gpio=%d): the WLAN driver failed during standby",
+             elapsed, event != nullptr && event->wake_wlan, event != nullptr && event->wake_timer,
+             event != nullptr && event->wake_gpio);
+    this->close_("the WLAN driver failed");
+    this->client_ = nullptr;
+    return;
+  }
   if (this->host_sleep_)
     request(WLAN_EXT_CMD_SET_P2P_HOST_SLEEP, 0);
 

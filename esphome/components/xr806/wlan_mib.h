@@ -12,6 +12,10 @@ int xr_msg_mib_read(void *hw_priv, uint16_t mib_id, void *buf, size_t buf_size, 
 
 namespace esphome::xr806 {
 
+/// True once the driver gave up on the WLAN core (bh_error, set with "fatal error occured"). Its requests then use
+/// state the recovery task is tearing down and can fault the CPU, so callers must leave the driver alone.
+inline bool wlan_driver_failed() { return *reinterpret_cast<volatile int *>(xr_drv_common + 0x1E4) != 0; }
+
 /// Reads up to 16 words of WLAN core memory through the stock firmware's register debug request (MIB 9, as used
 /// by DBG_BH_FW_RW_REGS): {u16 flag, u16 size, u32 address[16]}, flag bit 0 clear for a read; the firmware returns
 /// the values in place of the addresses. Addresses are those of the WLAN core. Returns the driver's error code.

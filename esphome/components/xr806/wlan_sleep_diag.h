@@ -122,12 +122,11 @@ inline void after_wake(int result, uint32_t event) {
   take(after);
   // Driver state behind a refused suspend (xr_wlan_suspend): its stay_awake timer and bh_error.
   auto *timer = reinterpret_cast<OS_Timer_t *>(xr_drv_common + 0x1C0);
-  const int bh_error = *reinterpret_cast<volatile int *>(xr_drv_common + 0x1E4);
   ESP_LOGI(TAG,
            "#%" PRIu32 " PM return %d event %08" PRIX32 " slept %" PRIu32
            " ms, driver rx +%d tx +%d, stay_awake %d bh_error %d",
            c.count, result, event, slept, skb_rx_cnt - c.rx, skb_tx_cnt - c.tx, OS_TimerIsActive(timer) ? 1 : 0,
-           bh_error);
+           wlan_driver_failed() ? 1 : 0);
   print("before", c.before);
   print("after ", after);
 }
