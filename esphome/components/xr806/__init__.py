@@ -63,6 +63,7 @@ CONF_HOST_SLEEP = "host_sleep"
 CONF_WAKE_ON_PEER = "wake_on_peer"
 CONF_LOAD_AT_BOOT = "load_at_boot"
 CONF_DIAGNOSE_WLAN_ROM_DUMP = "diagnose_wlan_rom_dump"
+CONF_DIAGNOSE_WLAN_SLEEP = "diagnose_wlan_sleep"
 CONF_WLAN_ROM_DUMP_ID = "wlan_rom_dump_id"
 CONF_WLAN_FW_SWAP_ID = "wlan_fw_swap_id"
 
@@ -284,6 +285,8 @@ CONFIG_SCHEMA = cv.All(
             ): EXPERIMENTAL_WIFI_FW_STANDBY_PATCH_SCHEMA,
             # Diagnostics: print the WLAN core's ROM to the log, read through the stock firmware.
             cv.Optional(CONF_DIAGNOSE_WLAN_ROM_DUMP, default=False): cv.boolean,
+            # Logs the WLAN core's timers, clock and the driver's frame counters around every standby.
+            cv.Optional(CONF_DIAGNOSE_WLAN_SLEEP, default=False): cv.boolean,
             cv.Optional(CONF_TOOLCHAIN): cv.toolchain_enum(_TOOLCHAINS),
         }
     ),
@@ -511,6 +514,8 @@ async def to_code(config: ConfigType) -> None:
     # Chip name for the API and for the chipFamily of http_request update manifests.
     cg.add_define("ESPHOME_VARIANT", "XR806")
 
+    if config[CONF_DIAGNOSE_WLAN_SLEEP]:
+        cg.add_define("USE_XR806_WLAN_SLEEP_DIAG")
     if config[CONF_DIAGNOSE_WLAN_ROM_DUMP] and "wifi" in CORE.config:
         cg.add_define("USE_XR806_WLAN_ROM_DUMP")
         cg.add_global(

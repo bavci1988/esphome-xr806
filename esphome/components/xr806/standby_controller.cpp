@@ -18,6 +18,7 @@ extern "C" {
 
 #include "standby_controller.h"
 #include "lowpower_policy.h"
+#include "wlan_sleep_diag.h"
 
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
@@ -392,6 +393,9 @@ void XR806StandbyController::attempt_standby_() {
   (void) drain_log_uart();
 #endif
 
+#ifdef USE_XR806_WLAN_SLEEP_DIAG
+  wlan_sleep_diag::before_standby();
+#endif
   HAL_Wakeup_SetEvent(0);
   pm_called = true;
   // '500' is the SDK wakelock-touch deadline, NOT an upper bound on the
@@ -403,6 +407,9 @@ void XR806StandbyController::attempt_standby_() {
     result = pm_enter_mode_timeout(PM_MODE_STANDBY, 500);
   }
   event = HAL_Wakeup_GetEvent();
+#ifdef USE_XR806_WLAN_SLEEP_DIAG
+  wlan_sleep_diag::after_wake(result, event);
+#endif
 
 abort:
   p.end_commit();
