@@ -39,7 +39,7 @@ static constexpr uint8_t LP_V3_SLEEP_REQUEST = 0x02;
 static constexpr uint8_t LP_V3_BUSY_NETWORK = 0x02;
 static constexpr uint8_t LP_V3_BUSY_UPGRADE = 0x04;
 
-// Scheduler ids continue those in tuya.cpp. The network status shares the Wi-Fi status slot
+// Scheduler ids continue those in tuya_uart.cpp. The network status shares the Wi-Fi status slot
 // there, because a hub runs one protocol only.
 static constexpr uint32_t LP_NETWORK_STATUS_INTERVAL_ID = 1;
 // After the quick CMD01 retries fail, ask again every 30 s until the MCU answers.
@@ -1082,7 +1082,7 @@ void TuyaUART::low_power_standby_resumed(bool expected_source, bool wake_gpio, b
 
 void TuyaUART::process_low_power_queue_() {
   const uint32_t now = App.get_loop_component_start_time();
-  // The byte and command timestamps of tuya.cpp come from millis(), so compare them with it.
+  // The byte and command timestamps of tuya_uart.cpp come from millis(), so compare them with it.
   const uint32_t wire_now = millis();
   if (static_cast<uint32_t>(wire_now - this->last_rx_char_timestamp_) > LP_RX_TIMEOUT_MS)
     this->rx_message_.clear();
