@@ -24,6 +24,8 @@ from esphome.const import (
 from esphome.core import CORE, ID, EsphomeError
 from esphome.types import ConfigType
 
+from .boards import BOARDS
+
 CODEOWNERS = ["@bavci1988"]
 # The preferences syncer writes pending preferences every 60 s and at shutdown.
 AUTO_LOAD = ["preferences"]
@@ -221,7 +223,7 @@ CONFIG_SCHEMA = cv.All(
             # Former switch for power management, now implied by standby
             cv.Optional(CONF_LOWPOWER): cv.boolean,
             cv.GenerateID(CONF_TUYA_HOST_ID): cv.declare_id(XR806TuyaLowPowerHost),
-            cv.Required(CONF_BOARD): cv.one_of("wxu", lower=True),
+            cv.Required(CONF_BOARD): cv.one_of(*BOARDS, lower=True),
             cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
             cv.Optional(CONF_STANDBY): cv.All(
                 *_renamed_ms_keys(

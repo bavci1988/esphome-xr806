@@ -1,4 +1,4 @@
-"""Board definitions for XR806-based modules.
+"""Board definitions for XR806-based modules and bare chips.
 
 WXU source:
 https://developer.tuya.com/en/docs/iot/wxu-module-datasheet?id=Kc2xk9qlk04so
@@ -6,6 +6,16 @@ https://developer.tuya.com/en/docs/iot/wxu-module-datasheet?id=Kc2xk9qlk04so
 GPIO values are (port, pin_number).
 Dictionary keys are physical WXU module pad numbers.
 """
+
+# "generic" is a bare XR806A chip on a custom board; "wxu" is the Tuya WXU module.
+BOARDS = ("generic", "wxu")
+
+# Every GPIO of the XR806A package (XR806AF2x, 32 pins). The XR806B package (40 pins)
+# adds PA0, PA1, PA10 and PA14..PA18, which are not supported.
+XR806A_GPIOS = frozenset(
+    [("A", pin) for pin in (11, 12, 13, 19, 20, 21, 22, 23)]
+    + [("B", pin) for pin in (0, 1, 2, 3, 4, 5, 6, 7, 14, 15)]
+)
 
 WXU_GPIO_PADS = {
     1: ("B", 7),

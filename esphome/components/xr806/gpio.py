@@ -19,7 +19,7 @@ from esphome.cpp_generator import MockObj
 from esphome.types import ConfigType
 
 from . import DOMAIN
-from .boards import WXU_GPIO_PADS
+from .boards import XR806A_GPIOS
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
 
@@ -40,8 +40,6 @@ _RESERVED = {
     **{("B", pin): "Flash/XIP" for pin in (2, 3, 5, 6, 7)},
 }
 
-_AVAILABLE = frozenset(WXU_GPIO_PADS.values())
-
 
 def validate_gpio_pin(value: object) -> int:
     """Translate PAx/PBx into the XR806 internal GPIO encoding (PAx = x, PBx = 32 + x)."""
@@ -58,8 +56,9 @@ def validate_gpio_pin(value: object) -> int:
     number = int(match.group(2))
     pin = (bank, number)
 
-    if pin not in _AVAILABLE:
-        raise cv.Invalid(f"GPIO {value} is not exposed on the WXU module")
+    # The WXU module brings out every pin of the XR806A, so one pin set serves all boards.
+    if pin not in XR806A_GPIOS:
+        raise cv.Invalid(f"GPIO {value} is not a pin of the XR806A chip")
     if (reason := _RESERVED.get(pin)) is not None:
         raise cv.Invalid(f"GPIO {value} is reserved: {reason}")
 

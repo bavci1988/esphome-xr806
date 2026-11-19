@@ -10,6 +10,7 @@ import pytest
 from esphome.components.xr806 import compiler_build_flags
 from esphome.config import read_config
 from esphome.core import CORE
+from tests.component_tests.helpers import get_define_value
 
 
 def defines() -> set[str]:
@@ -377,7 +378,7 @@ def test_gpio_pins(
     [
         ("      number: PA21\n", "GPIO PA21 is reserved: UART2 RX"),
         ("      number: PB5\n", "GPIO PB5 is reserved: Flash/XIP"),
-        ("      number: PA0\n", "GPIO PA0 is not exposed on the WXU module"),
+        ("      number: PA0\n", "GPIO PA0 is not a pin of the XR806A chip"),
         ("      number: 20\n", "XR806 pins must use PAx or PBx notation"),
         (
             (
@@ -403,6 +404,27 @@ def test_gpio_rejects_invalid_pins(
 
     assert read_config({}) is None
     assert message in capsys.readouterr().out
+
+
+def test_generic_board(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+) -> None:
+    config = component_config_path("gpio.yaml").read_text()
+    config_path = tmp_path / "gpio_generic.yaml"
+    config_path.write_text(config.replace("board: wxu", "board: generic"))
+
+    generated = generate_main(config_path)
+
+    assert "set_pin(20)" in generated
+    assert get_define_value("ESPHOME_BOARD") == '"generic"'
+
+
+def test_wxu_pads_are_all_xr806a_pins() -> None:
+    from esphome.components.xr806.boards import WXU_GPIO_PADS, XR806A_GPIOS
+
+    assert set(WXU_GPIO_PADS.values()) == XR806A_GPIOS
 
 
 def test_gpio_accepts_input_and_output() -> None:
