@@ -19,6 +19,7 @@ extern "C" {
 #include "standby_controller.h"
 #include "lowpower_policy.h"
 #include "wlan_sleep_diag.h"
+#include "wlan_mib.h"
 #ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
 #include "api_keepalive_offload.h"
 #endif
@@ -26,6 +27,7 @@ extern "C" {
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include "esphome/core/preferences.h"
 
 extern "C" {
 #include "driver/chip/hal_gpio.h"
@@ -412,6 +414,16 @@ void XR806StandbyController::attempt_standby_() {
   event = HAL_Wakeup_GetEvent();
 #ifdef USE_XR806_WLAN_SLEEP_DIAG
   wlan_sleep_diag::after_wake(result, event);
+#endif
+#ifdef USE_WIFI
+  if (wlan_driver_failed()) {
+    // The WLAN core hung during standby ("Device cannot wakeup"). The driver's own recovery does not bring it back,
+    // and the next request to the driver (from the WLAN component, for example its fallback AP) faults the CPU.
+    ESP_LOGE(TAG, "The WLAN core stopped answering during standby; restarting");
+    global_preferences->sync();
+    delay(100);  // let the log reach the UART
+    arch_restart();
+  }
 #endif
 
 abort:
