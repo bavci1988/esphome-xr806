@@ -10,6 +10,14 @@ Dictionary keys are physical WXU module pad numbers.
 # "generic" is a bare XR806A chip on a custom board; "wxu" is the Tuya WXU module.
 BOARDS = ("generic", "wxu")
 
+# Rti-Tek TRV801W radiator thermostat (PCB RT-TRV801W_802W 1.1, board: generic).
+# Wi-Fi board: bare XR806AF2E, joined to the main board by the 20-pin flat cable J9.
+#   Pads GND, UART2_RX, UART2_TX, PS_3V3: XR806 UART2 (which chip pins: not yet checked).
+#   TP12: PB02 (chip pin 25), LOW during reset enters flashing mode (measured).
+# Main board: BAT32G127GH MCU.
+#   J7 S_3V3, UART0TX, UART0RX, GND: probably the XR806 UART0 link to the MCU (not checked).
+#   Header next to the rotary encoder (nRST, GND, CLK, DIO, ...): SWD of the BAT32.
+
 # Every GPIO of the XR806A package (XR806AF2x, 32 pins). The XR806B package (40 pins)
 # adds PA0, PA1, PA10 and PA14..PA18, which are not supported.
 XR806A_GPIOS = frozenset(
