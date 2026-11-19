@@ -267,8 +267,8 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
   kpalive.KeepAlivePeriod_s = this->period_s_;
   kpalive.TxTimeOut_s = TX_TIMEOUT_S;
   kpalive.TxRetryLimit = TX_RETRIES;
-  // The patched firmware counts this byte down for every frame it builds and reports a wake (state 2) at zero:
-  // with the frame after the W planned ones.
+  // The patched firmware counts this byte down for every frame it builds and reports a wake (state 2) when it
+  // reaches zero, with the frame after the W planned ones, and again with every further frame.
   kpalive.reserved1 = this->wake_frames_ + 1;
   const size_t per_entry = ENTRY_PAYLOAD / this->frame_len_;
   for (size_t e = 0; e < ENTRY_COUNT; ++e) {
@@ -360,12 +360,14 @@ void XR806APIKeepaliveOffload::close_(const char *reason) {
 static XR806APIKeepaliveOffload *armed_instance = nullptr;
 
 bool XR806APIKeepaliveOffload::planned_wake() {
-  // The firmware counted reserved1 of the keepalive table (0x0900BC73, top byte of this word) down to zero.
+  // The firmware counts reserved1 of the keepalive table (0x0900BC73, top byte of this word) down and keeps it at 1
+  // once it reported the wake; 1 is also the value one frame earlier, which only matters for a wake from Home
+  // Assistant in that last period, and treating it as the planned wake is harmless.
   static constexpr uint32_t WAKE_COUNTDOWN_WORD = 0x0900BC70;
   uint32_t word = 0;
   if (this->client_ == nullptr || wlan_unusable() || wlan_read_words(WAKE_COUNTDOWN_WORD, &word, 1) != 0)
     return false;
-  return (word >> 24) == 0;
+  return (word >> 24) <= 1;
 }
 
 bool keepalive_offload_planned_wake() { return armed_instance != nullptr && armed_instance->planned_wake(); }

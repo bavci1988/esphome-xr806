@@ -18,11 +18,11 @@ server 0 sends a different, pre-encrypted frame each time Home Assistant acknowl
 3. The receive filter (0x0900A012) acknowledged data from the peer itself and dropped it, so a command from Home
    Assistant never reached the host. Data segments are now passed to the host, which wakes it (0x0900A14E);
    segments without data are still handled by the firmware.
-4. The frame chooser also reports a wake (state 2, 0x0900A5B8) when it has built the number of frames in the byte
-   at 0x0900BC73 (reserved1 of the keepalive configuration; 0 = off), counting that byte down; retries count too, so
-   a lost acknowledgement cannot delay the wake. A wake the host starts with its own timer while the WLAN core
-   sleeps occasionally leaves the core unable to answer, with the stock firmware too; wakes the core starts never
-   did.
+4. The frame chooser also reports a wake (state 2, 0x0900A5B8) when it builds frame W, W being the byte at
+   0x0900BC73 (reserved1 of the keepalive configuration; 0 = off), which it counts down for every frame built;
+   retries count too, so a lost acknowledgement cannot delay the wake. The byte then stays 1 and every further
+   frame reports again, in case the host missed the first report. A wake the host starts with its own timer while
+   the WLAN core sleeps occasionally leaves the core unable to answer, with the stock firmware too.
 
 Only the firmware with the known SHA-256 is patched; see docs/WLAN_FIRMWARE_NOTES.md in the xr806-sdk repository.
 Nothing patched is stored: the stock file comes from the SDK and the patch is applied in the build directory.
