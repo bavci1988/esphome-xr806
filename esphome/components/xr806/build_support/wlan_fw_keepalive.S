@@ -26,12 +26,11 @@ cave:
     ldr     r5, =0x0900BB98         @ server table entry 0: TcpSeqInit
     ldr     r5, [r5]
     subs    r4, r4, r5              @ bytes acknowledged
-    @ Stop after W - 1 frames (W in the unused reserved1 byte of the keepalive table, counted down for every frame
-    @ built, retries included; 0 = off). Build W disables keepalive entry 0, so the period timer sends nothing more
-    @ and does not restart; the firmware does not transmit a frame built while the entry is disabled. It also clears
-    @ the frame-in-flight flag the caller has just set: otherwise the retry timer would count that frame as lost
-    @ and report "connection lost" (state 3) to the host. Home Assistant then pings after its own idle time, and
-    @ that data segment wakes the host through the receive path.
+    @ Stop after W frames (W in the unused reserved1 byte of the keepalive table, counted down for every frame built,
+    @ retries included; 0 = off): with the last one, keepalive entry 0 is disabled, so the period timer sends
+    @ nothing more and does not restart. Home Assistant then pings after its own idle time, and that data segment
+    @ wakes the host through the receive path, which never left the WLAN core unable to answer. Retries of the last
+    @ frame and its acknowledgement do not depend on the entry being enabled.
     ldr     r5, =0x0900BC73         @ keepalive table: reserved1
     ldrb    r6, [r5]
     subs    r6, r6, #1
@@ -40,8 +39,6 @@ cave:
     bne     1f
     adds    r5, r5, #1
     strh    r6, [r5]                @ 0x0900BC74: Enable of keepalive entry 0
-    ldr     r5, =0x0900BC11         @ run-time state of server 0: frame in flight
-    strb    r6, [r5]
 1:
     movs    r5, #0                  @ area = 128 // length * length
     movs    r6, #128

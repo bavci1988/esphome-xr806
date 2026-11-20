@@ -109,8 +109,7 @@ static constexpr uint32_t ACK_WAIT_MS = 500;
 // Home Assistant pings when it received nothing for 20 s. The first firmware frame goes out one period after
 // arming, so the time since the last write plus one period must stay below this.
 static constexpr uint32_t PEER_PING_LIMIT_MS = 17000;
-// Home Assistant checks at this interval whether it received anything and pings if not (aioesphomeapi keepalive),
-// so its ping comes one to two intervals after the last frame.
+// Home Assistant pings this long after the last message it received (aioesphomeapi keepalive).
 static constexpr uint32_t PEER_IDLE_PING_MS = 20000;
 // The WLAN driver refused to suspend right after the host sent the held frames; wait this long after such a burst.
 static constexpr uint32_t SETTLE_MS = 2000;
@@ -270,9 +269,8 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
   kpalive.KeepAlivePeriod_s = this->period_s_;
   kpalive.TxTimeOut_s = TX_TIMEOUT_S;
   kpalive.TxRetryLimit = TX_RETRIES;
-  // The patched firmware counts this byte down for every frame it builds; the build that reaches zero is not sent
-  // any more and ends the keepalive.
-  kpalive.reserved1 = this->wake_frames_ + 1;
+  // The patched firmware counts this byte down for every frame it builds and stops sending with the last one.
+  kpalive.reserved1 = this->wake_frames_;
   const size_t per_entry = ENTRY_PAYLOAD / this->frame_len_;
   for (size_t e = 0; e < ENTRY_COUNT; ++e) {
     auto &slot = kpalive.P2PKeepAliveParamCfgs[e];
@@ -420,11 +418,11 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
 
   // Neither the host's own timer nor a wake reported by the firmware may end the sleep: both occasionally left the
   // WLAN core unable to answer (driver: "Device cannot wakeup"). Data from Home Assistant never did. So the firmware
-  // sends W frames and stops; Home Assistant pings one to two PEER_IDLE_PING_MS after the last one, and that ping
-  // wakes the host. Every frame takes a Noise nonce and the host sends those the firmware did not; one spare frame answers
+  // sends W frames and stops; Home Assistant pings PEER_IDLE_PING_MS after the last one, and that ping wakes the
+  // host. Every frame takes a Noise nonce and the host sends those the firmware did not; one spare frame answers
   // the ping right after the wake.
   const uint32_t period_ms = this->period_s_ * 1000U;
-  const uint32_t awake_ms = wake_after_ms > 2 * PEER_IDLE_PING_MS ? wake_after_ms - (2 * PEER_IDLE_PING_MS) : 0;
+  const uint32_t awake_ms = wake_after_ms > PEER_IDLE_PING_MS ? wake_after_ms - PEER_IDLE_PING_MS : 0;
   const uint32_t wake_frames = std::max<uint32_t>(1, awake_ms / period_ms);
   if (!this->capture_frames_(client, wake_frames + 1)) {
     if (this->frame_count_ == 0 && frame_capture.len == 0)
