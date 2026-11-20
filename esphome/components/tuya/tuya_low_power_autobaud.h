@@ -14,45 +14,45 @@ class TuyaLowPowerAutoBaud {
   static constexpr uint32_t BAUD_FAST = 115200;
 
   void start(uint32_t configured_baud) {
-    first_baud_ = configured_baud == BAUD_FAST ? BAUD_FAST : BAUD_SLOW;
-    candidate_ = first_baud_;
-    attempts_ = 0;
-    searching_ = true;
-    waiting_ = false;
-    locked_ = false;
-    sent_at_ms_ = 0;
+    this->first_baud_ = configured_baud == BAUD_FAST ? BAUD_FAST : BAUD_SLOW;
+    this->candidate_ = this->first_baud_;
+    this->attempts_ = 0;
+    this->searching_ = true;
+    this->waiting_ = false;
+    this->locked_ = false;
+    this->sent_at_ms_ = 0;
   }
 
-  bool searching() const { return searching_; }
-  bool locked() const { return locked_; }
-  bool waiting() const { return waiting_; }
-  uint32_t baud() const { return candidate_; }
-  uint32_t attempts() const { return attempts_; }
+  bool searching() const { return this->searching_; }
+  bool locked() const { return this->locked_; }
+  bool waiting() const { return this->waiting_; }
+  uint32_t baud() const { return this->candidate_; }
+  uint32_t attempts() const { return this->attempts_; }
 
   // Poll from the main loop. A timeout advances to the other supported speed.
   // No sleep, busy-wait or task blocking is necessary.
   bool probe_due(uint32_t now) {
-    if (!searching_)
+    if (!this->searching_)
       return false;
-    if (!waiting_)
+    if (!this->waiting_)
       return true;
-    if (static_cast<uint32_t>(now - sent_at_ms_) < PROBE_TIMEOUT_MS)
+    if (static_cast<uint32_t>(now - this->sent_at_ms_) < PROBE_TIMEOUT_MS)
       return false;
-    waiting_ = false;
-    candidate_ = candidate_ == BAUD_SLOW ? BAUD_FAST : BAUD_SLOW;
+    this->waiting_ = false;
+    this->candidate_ = this->candidate_ == BAUD_SLOW ? BAUD_FAST : BAUD_SLOW;
     return true;
   }
 
   void probe_sent(uint32_t now) {
-    waiting_ = true;
-    sent_at_ms_ = now;
-    ++attempts_;
+    this->waiting_ = true;
+    this->sent_at_ms_ = now;
+    ++this->attempts_;
   }
 
   // Call only for fully received frames; this independent check also makes
   // it possible to test rejection of bad checksums and wrong commands.
   bool accept_frame(const uint8_t *frame, size_t frame_len, uint32_t now) {
-    if (!searching_ || !waiting_ || frame == nullptr || static_cast<uint32_t>(now - sent_at_ms_) >= PROBE_TIMEOUT_MS)
+    if (!this->searching_ || !this->waiting_ || frame == nullptr || static_cast<uint32_t>(now - this->sent_at_ms_) >= PROBE_TIMEOUT_MS)
       return false;
     // Version 0 (HC32 firmware 1.3.1) or 3 (standard Tuya MCU replies).
     if (frame_len < 9 || frame[0] != 0x55 || frame[1] != 0xAA || (frame[2] != 0x00 && frame[2] != 0x03) ||
@@ -69,15 +69,15 @@ class TuyaLowPowerAutoBaud {
       checksum += frame[i];
     if (checksum != frame[frame_len - 1])
       return false;
-    searching_ = false;
-    waiting_ = false;
-    locked_ = true;
+    this->searching_ = false;
+    this->waiting_ = false;
+    this->locked_ = true;
     return true;
   }
 
   void stop() {
-    searching_ = false;
-    waiting_ = false;
+    this->searching_ = false;
+    this->waiting_ = false;
   }
 
  private:
