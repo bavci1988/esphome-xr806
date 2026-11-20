@@ -109,6 +109,8 @@ static constexpr uint32_t ACK_WAIT_MS = 500;
 // Home Assistant pings when it received nothing for 20 s. The first firmware frame goes out one period after
 // arming, so the time since the last write plus one period must stay below this.
 static constexpr uint32_t PEER_PING_LIMIT_MS = 17000;
+// Home Assistant pings this long after the last message it received (aioesphomeapi keepalive).
+static constexpr uint32_t PEER_IDLE_PING_MS = 20000;
 // The WLAN driver refused to suspend right after the host sent the held frames; wait this long after such a burst.
 static constexpr uint32_t SETTLE_MS = 2000;
 // lwIP holds the small ping back (Nagle) until the frames sent before it are acknowledged.
@@ -267,9 +269,8 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
   kpalive.KeepAlivePeriod_s = this->period_s_;
   kpalive.TxTimeOut_s = TX_TIMEOUT_S;
   kpalive.TxRetryLimit = TX_RETRIES;
-  // The patched firmware counts this byte down for every frame it builds and reports a wake (state 2) when it
-  // reaches zero, with the frame after the W planned ones, and again with every further frame.
-  kpalive.reserved1 = this->wake_frames_ + 1;
+  // The patched firmware counts this byte down for every frame it builds and stops sending with the last one.
+  kpalive.reserved1 = this->wake_frames_;
   const size_t per_entry = ENTRY_PAYLOAD / this->frame_len_;
   for (size_t e = 0; e < ENTRY_COUNT; ++e) {
     auto &slot = kpalive.P2PKeepAliveParamCfgs[e];
@@ -360,14 +361,13 @@ void XR806APIKeepaliveOffload::close_(const char *reason) {
 static XR806APIKeepaliveOffload *armed_instance = nullptr;
 
 bool XR806APIKeepaliveOffload::planned_wake() {
-  // The firmware counts reserved1 of the keepalive table (0x0900BC73, top byte of this word) down and keeps it at 1
-  // once it reported the wake; 1 is also the value one frame earlier, which only matters for a wake from Home
-  // Assistant in that last period, and treating it as the planned wake is harmless.
+  // The firmware counted reserved1 of the keepalive table (0x0900BC73, top byte of this word) down to zero: it sent
+  // its last frame, and what woke the host is Home Assistant's ping after that silence.
   static constexpr uint32_t WAKE_COUNTDOWN_WORD = 0x0900BC70;
   uint32_t word = 0;
   if (this->client_ == nullptr || wlan_unusable() || wlan_read_words(WAKE_COUNTDOWN_WORD, &word, 1) != 0)
     return false;
-  return (word >> 24) <= 1;
+  return (word >> 24) == 0;
 }
 
 bool keepalive_offload_planned_wake() { return armed_instance != nullptr && armed_instance->planned_wake(); }
@@ -416,14 +416,15 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   if (client == nullptr)
     return;
 
-  // A wake the host starts with its own timer while the WLAN core sleeps occasionally leaves the core unable to
-  // answer (driver: "Device cannot wakeup"), also with the stock firmware; wakes the core starts never did. So the
-  // firmware wakes the host when it builds frame W + 1 (retries count, so at the latest after W + 1 periods), and the
-  // host timer only backs that up after the list. Every frame takes a Noise nonce and the host sends those the
-  // firmware did not, so the list holds W + 2 frames: the one in flight at the wake and one spare.
+  // Neither the host's own timer nor a wake reported by the firmware may end the sleep: both occasionally left the
+  // WLAN core unable to answer (driver: "Device cannot wakeup"). Data from Home Assistant never did. So the firmware
+  // sends W frames and stops; Home Assistant pings PEER_IDLE_PING_MS after the last one, and that ping wakes the
+  // host. Every frame takes a Noise nonce and the host sends those the firmware did not; one spare frame answers
+  // the ping right after the wake.
   const uint32_t period_ms = this->period_s_ * 1000U;
-  const uint32_t wake_frames = std::max<uint32_t>(1, wake_after_ms / period_ms);
-  if (!this->capture_frames_(client, wake_frames + 2)) {
+  const uint32_t awake_ms = wake_after_ms > PEER_IDLE_PING_MS ? wake_after_ms - PEER_IDLE_PING_MS : 0;
+  const uint32_t wake_frames = std::max<uint32_t>(1, awake_ms / period_ms);
+  if (!this->capture_frames_(client, wake_frames + 1)) {
     if (this->frame_count_ == 0 && frame_capture.len == 0)
       return;  // Nothing reached the socket, so no nonce was used.
     this->client_ = client;
@@ -434,7 +435,7 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   this->client_ = client;
   this->armed_ms_ = millis();
   this->wake_frames_ =
-      static_cast<uint8_t>(std::min<uint32_t>(wake_frames, this->frame_count_ > 2 ? this->frame_count_ - 2 : 1));
+      static_cast<uint8_t>(std::min<uint32_t>(wake_frames, this->frame_count_ > 1 ? this->frame_count_ - 1 : 1));
   if (!this->configure_firmware_()) {
     // The frames hold Noise nonces: send them now so both sides stay in step.
     ESP_LOGW(TAG, "Firmware refused the keepalive configuration");
@@ -446,15 +447,14 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
     this->client_ = nullptr;
     return;
   }
-  // Wake before the firmware runs out of frames: frame n goes out n periods after arming.
-  // Backup timer: half a period before the firmware would run out of frames.
-  const uint32_t list_ms = (static_cast<uint32_t>(this->frame_count_) * period_ms) + (period_ms / 2);
+  // Backup timer, for a peer that does not ping: well after its ping is due and before it gives up (90 s of silence).
+  const uint32_t list_ms = (static_cast<uint32_t>(this->wake_frames_) * period_ms) + (3 * PEER_IDLE_PING_MS);
   HAL_Wakeup_SetTimer_mS(list_ms);
   armed_instance = this;
   ESP_LOGD(TAG,
-           "Armed details: seq %08" PRIX32 " ack %08" PRIX32 " IP ID %u, firmware wakes the host with frame %u, "
+           "Armed details: seq %08" PRIX32 " ack %08" PRIX32 " IP ID %u, firmware stops after frame %u, "
            "backup timer %" PRIu32 " ms",
-           this->snd_nxt_, this->rcv_nxt_, IP_ID_INIT, this->wake_frames_ + 1, list_ms);
+           this->snd_nxt_, this->rcv_nxt_, IP_ID_INIT, this->wake_frames_, list_ms);
 }
 
 void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {

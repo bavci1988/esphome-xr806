@@ -7,7 +7,7 @@
 @ 128 / length frames each: the payloads of the three keepalive entries (0x0900BC78, 0x84 apart), then the
 @ payloads of the three wake pattern entries (0x0900BE04, 0x84 apart), which the host writes directly and whose
 @ Enable stays 0, so the firmware never reads them. Other servers keep one payload.
-@ Optionally reports state 2 to the host once W frames have been built (see below).
+@ Optionally stops after W frames, so that the peer's own ping wakes the host (see below).
     .syntax unified
     .thumb
     .text
@@ -26,23 +26,19 @@ cave:
     ldr     r5, =0x0900BB98         @ server table entry 0: TcpSeqInit
     ldr     r5, [r5]
     subs    r4, r4, r5              @ bytes acknowledged
-    @ Wake the host with frame W (W in the unused reserved1 byte of the keepalive table, counted down for every frame
-    @ built, retries included; 0 = off). Built, not acknowledged: a lost acknowledgement must not delay the wake
-    @ past the end of the list, where only the host timer is left. The byte then stays 1, so every further frame
-    @ reports again, in case the host missed the first report.
+    @ Stop after W frames (W in the unused reserved1 byte of the keepalive table, counted down for every frame built,
+    @ retries included; 0 = off): with the last one, keepalive entry 0 is disabled, so the period timer sends
+    @ nothing more and does not restart. Home Assistant then pings after its own idle time, and that data segment
+    @ wakes the host through the receive path, which never left the WLAN core unable to answer. Retries of the last
+    @ frame and its acknowledgement do not depend on the entry being enabled.
     ldr     r5, =0x0900BC73         @ keepalive table: reserved1
     ldrb    r6, [r5]
     subs    r6, r6, #1
     blo     1f                      @ was 0: off
-    bne     2f
-    adds    r6, r6, #1              @ reached 0: report now and keep 1 for the next frame
-    push    {r0, r1, r2, r3}
-    movs    r0, #0                  @ server 0
-    movs    r1, #2                  @ state 2: wake the host (as for a matched wake pattern)
-    ldr     r3, =0x0900A5B9         @ state report to the host (Thumb)
-    blx     r3
-    pop     {r0, r1, r2, r3}
-2:  strb    r6, [r5]
+    strb    r6, [r5]
+    bne     1f
+    adds    r5, r5, #1
+    strh    r6, [r5]                @ 0x0900BC74: Enable of keepalive entry 0
 1:
     movs    r5, #0                  @ area = 128 // length * length
     movs    r6, #128
