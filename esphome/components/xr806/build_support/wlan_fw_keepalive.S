@@ -26,22 +26,21 @@ cave:
     ldr     r5, =0x0900BB98         @ server table entry 0: TcpSeqInit
     ldr     r5, [r5]
     subs    r4, r4, r5              @ bytes acknowledged
-    @ Stop after W - 1 frames (W in the unused reserved1 byte of the keepalive table, counted down for every frame
-    @ built, retries included; 0 = off). Build W disables keepalive entry 0, so the period timer sends nothing more
-    @ and does not restart; the firmware does not transmit a frame built while the entry is disabled. It also clears
-    @ the frame-in-flight flag the caller has just set: otherwise the retry timer would count that frame as lost
-    @ and report "connection lost" (state 3) to the host. Home Assistant then pings after its own idle time, and
-    @ that data segment wakes the host through the receive path.
+    @ Stop after W frames (W in the unused reserved1 byte of the keepalive table, counted down for every frame built,
+    @ retries included; 0 = off): with frame W the keepalive period (byte 0x0900BC70) becomes 255 s, so the period
+    @ timer the caller restarts next fires after the host's backup timer. Frame W is sent and acknowledged as usual.
+    @ Keepalive entry 0 stays enabled: the receive filter only passes Home Assistant's data to the host while it is
+    @ (with host sleep set, it drops the data otherwise). Home Assistant then pings after its own idle time, and that
+    @ data segment wakes the host through the receive path.
     ldr     r5, =0x0900BC73         @ keepalive table: reserved1
     ldrb    r6, [r5]
     subs    r6, r6, #1
     blo     1f                      @ was 0: off
     strb    r6, [r5]
     bne     1f
-    adds    r5, r5, #1
-    strh    r6, [r5]                @ 0x0900BC74: Enable of keepalive entry 0
-    ldr     r5, =0x0900BC11         @ run-time state of server 0: frame in flight
-    strb    r6, [r5]
+    subs    r6, r6, #1              @ 0xFF
+    subs    r5, r5, #3
+    strb    r6, [r5]                @ 0x0900BC70: KeepAlivePeriod_s
 1:
     movs    r5, #0                  @ area = 128 // length * length
     movs    r6, #128

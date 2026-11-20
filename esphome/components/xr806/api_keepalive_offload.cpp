@@ -270,9 +270,9 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
   kpalive.KeepAlivePeriod_s = this->period_s_;
   kpalive.TxTimeOut_s = TX_TIMEOUT_S;
   kpalive.TxRetryLimit = TX_RETRIES;
-  // The patched firmware counts this byte down for every frame it builds; the build that reaches zero is not sent
-  // any more and ends the keepalive.
-  kpalive.reserved1 = this->wake_frames_ + 1;
+  // The patched firmware counts this byte down for every frame it builds; with the frame that reaches zero it sets
+  // the period to 255 s, so no further frame is due before Home Assistant's ping wakes the host.
+  kpalive.reserved1 = this->wake_frames_;
   const size_t per_entry = ENTRY_PAYLOAD / this->frame_len_;
   for (size_t e = 0; e < ENTRY_COUNT; ++e) {
     auto &slot = kpalive.P2PKeepAliveParamCfgs[e];
@@ -449,7 +449,8 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
     this->client_ = nullptr;
     return;
   }
-  // Backup timer, for a peer that does not ping: well after its ping is due and before it gives up (90 s of silence).
+  // Backup timer, for a peer that does not ping: after its ping is due (one to two PEER_IDLE_PING_MS after the last
+  // frame) and before it gives up.
   const uint32_t list_ms = (static_cast<uint32_t>(this->wake_frames_) * period_ms) + (3 * PEER_IDLE_PING_MS);
   HAL_Wakeup_SetTimer_mS(list_ms);
   armed_instance = this;
