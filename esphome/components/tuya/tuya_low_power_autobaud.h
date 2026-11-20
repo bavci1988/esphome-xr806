@@ -2,6 +2,7 @@
 
 // Protocol-controlled Tuya MCU autobaud, exercised independently of ESPHome.
 // Each candidate sends CMD01 and accepts only a checksummed product-info reply.
+// Any other valid frame keeps the current rate and asks for the product info again.
 #include <cstddef>
 #include <cstdint>
 
@@ -10,6 +11,10 @@ namespace esphome::tuya {
 class TuyaLowPowerAutoBaud {
  public:
   static constexpr uint32_t PROBE_TIMEOUT_MS = 500;
+  // A silent MCU (asleep or absent) is probed less often after the first rounds.
+  static constexpr uint32_t SLOW_PROBE_TIMEOUT_MS = 2000;
+  static constexpr uint32_t FAST_PROBE_ATTEMPTS = 20;
+  static constexpr uint32_t MIN_PROBE_GAP_MS = 100;
   static constexpr uint32_t BAUD_SLOW = 9600;
   static constexpr uint32_t BAUD_FAST = 115200;
 
@@ -36,7 +41,7 @@ class TuyaLowPowerAutoBaud {
       return false;
     if (!this->waiting_)
       return true;
-    if (static_cast<uint32_t>(now - this->sent_at_ms_) < PROBE_TIMEOUT_MS)
+    if (static_cast<uint32_t>(now - this->sent_at_ms_) < this->timeout_())
       return false;
     this->waiting_ = false;
     this->candidate_ = this->candidate_ == BAUD_SLOW ? BAUD_FAST : BAUD_SLOW;
@@ -52,7 +57,8 @@ class TuyaLowPowerAutoBaud {
   // Call only for fully received frames; this independent check also makes
   // it possible to test rejection of bad checksums and wrong commands.
   bool accept_frame(const uint8_t *frame, size_t frame_len, uint32_t now) {
-    if (!this->searching_ || !this->waiting_ || frame == nullptr || static_cast<uint32_t>(now - this->sent_at_ms_) >= PROBE_TIMEOUT_MS)
+    if (!this->searching_ || !this->waiting_ || frame == nullptr ||
+        static_cast<uint32_t>(now - this->sent_at_ms_) >= this->timeout_())
       return false;
     // Version 0 (HC32 firmware 1.3.1) or 3 (standard Tuya MCU replies).
     if (frame_len < 9 || frame[0] != 0x55 || frame[1] != 0xAA || (frame[2] != 0x00 && frame[2] != 0x03) ||
@@ -75,12 +81,28 @@ class TuyaLowPowerAutoBaud {
     return true;
   }
 
+  // Call for a valid frame that accept_frame() rejected. It proves the current rate and
+  // shows that the MCU is awake: probe again at once, without changing the rate.
+  void probe_again(uint32_t now) {
+    if (!this->searching_)
+      return;
+    if (static_cast<uint32_t>(now - this->sent_at_ms_) >= MIN_PROBE_GAP_MS) {
+      this->waiting_ = false;
+    } else {
+      this->sent_at_ms_ = now;  // A burst of reports: stay at this rate, do not answer each frame.
+    }
+  }
+
   void stop() {
     this->searching_ = false;
     this->waiting_ = false;
   }
 
  private:
+  uint32_t timeout_() const {
+    return this->attempts_ <= FAST_PROBE_ATTEMPTS ? PROBE_TIMEOUT_MS : SLOW_PROBE_TIMEOUT_MS;
+  }
+
   uint32_t first_baud_{BAUD_SLOW};
   uint32_t candidate_{BAUD_SLOW};
   uint32_t sent_at_ms_{0};

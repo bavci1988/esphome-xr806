@@ -226,6 +226,7 @@ void TuyaUART::handle_low_power_frame_(uint8_t command, uint8_t version, const u
       ESP_LOGD(LP_TAG, "Baud scan ignored CMD 0x%02X v%u len %u: %s| %.*s", command, version,
                static_cast<unsigned>(len), hex, static_cast<int>(len > 120 ? 120 : len),
                reinterpret_cast<const char *>(buffer));
+      this->lp_autobaud_.probe_again(App.get_loop_component_start_time());
       return;
     }
     ESP_LOGI(LP_TAG, "Tuya low_power baud locked: %u", static_cast<unsigned>(this->lp_autobaud_.baud()));
@@ -415,7 +416,8 @@ void TuyaUART::poll_low_power_autobaud_() {
 
   const uint32_t baud = this->lp_autobaud_.baud();
   // Bytes received at a wrong candidate rate fail the frame checksum and are dropped.
-  if (this->parent_ != nullptr) {
+  // A repeated probe at the same rate must not restart the UART.
+  if (this->parent_ != nullptr && this->parent_->get_baud_rate() != baud) {
     this->parent_->set_baud_rate(baud);
     this->parent_->load_settings(false);
   }
