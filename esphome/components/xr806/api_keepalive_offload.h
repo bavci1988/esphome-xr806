@@ -23,8 +23,8 @@ namespace esphome::xr806 {
 /// sends frame k after Home Assistant acknowledged k frames, one per period. After the wake the host reads k from
 /// the firmware, moves lwIP's sequence numbers by k frames and sends the frames the firmware did not send, so the
 /// Noise counters of both sides match again. Anything unexpected closes the connection.
-/// True when the standby that just ended was the planned one: the patched firmware sent its last frame and Home
-/// Assistant's ping woke the host. The coordinator then treats it like its timer wake.
+/// True when the standby that just ended was cut short by the patched firmware's planned wake. The coordinator then
+/// treats it like its timer wake.
 bool keepalive_offload_planned_wake();
 
 class XR806APIKeepaliveOffload {
@@ -40,7 +40,7 @@ class XR806APIKeepaliveOffload {
   void arm(uint32_t wake_after_ms);
   /// After the wake, or when standby did not happen.
   void disarm(const XR806StandbyResume *event);
-  /// After a WLAN wake while armed: whether the firmware had sent its last frame, so this is the planned wake.
+  /// After a WLAN wake while armed: whether it is the firmware's planned wake (W frames acknowledged).
   bool planned_wake();
   /// False while standby should wait: shortly after the host sent held frames, or when Home Assistant would ping
   /// before the first firmware frame (then a ping response is sent first). Called from the standby preflight on

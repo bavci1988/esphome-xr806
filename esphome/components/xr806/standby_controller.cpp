@@ -483,11 +483,11 @@ abort:
     resume.wake_gpio = wake_io >= 0 && (event & (1u << wake_io)) != 0;
     resume.wake_wlan = (event & XR806StandbyCoordinatorState::WAKE_WLAN) != 0;
 #ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
-    // With the patched WLAN firmware Home Assistant's ping ends the sleep in place of the host timer (see
-    // api_keepalive_offload.cpp); the participants treat that wake as the periodic one.
+    // The patched WLAN firmware wakes the host in place of its timer (see api_keepalive_offload.cpp); the
+    // participants treat that wake as the periodic one.
     if (resume.wake_wlan && !resume.wake_timer && keepalive_offload_planned_wake()) {
       resume.wake_timer = true;
-      ESP_LOGD(TAG, "Planned wake by the peer's ping");
+      ESP_LOGD(TAG, "Planned wake by the WLAN firmware");
     }
 #endif
     if (resume.wake_timer)
