@@ -350,11 +350,19 @@ void XR806StandbyController::attempt_standby_() {
     HAL_GPIO_GetConfig(GPIO_PORT_A, pin, &previous_gpio);
     // We cannot snapshot another component's IRQ callback via
     // HAL_GPIO_GetConfig(). Never hijack an already active EINT/output mux.
+    if (previous_gpio.mode == GPIOx_Pn_F6_EINT && !this->wake_pin_seen_free_) {
+      // Pin settings survive a restart: this is the wake interrupt of a standby that a reset cut short.
+      ESP_LOGW(TAG, "Wake PA%u still in interrupt mode from before the restart; releasing it",
+               static_cast<unsigned>(this->wake_pin_));
+      previous_gpio.mode = GPIOx_Pn_F0_INPUT;
+      HAL_GPIO_Init(GPIO_PORT_A, pin, &previous_gpio);
+    }
     if (previous_gpio.mode == GPIOx_Pn_F6_EINT || previous_gpio.mode == GPIOx_Pn_F1_OUTPUT) {
       ESP_LOGE(TAG, "Wake PA%u already owned by IRQ/output client; refusing standby",
                static_cast<unsigned>(this->wake_pin_));
       goto abort;
     }
+    this->wake_pin_seen_free_ = true;
     GPIO_InitParam eint = previous_gpio;
     eint.mode = GPIOx_Pn_F6_EINT;
     eint.pull = this->wake_falling_ ? GPIO_PULL_UP : GPIO_PULL_DOWN;
@@ -415,16 +423,6 @@ void XR806StandbyController::attempt_standby_() {
 #ifdef USE_XR806_WLAN_SLEEP_DIAG
   wlan_sleep_diag::after_wake(result, event);
 #endif
-#ifdef USE_WIFI
-  if (wlan_driver_failed()) {
-    // The WLAN core hung during standby ("Device cannot wakeup"). The driver's own recovery does not bring it back,
-    // and the next request to the driver (from the WLAN component, for example its fallback AP) faults the CPU.
-    ESP_LOGE(TAG, "The WLAN core stopped answering during standby; restarting");
-    global_preferences->sync();
-    delay(100);  // let the log reach the UART
-    arch_restart();
-  }
-#endif
 
 abort:
   p.end_commit();
@@ -439,6 +437,18 @@ abort:
     // Do not deinitialize an MCU-owned pin: restore its original mux.
     HAL_GPIO_Init(GPIO_PORT_A, static_cast<GPIO_Pin>(this->wake_pin_), &previous_gpio);
   }
+
+#ifdef USE_WIFI
+  if (pm_called && wlan_driver_failed()) {
+    // The WLAN core hung during standby ("Device cannot wakeup"). The driver's own recovery does not bring it back,
+    // and the next request to the driver (from the WLAN component, for example its fallback AP) faults the CPU.
+    // Only after the wake sources are released above: pin settings survive the restart.
+    ESP_LOGE(TAG, "The WLAN core stopped answering during standby; restarting");
+    global_preferences->sync();
+    delay(100);  // let the log reach the UART
+    arch_restart();
+  }
+#endif
 
   if (!pm_called) {
     this->cancel_prepared_(prepared);

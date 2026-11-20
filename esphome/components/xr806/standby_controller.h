@@ -110,6 +110,7 @@ class XR806StandbyController final : public Component {
   uint32_t boot_hold_ms_{0};
   uint8_t wake_pin_{20};
   bool has_wake_pin_{false};
+  bool wake_pin_seen_free_{false};  // since boot; false marks an interrupt mode left over from before a restart
   bool wake_falling_{true};
   bool no_uart_{false};
   bool no_network_{false};
