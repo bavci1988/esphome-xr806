@@ -421,8 +421,8 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   // Neither the host's own timer nor a wake reported by the firmware may end the sleep: both occasionally left the
   // WLAN core unable to answer (driver: "Device cannot wakeup"). Data from Home Assistant never did. So the firmware
   // sends W frames and stops; Home Assistant pings one to two PEER_IDLE_PING_MS after the last one, and that ping
-  // wakes the host. Every frame takes a Noise nonce and the host sends those the firmware did not; one spare frame
-  // answers the ping right after the wake.
+  // wakes the host. Every frame takes a Noise nonce and the host sends those the firmware did not; one spare frame answers
+  // the ping right after the wake.
   const uint32_t period_ms = this->period_s_ * 1000U;
   const uint32_t awake_ms = wake_after_ms > 2 * PEER_IDLE_PING_MS ? wake_after_ms - (2 * PEER_IDLE_PING_MS) : 0;
   const uint32_t wake_frames = std::max<uint32_t>(1, awake_ms / period_ms);
