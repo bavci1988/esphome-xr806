@@ -19,6 +19,16 @@ CONF_STATUS_PIN = "status_pin"
 CONF_FORCE_TIME_SYNC = "force_time_sync"
 CONF_AUTO_BAUD = "auto_baud"
 CONF_MCU_WAKE_PIN = "mcu_wake_pin"
+CONF_STATUS_DATAPOINTS = "status_datapoints"
+CONF_REFRESH_DATAPOINTS = "refresh_datapoints"
+CONF_REFRESH_TRIGGER_DATAPOINT = "refresh_trigger_datapoint"
+LOW_POWER_DATAPOINT_OPTIONS = (
+    CONF_STATUS_DATAPOINTS,
+    CONF_REFRESH_DATAPOINTS,
+    CONF_REFRESH_TRIGGER_DATAPOINT,
+)
+# The driver tracks each list as a 32-bit mask.
+MAX_LISTED_DATAPOINTS = 32
 
 tuya_ns = cg.esphome_ns.namespace("tuya")
 TuyaDatapointType = tuya_ns.enum("TuyaDatapointType", is_class=True)
@@ -75,6 +85,12 @@ def _validate_time_options(config: ConfigType) -> ConfigType:
             f"{CONF_MCU_WAKE_PIN} requires protocol: low_power",
             path=[CONF_MCU_WAKE_PIN],
         )
+    if config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER:
+        for option in LOW_POWER_DATAPOINT_OPTIONS:
+            if option in config:
+                raise cv.Invalid(
+                    f"{option} requires protocol: low_power", path=[option]
+                )
     if config[CONF_AUTO_BAUD] and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER:
         raise cv.Invalid(
             "auto_baud is only supported with protocol: low_power",
@@ -92,6 +108,15 @@ CONFIG_SCHEMA = cv.All(
             ),
             cv.Optional(CONF_AUTO_BAUD, default=False): cv.boolean,
             cv.Optional(CONF_MCU_WAKE_PIN): pins.gpio_output_pin_schema,
+            cv.Optional(CONF_STATUS_DATAPOINTS): cv.All(
+                cv.ensure_list(cv.uint8_t),
+                cv.Length(min=1, max=MAX_LISTED_DATAPOINTS),
+            ),
+            cv.Optional(CONF_REFRESH_DATAPOINTS): cv.All(
+                cv.ensure_list(cv.uint8_t),
+                cv.Length(min=1, max=MAX_LISTED_DATAPOINTS),
+            ),
+            cv.Optional(CONF_REFRESH_TRIGGER_DATAPOINT): cv.uint8_t,
             cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
             cv.Optional(CONF_FORCE_TIME_SYNC, default=False): cv.boolean,
             cv.Optional(CONF_IGNORE_MCU_UPDATE_ON_DATAPOINTS): cv.ensure_list(
@@ -123,6 +148,14 @@ async def to_code(config):
         cg.add(var.set_protocol(TuyaProtocol.TUYA_PROTOCOL_LOW_POWER))
         cg.add(var.set_auto_baud(config[CONF_AUTO_BAUD]))
         await cg.add_pin(var.set_mcu_wake_pin, config.get(CONF_MCU_WAKE_PIN))
+        if (status := config.get(CONF_STATUS_DATAPOINTS)) is not None:
+            cg.add(var.set_low_power_status_datapoints(status))
+        if (refresh := config.get(CONF_REFRESH_DATAPOINTS)) is not None:
+            cg.add(var.set_low_power_refresh_datapoints(refresh))
+        cg.add_optional(
+            var.set_low_power_refresh_trigger_datapoint,
+            config.get(CONF_REFRESH_TRIGGER_DATAPOINT),
+        )
     if (time_id := config.get(CONF_TIME_ID)) is not None:
         await cg.add_variable(var.set_time_id, time_id)
         if config[CONF_FORCE_TIME_SYNC]:

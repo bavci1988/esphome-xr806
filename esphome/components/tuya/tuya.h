@@ -11,6 +11,7 @@
 
 #ifdef USE_TUYA_LOW_POWER
 #include <array>
+#include <initializer_list>
 
 #include "esphome/core/automation.h"
 #include "tuya_low_power.h"
@@ -129,6 +130,15 @@ class Tuya final : public Component, public uart::UARTDevice {
   void set_auto_baud(bool auto_baud) { this->auto_baud_ = auto_baud; }
   void set_mcu_wake_pin(GPIOPin *pin) { this->mcu_wake_pin_ = pin; }
   void set_low_power_host(TuyaLowPowerHost *host) { this->lp_host_ = host; }
+  /// Datapoints of a version-0 MCU: all of `status` must be reported before it counts as synchronized,
+  /// writing 1 to `trigger` makes it report `refresh`. The defaults are those of the TRV16 (HC32).
+  void set_low_power_status_datapoints(std::initializer_list<uint8_t> status) {
+    this->lp_session_.set_status_dps(status.begin(), status.size());
+  }
+  void set_low_power_refresh_datapoints(std::initializer_list<uint8_t> refresh) {
+    this->lp_session_.set_refresh_dps(refresh.begin(), refresh.size());
+  }
+  void set_low_power_refresh_trigger_datapoint(uint8_t trigger) { this->lp_session_.set_refresh_trigger_dp(trigger); }
   bool request_low_power_refresh();
   /// Diagnostics: sends only the start of an MCU firmware update (CMD0A, or CMD0D for version-0 frames) for an
   /// image of `image_size` bytes and logs the MCU's answer. No data follows; the running MCU firmware is untouched.

@@ -54,6 +54,10 @@ def test_on_mcu_ready(
             "refresh_standard_protocol.yaml",
             "tuya.refresh requires protocol: low_power",
         ),
+        (
+            "datapoint_lists_standard_protocol.yaml",
+            "status_datapoints requires protocol: low_power",
+        ),
     ],
 )
 def test_low_power_rejected(
@@ -78,3 +82,18 @@ def test_low_power_wake_pin_pb4(
     assert "set_mcu_wake_pin(" in main_cpp
     assert "set_pin(36)" in main_cpp
     assert "set_inverted(true)" in main_cpp
+
+
+def test_low_power_datapoint_lists(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+) -> None:
+    # A version-0 MCU other than the TRV16 names its own status and refresh datapoints.
+    main_cpp = generate_main(component_config_path("low_power_datapoints.yaml"))
+
+    assert (
+        "set_low_power_status_datapoints({2, 3, 8, 16, 19, 24, 25, 26, 27, 35, 40, 45, "
+        "101, 102, 104, 106})" in main_cpp
+    )
+    assert "set_low_power_refresh_datapoints({2, 3, 8, 16, 19, 24})" in main_cpp
+    assert "set_low_power_refresh_trigger_datapoint(106)" in main_cpp

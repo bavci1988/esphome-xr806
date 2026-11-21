@@ -1,0 +1,20 @@
+# A version-0 MCU with its own datapoints (TRV801W): status list, refresh list and refresh trigger.
+esphome:
+  name: xr806-trv801w-low-power
+xr806:
+  board: wxu
+
+uart:
+  id: mcu_uart
+  tx_pin: PB0
+  rx_pin: PB1
+  baud_rate: 9600
+
+tuya:
+  id: trv801w_mcu
+  uart_id: mcu_uart
+  protocol: low_power
+  auto_baud: true
+  status_datapoints: [2, 3, 8, 16, 19, 24, 25, 26, 27, 35, 40, 45, 101, 102, 104, 106]
+  refresh_datapoints: [2, 3, 8, 16, 19, 24]
+  refresh_trigger_datapoint: 106

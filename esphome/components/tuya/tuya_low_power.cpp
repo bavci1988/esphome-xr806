@@ -521,12 +521,12 @@ bool Tuya::request_low_power_refresh() {
     this->wake_low_power_mcu_();
   }
   if (this->lp_v3_) {
-    // A version-3 MCU answers the standard status query; DP106 is the HC32's refresh trigger.
+    // A version-3 MCU answers the standard status query; a version-0 MCU has a refresh trigger datapoint.
     this->lp_v3_last_poll_ms_ = App.get_loop_component_start_time();
     this->send_low_power_direct_(0x08, {});
     return true;
   }
-  this->send_datapoint_command_(106, TuyaDatapointType::BOOLEAN, {0x01});
+  this->send_datapoint_command_(this->lp_session_.refresh_trigger_dp(), TuyaDatapointType::BOOLEAN, {0x01});
   return true;
 }
 

@@ -10,6 +10,57 @@
 
 namespace esphome::tuya::testing {
 
+TEST(TuyaLowPowerSession, ConfiguredDatapointLists) {
+  using esphome::tuya::TuyaLowPowerSession;
+  // A device with its own datapoints: other status list, refresh list and refresh trigger.
+  static constexpr uint8_t STATUS[] = {2, 16, 24, 101, 102};
+  static constexpr uint8_t REFRESH[] = {2, 16, 24};
+  TuyaLowPowerSession state;
+  state.set_status_dps(STATUS, sizeof(STATUS));
+  state.set_refresh_dps(REFRESH, sizeof(REFRESH));
+  state.set_refresh_trigger_dp(110);
+  EXPECT_EQ(state.refresh_trigger_dp(), 110);
+  state.product_received();
+  state.begin_full_status(100);
+  uint8_t value = 1;
+  // The TRV16 defaults no longer count.
+  for (uint8_t id : TuyaLowPowerSession::FULL_STATUS_DPS) {
+    if (id != 2 && id != 101 && id != 102)
+      state.observe_dp(id, 1, &value, 1);
+  }
+  EXPECT_FALSE(state.ready());
+  for (uint8_t id : STATUS)
+    state.observe_dp(id, 1, &value, 1);
+  EXPECT_TRUE(state.ready());
+
+  // Only a write of 1 to the configured trigger waits for the refresh list.
+  state.begin_write(106, 1, &value, 1, 200);
+  EXPECT_FALSE(state.refresh_pending());
+  state.write_ack();
+  state.observe_dp(106, 1, &value, 1);
+  EXPECT_TRUE(state.ready());
+  state.begin_write(110, 1, &value, 1, 300);
+  EXPECT_TRUE(state.refresh_pending());
+  state.write_ack();
+  state.observe_dp(2, 1, &value, 1);
+  state.observe_dp(16, 1, &value, 1);
+  EXPECT_FALSE(state.ready());
+  state.observe_dp(24, 1, &value, 1);
+  EXPECT_TRUE(state.ready());
+
+  // 32 entries fill the mask completely; longer lists are cut there.
+  uint8_t many[40];
+  for (uint8_t i = 0; i < 40; ++i)
+    many[i] = static_cast<uint8_t>(i + 1);
+  state.set_status_dps(many, sizeof(many));
+  state.begin_full_status(400);
+  for (uint8_t i = 0; i < 31; ++i)
+    state.observe_dp(many[i], 1, &value, 1);
+  EXPECT_FALSE(state.ready());
+  state.observe_dp(many[31], 1, &value, 1);
+  EXPECT_TRUE(state.ready());
+}
+
 TEST(TuyaLowPowerSession, FullStatusAndWrites) {
   using esphome::tuya::TuyaLowPowerSession;
   TuyaLowPowerSession state;

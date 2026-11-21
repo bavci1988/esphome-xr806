@@ -11,14 +11,29 @@ namespace esphome::tuya {
 
 class TuyaLowPowerSession {
  public:
+  /// Datapoints the HC32 firmware of the TRV16 reports after network state 04, and after a refresh.
+  /// They are the defaults; a device with other datapoints sets its own lists.
   static constexpr std::array<uint8_t, 17> FULL_STATUS_DPS = {
       1, 3, 4, 2, 17, 16, 10, 11, 7, 19, 20, 108, 101, 102, 104, 105, 107,
   };
   static constexpr std::array<uint8_t, 8> REFRESH_DPS = {1, 3, 4, 2, 17, 16, 19, 20};
+  static constexpr uint8_t REFRESH_TRIGGER_DP = 106;
+  /// The pending sets are bit masks, one bit per listed datapoint.
+  static constexpr size_t MAX_LISTED_DPS = 32;
   static constexpr uint32_t REPORT_TIMEOUT_MS = 12000;
 
   enum class WriteResult : uint8_t { NONE, CONFIRMED, TIMED_OUT };
 
+  TuyaLowPowerSession() {
+    this->set_status_dps(FULL_STATUS_DPS.data(), FULL_STATUS_DPS.size());
+    this->set_refresh_dps(REFRESH_DPS.data(), REFRESH_DPS.size());
+  }
+  /// Datapoints that must all be reported before the MCU status counts as synchronized.
+  void set_status_dps(const uint8_t *ids, size_t count) { status_count_ = copy_list_(status_dps_, ids, count); }
+  /// Datapoints the MCU reports after a write of 1 to the refresh trigger.
+  void set_refresh_dps(const uint8_t *ids, size_t count) { refresh_count_ = copy_list_(refresh_dps_, ids, count); }
+  void set_refresh_trigger_dp(uint8_t id) { refresh_trigger_dp_ = id; }
+  uint8_t refresh_trigger_dp() const { return refresh_trigger_dp_; }
   void product_received() { product_ = true; }
   bool has_product() const { return product_; }
   bool synchronized() const { return synced_; }
@@ -42,7 +57,7 @@ class TuyaLowPowerSession {
   }
 
   void begin_full_status(uint32_t now) {
-    status_mask_ = (1u << FULL_STATUS_DPS.size()) - 1u;
+    status_mask_ = full_mask_(status_count_);
     synced_ = false;
     full_status_active_ = true;
     status_started_ms_ = now;
@@ -52,8 +67,8 @@ class TuyaLowPowerSession {
     write_pending_ = true;
     write_acked_ = false;
     write_seen_ = false;
-    write_refresh_ = (id == 106 && type == 1 && len == 1 && value != nullptr && value[0] == 1);
-    refresh_mask_ = write_refresh_ ? ((1u << REFRESH_DPS.size()) - 1u) : 0;
+    write_refresh_ = (id == refresh_trigger_dp_ && type == 1 && len == 1 && value != nullptr && value[0] == 1);
+    refresh_mask_ = write_refresh_ ? full_mask_(refresh_count_) : 0;
     last_result_ = WriteResult::NONE;
     write_id_ = id;
     write_type_ = type;
@@ -71,8 +86,8 @@ class TuyaLowPowerSession {
   }
 
   void observe_dp(uint8_t id, uint8_t type, const uint8_t *value, size_t len) {
-    for (size_t i = 0; i < FULL_STATUS_DPS.size(); ++i) {
-      if (status_mask_ && FULL_STATUS_DPS[i] == id) {
+    for (size_t i = 0; i < status_count_; ++i) {
+      if (status_mask_ && status_dps_[i] == id) {
         status_mask_ &= ~(1u << i);
       }
     }
@@ -86,8 +101,8 @@ class TuyaLowPowerSession {
       return;
     }
     if (write_refresh_) {
-      for (size_t i = 0; i < REFRESH_DPS.size(); ++i) {
-        if (REFRESH_DPS[i] == id) {
+      for (size_t i = 0; i < refresh_count_; ++i) {
+        if (refresh_dps_[i] == id) {
           refresh_mask_ &= ~(1u << i);
         }
       }
@@ -159,6 +174,16 @@ class TuyaLowPowerSession {
 
  private:
   bool status_started_() const { return full_status_active_; }
+  static uint32_t full_mask_(size_t count) { return count >= 32 ? 0xFFFFFFFFu : (1u << count) - 1u; }
+  static uint8_t copy_list_(std::array<uint8_t, MAX_LISTED_DPS> &list, const uint8_t *ids, size_t count) {
+    if (ids == nullptr)
+      count = 0;
+    if (count > MAX_LISTED_DPS)
+      count = MAX_LISTED_DPS;
+    for (size_t i = 0; i < count; ++i)
+      list[i] = ids[i];
+    return static_cast<uint8_t>(count);
+  }
   void finish_write_() {
     if (!write_pending_ || !write_acked_ || !write_seen_)
       return;
@@ -168,6 +193,11 @@ class TuyaLowPowerSession {
     last_result_ = WriteResult::CONFIRMED;
   }
 
+  std::array<uint8_t, MAX_LISTED_DPS> status_dps_{};
+  std::array<uint8_t, MAX_LISTED_DPS> refresh_dps_{};
+  uint8_t status_count_{0};
+  uint8_t refresh_count_{0};
+  uint8_t refresh_trigger_dp_{REFRESH_TRIGGER_DP};
   bool product_{false};
   bool synced_{false};
   bool fault_{false};

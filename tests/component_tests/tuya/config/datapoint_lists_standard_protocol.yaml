@@ -1,0 +1,16 @@
+# The datapoint lists belong to the low_power protocol; a standard Tuya hub must reject them.
+esphome:
+  name: tuya-lists-standard
+esp8266:
+  board: d1_mini
+
+uart:
+  id: tuya_uart
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 9600
+
+tuya:
+  id: tuya_mcu
+  uart_id: tuya_uart
+  status_datapoints: [1, 2, 3]
