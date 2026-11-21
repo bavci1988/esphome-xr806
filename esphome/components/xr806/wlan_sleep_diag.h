@@ -26,6 +26,10 @@ void heap_get_space(uint8_t **start, uint8_t **end, uint8_t **current);
 
 namespace esphome::xr806::wlan_sleep_diag {
 
+// The standby controller runs from RAM; the diagnostics are only called before and after standby, so their code
+// goes to flash and leaves the RAM to the heap.
+#define XR806_DIAG_FLASH __attribute__((noinline, section(".xip_text.wlan_diag")))
+
 // ROM timer list (see the lab notes): head at 0xFFF01C6C, nodes {next, prev, expiry, callback, argument}; time is
 // [0x0AC00004] + [0xFFF0560C] in microseconds; event words at 0xFFF01C0C (+4: reasons to stay awake).
 static constexpr uint32_t TIMER_HEAD = 0xFFF01C6C;
@@ -47,7 +51,7 @@ struct Snapshot {
 
 inline bool read_word(uint32_t address, uint32_t &value) { return wlan_read_words(address, &value, 1) == 0; }
 
-inline void take(Snapshot &s) {
+XR806_DIAG_FLASH inline void take(Snapshot &s) {
   s = Snapshot{};
   uint32_t head[6]{};
   if (wlan_read_words(TIMER_HEAD, head, 6) != 0)
@@ -73,7 +77,7 @@ inline void take(Snapshot &s) {
 }
 
 // One line: WLAN time, event words, hardware timer, and every timer as callback@ms-until-expiry (negative: overdue).
-inline void print(const char *label, const Snapshot &s) {
+XR806_DIAG_FLASH inline void print(const char *label, const Snapshot &s) {
   static const char *const TAG = "xr806.wlan_diag";
   if (!s.ok) {
     ESP_LOGW(TAG, "%s: WLAN core does not answer MIB 9", label);
@@ -106,7 +110,7 @@ inline const volatile uint32_t *app_address(uint32_t wlan_address) {
 }
 
 // Prints [start, end) as hex words, eight per line; lines that are all zero are left out.
-inline void dump_words(const char *label, uint32_t start, uint32_t end) {
+XR806_DIAG_FLASH inline void dump_words(const char *label, uint32_t start, uint32_t end) {
   static const char *const TAG = "xr806.wlan_diag";
   for (uint32_t address = start; address < end; address += 32) {
     const volatile uint32_t *p = app_address(address);
@@ -134,7 +138,7 @@ static constexpr uint32_t POWER_WLAN_HIF_OVERRIDE = POWER_CONTROL_BASE + 0x21C; 
 inline volatile uint32_t &cpu_register(uint32_t address) { return *reinterpret_cast<volatile uint32_t *>(address); }
 inline bool wlan_alive() { return (cpu_register(POWER_SYS3_STATUS) & 1) != 0; }
 
-inline void dump_power_control(const char *label) {
+XR806_DIAG_FLASH inline void dump_power_control(const char *label) {
   static const char *const TAG = "xr806.wlan_diag";
   for (uint32_t address = POWER_CONTROL_BASE; address < POWER_CONTROL_BASE + POWER_CONTROL_SIZE; address += 32) {
     uint32_t w[8];
@@ -157,7 +161,7 @@ inline bool wait_alive(uint32_t timeout_ms) {
 // State of a WLAN core that stopped answering. Its memory can only be read while its power domain is up, so the
 // CPU-side power registers come first, then attempts to bring the domain up, then the core's own state: where it
 // stands (its stacks hold the return addresses and any exception frame), what it waits for, what it queued.
-inline void post_mortem() {
+XR806_DIAG_FLASH inline void post_mortem() {
   static const char *const TAG = "xr806.wlan_diag";
   dump_power_control("prcm");
   bool alive = wlan_alive();
@@ -205,7 +209,7 @@ inline Cycle &cycle() {
 }
 
 // Right before the PM call: read only, print after the wake so no UART traffic delays standby.
-inline void before_standby() {
+XR806_DIAG_FLASH inline void before_standby() {
   auto &c = cycle();
   ++c.count;
   c.rx = skb_rx_cnt;
@@ -214,7 +218,7 @@ inline void before_standby() {
   c.start_ms = millis();
 }
 
-inline void after_wake(int result, uint32_t event) {
+XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
   static const char *const TAG = "xr806.wlan_diag";
   auto &c = cycle();
   const uint32_t slept = millis() - c.start_ms;
