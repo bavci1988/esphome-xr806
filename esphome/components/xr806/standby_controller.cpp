@@ -324,6 +324,7 @@ void XR806StandbyController::attempt_standby_() {
   bool gpio_armed = false;
   bool timer_armed = false;
   bool pm_called = false;
+  [[maybe_unused]] bool wlan_failed = false;
   int result = -1;
   uint32_t event = 0;
   uint32_t commit_epoch = 0;
@@ -420,6 +421,10 @@ void XR806StandbyController::attempt_standby_() {
     result = pm_enter_mode_timeout(PM_MODE_STANDBY, 500);
   }
   event = HAL_Wakeup_GetEvent();
+#ifdef USE_WIFI
+  // Read now: the driver's recovery task clears the flag again within a moment.
+  wlan_failed = wlan_driver_failed();
+#endif
 #ifdef USE_XR806_WLAN_SLEEP_DIAG
   wlan_sleep_diag::after_wake(result, event);
 #endif
@@ -439,7 +444,7 @@ abort:
   }
 
 #ifdef USE_WIFI
-  if (pm_called && wlan_driver_failed()) {
+  if (pm_called && (wlan_failed || wlan_driver_failed())) {
     // The WLAN core hung during standby ("Device cannot wakeup"). The driver's own recovery does not bring it back,
     // and the next request to the driver (from the WLAN component, for example its fallback AP) faults the CPU.
     // Only after the wake sources are released above: pin settings survive the restart.
