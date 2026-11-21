@@ -23,6 +23,9 @@ server 0 sends a different, pre-encrypted frame each time Home Assistant acknowl
    sets the keepalive period (0x0900BC70) to 255 s. Keepalive entry 0 stays enabled, because the receive filter only
    passes data from the peer to the host while it is; with host sleep set it drops that data otherwise. Home
    Assistant then pings after its own idle time and that data wakes the host (change 3).
+5. While the host sleeps the receive filter drops every IPv4 packet that is not from the keepalive peer, so the web
+   server and OTA could not wake the host. A TCP SYN (no other flag, not a fragment) to the web server or OTA port
+   is now passed to the host (0x0900A216, code next to the frame chooser). Nothing else is let through.
 
 Only the firmware with the known SHA-256 is patched; see docs/WLAN_FIRMWARE_NOTES.md in the xr806-sdk repository.
 Nothing patched is stored: the stock file comes from the SDK and the patch is applied in the build directory.
@@ -41,6 +44,8 @@ STOCK_SHA256 = "0d08b6c6d0c9bcf3af7b3ebdab55cb623f28feb8392343585255be17c98e59c8
 # It overwrites the UDP keepalive from 0x0900A3C6 up to its literal pool at 0x0900A4A8.
 CAVE_SOURCE = Path(__file__).with_name("wlan_fw_keepalive.S")
 CAVE_ADDRESS = 0x0900A3C8
+# wlan_fw_keepalive.S starts with two branches: the frame chooser at CAVE_ADDRESS, the receive filter decision at +2.
+CAVE_FILTER_ENTRY = CAVE_ADDRESS + 2
 CAVE_MAX_SIZE = 0x0900A4A8 - CAVE_ADDRESS
 IMMEDIATE_SEND_ADDRESS = 0x0900A374
 IMMEDIATE_SEND_STOCK = bytes.fromhex("00f0a8f9")  # bl 0x0900A6C8
@@ -52,6 +57,9 @@ THUMB_NOP = bytes.fromhex("c046")  # mov r8, r8
 # After "cmp r1,#0; beq 0x0900A15E" (no data: done), data is acknowledged by the firmware and dropped.
 PEER_DATA_ADDRESS = 0x0900A14E
 PEER_DATA_STOCK = bytes.fromhex("0022")  # movs r2,#0: start of the acknowledgement
+FILTER_DROP_ADDRESS = 0x0900A216
+# ldr r0,[sp,#0x14]; cmp r0,#0; bne 0x0900A220; movs r0,#1 (then str r0,[sp,#0x18])
+FILTER_DROP_STOCK = bytes.fromhex("0598002801d10120")
 PEER_DATA_PATCHED = bytes.fromhex(
     "67e0"
 )  # b 0x0900A220: return 0, the frame goes to the host
@@ -167,6 +175,11 @@ def patch(stock: bytes, cave: bytes, verify_hash: bool = True) -> bytes:
             PAYLOAD_SOURCE_ADDRESS,
             PAYLOAD_SOURCE_STOCK,
             thumb_bl(PAYLOAD_SOURCE_ADDRESS, CAVE_ADDRESS) + THUMB_NOP,
+        ),
+        (
+            FILTER_DROP_ADDRESS,
+            FILTER_DROP_STOCK,
+            thumb_bl(FILTER_DROP_ADDRESS, CAVE_FILTER_ENTRY) + THUMB_NOP * 2,
         ),
         (CAVE_ADDRESS, None, cave),
         (PEER_DATA_ADDRESS, PEER_DATA_STOCK, PEER_DATA_PATCHED),

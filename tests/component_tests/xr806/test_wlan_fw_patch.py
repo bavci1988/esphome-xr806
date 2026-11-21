@@ -14,9 +14,11 @@ SECTION_SIZE = 0x1000
 CAVE = bytes(range(0x20, 0x20 + 92))
 # wlan_fw_keepalive.S as assembled with GNU as and checked in Unicorn against the firmware's data layout.
 CAVE_CHECKED = bytes.fromhex(
-    "70b51199ca88139b002b2ed1002a2cd0174c2468174d2d68641b174d2e78013e04d32e7002d1013e033d2e70"
-    "00258026964202d3b61aad18fae70026ac4206d3641b0136052ef9d90526ac1a05e02300934201d39b1afbe7"
-    "e41a032e01d3033e064984237343c9180919083170bd000004bc000998bb000973bc0009fcbd0009"
+    "24e0ffe7059800281cd1707a06281bd130780007000f052816d3b079800613d1f079002810d1687b8006800e"
+    "02280bd1a8780002e97808432049884202d02049884201d1069870470120704770b51199ca88139b002b2ed1"
+    "002a2cd0194c2468194d2d68641b194d2e78013e04d32e7002d1013e033d2e7000258026964202d3b61aad18"
+    "fae70026ac4206d3641b0136052ef9d90526ac1a05e02300934201d39b1afbe7e41a032e01d3033e08498423"
+    "7343c9180919083170bd000050000000a00c000004bc000998bb000973bc0009fcbd0009"
 )
 
 
@@ -27,6 +29,7 @@ def _image() -> bytes:
         (patch_mod.IMMEDIATE_SEND_ADDRESS, patch_mod.IMMEDIATE_SEND_STOCK),
         (patch_mod.PAYLOAD_SOURCE_ADDRESS, patch_mod.PAYLOAD_SOURCE_STOCK),
         (patch_mod.PEER_DATA_ADDRESS, patch_mod.PEER_DATA_STOCK),
+        (patch_mod.FILTER_DROP_ADDRESS, patch_mod.FILTER_DROP_STOCK),
     ):
         data[address - SECTION : address - SECTION + len(code)] = code
     image = bytearray(b"XR01")
@@ -50,13 +53,17 @@ def test_thumb_bl_encoding() -> None:
     assert patch_mod.thumb_bl(0x0900A374, 0x0900A6C8) == patch_mod.IMMEDIATE_SEND_STOCK
 
 
-def test_patch_changes_the_three_places_and_keeps_the_checksum() -> None:
+def test_patch_changes_the_code_and_keeps_the_checksum() -> None:
     stock = _image()
     patched = patch_mod.patch(stock, CAVE, verify_hash=False)
 
     assert len(patched) == len(stock)
     assert sum(struct.unpack(f"<{len(patched) // 4}I", patched)) & 0xFFFFFFFF == 0
     assert _at(patched, patch_mod.IMMEDIATE_SEND_ADDRESS, 4) == patch_mod.THUMB_NOP * 2
+    # bl 0x0900A3CA at 0x0900A216, as assembled by GNU as
+    assert _at(patched, patch_mod.FILTER_DROP_ADDRESS, 8) == bytes.fromhex(
+        "00f0d8f8"
+    ) + (patch_mod.THUMB_NOP * 2)
     assert (
         _at(patched, patch_mod.PAYLOAD_SOURCE_ADDRESS, 6)
         == bytes.fromhex("00f0dcfa") + patch_mod.THUMB_NOP

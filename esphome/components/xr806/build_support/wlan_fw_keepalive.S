@@ -1,6 +1,6 @@
 @ Keepalive frame list for the XR806 WLAN firmware patch (wlan_fw.bin); see wlan_fw_patch.py.
 @ Assembled at build time with the ARM toolchain and linked at 0x0900A3C8 (WLAN core address).
-@ Called with BL from 0x09009E0C instead of "ldr r1,[sp,#0x34]; ldrh r2,[r1,#6]; adds r1,#8",
+@ Frame chooser, called with BL from 0x09009E0C instead of "ldr r1,[sp,#0x34]; ldrh r2,[r1,#6]; adds r1,#8",
 @ right before the payload memcpy. Returns r1 = source of the payload, r2 = its length; r0 (destination) kept.
 @ Server 0 sends frame k = (sequence - TcpSeqInit) / length, the number of frames HA has acknowledged (the
 @ firmware adds the length to the sequence for each acknowledged frame). The frames lie in six areas of 128 bytes,
@@ -12,7 +12,63 @@
     .thumb
     .text
     .global cave
+    .ifndef WAKE_PORT_1
+    .equ    WAKE_PORT_1, 80         @ web server
+    .endif
+    .ifndef WAKE_PORT_2
+    .equ    WAKE_PORT_2, 3232       @ OTA
+    .endif
 cave:
+    b       payload                 @ CAVE_ADDRESS: frame chooser
+    b       receive_filter          @ CAVE_ADDRESS + 2: drop decision of the receive filter
+
+@ Receive filter (0x0900A012), called with BL from 0x0900A216 instead of
+@ "ldr r0,[sp,#0x14]; cmp r0,#0; bne 0x0900A220; movs r0,#1", followed by "str r0,[sp,#0x18]".
+@ While the host sleeps the stock firmware drops every IPv4 packet that matched no wake filter ([sp,#0x14] == 0).
+@ Someone opening the web server or an OTA connection now wakes the host: a TCP segment that is not a fragment, has
+@ only SYN of the six flags set and goes to WAKE_PORT_1 or WAKE_PORT_2 is passed on. Everything else is still dropped.
+@ r6 = IPv4 header, r5 = r6 + header length. Returns r0 = the new [sp,#0x18]: 1 drops, the old value keeps.
+receive_filter:
+    ldr     r0, [sp, #0x14]
+    cmp     r0, #0
+    bne     keep
+    ldrb    r0, [r6, #9]            @ protocol
+    cmp     r0, #6
+    bne     drop
+    ldrb    r0, [r6, #0]            @ header length in words
+    lsls    r0, r0, #28
+    lsrs    r0, r0, #28
+    cmp     r0, #5
+    blo     drop
+    ldrb    r0, [r6, #6]            @ more fragments, fragment offset (high bits)
+    lsls    r0, r0, #26
+    bne     drop
+    ldrb    r0, [r6, #7]            @ fragment offset (low bits)
+    cmp     r0, #0
+    bne     drop
+    ldrb    r0, [r5, #13]           @ TCP flags: URG ACK PSH RST SYN FIN
+    lsls    r0, r0, #26
+    lsrs    r0, r0, #26
+    cmp     r0, #2                  @ SYN alone
+    bne     drop
+    ldrb    r0, [r5, #2]            @ destination port
+    lsls    r0, r0, #8
+    ldrb    r1, [r5, #3]
+    orrs    r0, r1
+    ldr     r1, =WAKE_PORT_1
+    cmp     r0, r1
+    beq     keep
+    ldr     r1, =WAKE_PORT_2
+    cmp     r0, r1
+    bne     drop
+keep:
+    ldr     r0, [sp, #0x18]
+    bx      lr
+drop:
+    movs    r0, #1
+    bx      lr
+
+payload:
     push    {r4, r5, r6, lr}
     ldr     r1, [sp, #0x44]         @ caller's [sp,#0x34]: keepalive entry i
     ldrh    r2, [r1, #6]            @ frame length
