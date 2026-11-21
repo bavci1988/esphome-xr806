@@ -10,6 +10,7 @@
 
 #include <cinttypes>
 #include <cstdint>
+#include <malloc.h>
 
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -17,8 +18,10 @@
 
 extern "C" {
 #include "kernel/os/os_timer.h"
+#include "sys/sys_heap.h"
 extern volatile int skb_rx_cnt;  // libxrwireless: frames handed up by the WLAN driver
 extern volatile int skb_tx_cnt;
+void heap_get_space(uint8_t **start, uint8_t **end, uint8_t **current);
 }
 
 namespace esphome::xr806::wlan_sleep_diag {
@@ -224,6 +227,16 @@ inline void after_wake(int result, uint32_t event) {
            " ms, driver rx +%d tx +%d, stay_awake %d bh_error %d",
            c.count, result, event, slept, skb_rx_cnt - c.rx, skb_tx_cnt - c.tx, OS_TimerIsActive(timer) ? 1 : 0,
            wlan_driver_failed() ? 1 : 0);
+  // Heap: bytes in use, free bytes inside the claimed part (in pieces) and the part never claimed. "in use" that
+  // keeps growing is a leak; a small "never claimed" with a large "free" is fragmentation.
+  uint8_t *heap_start, *heap_end, *heap_current;
+  malloc_mutex_lock();
+  heap_get_space(&heap_start, &heap_end, &heap_current);
+  const struct mallinfo heap = mallinfo();
+  malloc_mutex_unlock();
+  ESP_LOGI(TAG, "heap: in use %u, free in pieces %u, never claimed %u of %u", static_cast<unsigned>(heap.uordblks),
+           static_cast<unsigned>(heap.fordblks), static_cast<unsigned>(heap_end - heap_current),
+           static_cast<unsigned>(heap_end - heap_start));
   print("before", c.before);
   print("after ", after);
   if (c.before.ok && after.ok) {
