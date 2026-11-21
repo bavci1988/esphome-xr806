@@ -121,10 +121,59 @@ inline void dump_words(const char *label, uint32_t start, uint32_t end) {
   }
 }
 
-// State of a WLAN core that stopped answering: where it stands (its stacks hold the return addresses and any
-// exception frame), what it waits for, and what it queued for the CPU. Hardware registers come last, in case the
-// core's bus is switched off.
+// CPU-side power control block. SYS3 is the WLAN core's power domain: the driver wakes it with the WUP bit and
+// waits for the ALIVE bit ("Device cannot wakeup during 500ms" when it stays clear).
+static constexpr uint32_t PRCM_BASE = 0x40040000;
+static constexpr uint32_t PRCM_SIZE = 0x240;
+static constexpr uint32_t PRCM_SYS3_STATUS = PRCM_BASE + 0x94;         // bit 0: alive
+static constexpr uint32_t PRCM_WLAN_HIF_OVERRIDE = PRCM_BASE + 0x21C;  // bit 2: wake request
+
+inline volatile uint32_t &cpu_register(uint32_t address) { return *reinterpret_cast<volatile uint32_t *>(address); }
+inline bool wlan_alive() { return (cpu_register(PRCM_SYS3_STATUS) & 1) != 0; }
+
+inline void dump_power_control(const char *label) {
+  static const char *const TAG = "xr806.wlan_diag";
+  for (uint32_t address = PRCM_BASE; address < PRCM_BASE + PRCM_SIZE; address += 32) {
+    uint32_t w[8];
+    for (uint8_t i = 0; i < 8; ++i)
+      w[i] = cpu_register(address + 4 * i);
+    ESP_LOGE(TAG,
+             "%s %03" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
+             " %08" PRIX32 " %08" PRIX32,
+             label, address - PRCM_BASE, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+    delay(3);
+  }
+}
+
+inline bool wait_alive(uint32_t timeout_ms) {
+  for (uint32_t i = 0; i < timeout_ms && !wlan_alive(); ++i)
+    delay(1);
+  return wlan_alive();
+}
+
+// State of a WLAN core that stopped answering. Its memory can only be read while its power domain is up, so the
+// CPU-side power registers come first, then attempts to bring the domain up, then the core's own state: where it
+// stands (its stacks hold the return addresses and any exception frame), what it waits for, what it queued.
 inline void post_mortem() {
+  static const char *const TAG = "xr806.wlan_diag";
+  dump_power_control("prcm");
+  bool alive = wlan_alive();
+  ESP_LOGE(TAG, "WLAN power domain alive: %d", alive ? 1 : 0);
+  if (!alive) {
+    alive = wait_alive(3000);
+    ESP_LOGE(TAG, "after waiting 3 s more: alive %d", alive ? 1 : 0);
+  }
+  if (!alive) {
+    volatile uint32_t &hif = cpu_register(PRCM_WLAN_HIF_OVERRIDE);
+    hif = hif & ~0x4U;
+    delay(20);
+    hif = hif | 0x4U;
+    alive = wait_alive(2000);
+    ESP_LOGE(TAG, "after a new wake request: alive %d", alive ? 1 : 0);
+    dump_power_control("prcm2");
+  }
+  if (!alive)
+    return;
   dump_words("sched", 0xFFF01C00, 0xFFF01CA0);  // event words, reasons to stay awake, timer list head
   uint32_t node = *app_address(TIMER_HEAD);
   for (uint8_t i = 0; i < MAX_NODES && (node >> 20) == 0xFFF; ++i) {
@@ -177,6 +226,16 @@ inline void after_wake(int result, uint32_t event) {
            wlan_driver_failed() ? 1 : 0);
   print("before", c.before);
   print("after ", after);
+  if (c.before.ok && after.ok) {
+    // The core's clock must advance as far as the CPU's; less means the core slept past its own timers.
+    const uint32_t wlan_ms = ((after.counter + after.offset) - (c.before.counter + c.before.offset)) / 1000;
+    if (wlan_ms + 2000 < slept) {
+      ESP_LOGE(TAG, "WLAN clock advanced only %" PRIu32 " of %" PRIu32 " ms: the core overslept", wlan_ms, slept);
+      dump_power_control("prcm");
+    } else if (c.count == 2) {
+      dump_power_control("prcm-ok");  // reference values from a good cycle
+    }
+  }
   if (!after.ok && wlan_driver_failed())
     post_mortem();
 }
