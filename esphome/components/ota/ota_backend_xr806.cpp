@@ -127,6 +127,15 @@ OTAResponseTypes XR806OTABackend::begin(size_t image_size, OTAType type) {
     return OTA_RESPONSE_ERROR_UPDATE_PREPARE;
   }
   this->sdk_initialized_ = true;
+  // The check at the end needs about 39 KiB, most of it in two large blocks, and a heap that has been in use for
+  // a long time may no longer have them. Find that out now, before anything is erased. The memory is given back
+  // for the upload and taken again for the check.
+  if (!this->reserve_check_memory_()) {
+    this->stop_();
+    this->restart_for_memory_();
+    return OTA_RESPONSE_ERROR_UPDATE_PREPARE;
+  }
+  this->release_check_memory_();
   this->image_base_ = runtime->bl_size;
   this->staging_flash_ = runtime->flash[this->plan_.candidate_seq];
   this->declared_ = static_cast<uint32_t>(image_size);
@@ -253,24 +262,52 @@ bool XR806OTABackend::read_commit_() {
          confirmed.state == IMAGE_STATE_VERIFIED;
 }
 
-bool XR806OTABackend::probe_staged_image_() {
-  // Same decoder (ROM xz-embedded) and dictionary limit as the bootloader.
-  // Small buffers: a web upload ends here while the HTTP server still holds its own buffers, and the
-  // heap is nearly full then. The check reads byte by byte, so the chunk size only affects speed.
-  constexpr size_t IN_CHUNK = 512;
-  constexpr size_t OUT_CHUNK = 1024;
+// Same decoder (ROM xz-embedded) and dictionary limit as the bootloader. The check reads byte by byte, so the
+// chunk sizes only affect speed.
+static constexpr size_t CHECK_IN_CHUNK = 512;
+static constexpr size_t CHECK_OUT_CHUNK = 1024;
+
+bool XR806OTABackend::reserve_check_memory_() {
+  this->release_check_memory_();
   xz_crc32_init();
-  struct xz_dec *dec = xz_dec_init(XZ_PREALLOC, xr806::XR806_BOOTLOADER_XZ_DICT);
+  this->check_decoder_ = xz_dec_init(XZ_PREALLOC, xr806::XR806_BOOTLOADER_XZ_DICT);
   RAMAllocator<uint8_t> allocator;
-  uint8_t *in = allocator.allocate(IN_CHUNK + OUT_CHUNK);
-  if (dec == nullptr || in == nullptr) {
-    if (dec != nullptr)
-      xz_dec_end(dec);
-    if (in != nullptr)
-      allocator.deallocate(in, IN_CHUNK + OUT_CHUNK);
-    ESP_LOGE(TAG, "Not enough memory to check the staged image");
+  this->check_buffer_ = allocator.allocate(CHECK_IN_CHUNK + CHECK_OUT_CHUNK);
+  if (this->check_decoder_ != nullptr && this->check_buffer_ != nullptr)
+    return true;
+  this->release_check_memory_();
+  return false;
+}
+
+void XR806OTABackend::restart_for_memory_() {
+  ESP_LOGE(TAG, "Not enough memory to check an update; restarting so that the next upload works");
+  delay(200);  // lets the log line out
+  App.safe_reboot();
+}
+
+void XR806OTABackend::release_check_memory_() {
+  if (this->check_decoder_ != nullptr) {
+    xz_dec_end(this->check_decoder_);
+    this->check_decoder_ = nullptr;
+  }
+  if (this->check_buffer_ != nullptr) {
+    RAMAllocator<uint8_t> allocator;
+    allocator.deallocate(this->check_buffer_, CHECK_IN_CHUNK + CHECK_OUT_CHUNK);
+    this->check_buffer_ = nullptr;
+  }
+}
+
+bool XR806OTABackend::probe_staged_image_() {
+  constexpr size_t IN_CHUNK = CHECK_IN_CHUNK;
+  constexpr size_t OUT_CHUNK = CHECK_OUT_CHUNK;
+  if (!this->reserve_check_memory_()) {
+    // Nothing is committed yet: the running firmware stays. A fresh heap after the restart has the room.
+    this->abort();
+    this->restart_for_memory_();
     return false;
   }
+  struct xz_dec *dec = this->check_decoder_;
+  uint8_t *in = this->check_buffer_;
   uint8_t *out = in + IN_CHUNK;
   xr806::DecompressedImageCheck check(this->image_base_, this->plan_.active.size);
   const uint32_t start = this->plan_.candidate.start + xr806::AWIH_HEADER_BYTES;
@@ -301,8 +338,7 @@ bool XR806OTABackend::probe_staged_image_() {
     // A truncated stream ends with XZ_BUF_ERROR: multi-call mode reports it on the second call without progress.
     App.feed_wdt();
   }
-  xz_dec_end(dec);
-  allocator.deallocate(in, IN_CHUNK + OUT_CHUNK);
+  this->release_check_memory_();
   const bool ok = valid && ret == XZ_STREAM_END && offset == length && b.in_pos == b.in_size && check.complete();
   if (!ok) {
     ESP_LOGE(TAG, "Staged image check failed (xz=%d, in=%u/%u, out=%u, sections=%u)", static_cast<int>(ret),
@@ -316,6 +352,7 @@ bool XR806OTABackend::probe_staged_image_() {
 }
 
 void XR806OTABackend::stop_() {
+  this->release_check_memory_();
   if (this->sdk_initialized_) {
     ota_push_stop();
     this->sdk_initialized_ = false;

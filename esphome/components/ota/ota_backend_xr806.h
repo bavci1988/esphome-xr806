@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+struct xz_dec;
 namespace esphome::ota {
 class XR806OTABackend final {
  public:
@@ -27,6 +28,9 @@ class XR806OTABackend final {
  private:
   bool push_(uint8_t *data, size_t bytes);
   bool probe_staged_image_();
+  bool reserve_check_memory_();
+  void release_check_memory_();
+  void restart_for_memory_();
   bool read_commit_();
   void stop_();
   void release_lock_();
@@ -42,6 +46,9 @@ class XR806OTABackend final {
   uint32_t received_{0}, declared_{0}, required_{0};
   uint32_t image_base_{0};  // ROM bl_size: section next_addr values are relative to it
   uint8_t staging_flash_{0};
+  // Decoder and buffers for the check of the staged image, held only while it runs.
+  struct xz_dec *check_decoder_{nullptr};
+  uint8_t *check_buffer_{nullptr};
   size_t preface_len_{0};
   bool md5_supplied_{false}, md5_valid_{false};
   bool sdk_initialized_{false}, writing_{false}, pm_held_{false}, committed_{false};
