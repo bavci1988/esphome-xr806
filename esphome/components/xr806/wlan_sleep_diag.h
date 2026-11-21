@@ -123,24 +123,24 @@ inline void dump_words(const char *label, uint32_t start, uint32_t end) {
 
 // CPU-side power control block. SYS3 is the WLAN core's power domain: the driver wakes it with the WUP bit and
 // waits for the ALIVE bit ("Device cannot wakeup during 500ms" when it stays clear).
-static constexpr uint32_t PRCM_BASE = 0x40040000;
-static constexpr uint32_t PRCM_SIZE = 0x240;
-static constexpr uint32_t PRCM_SYS3_STATUS = PRCM_BASE + 0x94;         // bit 0: alive
-static constexpr uint32_t PRCM_WLAN_HIF_OVERRIDE = PRCM_BASE + 0x21C;  // bit 2: wake request
+static constexpr uint32_t POWER_CONTROL_BASE = 0x40040000;
+static constexpr uint32_t POWER_CONTROL_SIZE = 0x240;
+static constexpr uint32_t POWER_SYS3_STATUS = POWER_CONTROL_BASE + 0x94;         // bit 0: alive
+static constexpr uint32_t POWER_WLAN_HIF_OVERRIDE = POWER_CONTROL_BASE + 0x21C;  // bit 2: wake request
 
 inline volatile uint32_t &cpu_register(uint32_t address) { return *reinterpret_cast<volatile uint32_t *>(address); }
-inline bool wlan_alive() { return (cpu_register(PRCM_SYS3_STATUS) & 1) != 0; }
+inline bool wlan_alive() { return (cpu_register(POWER_SYS3_STATUS) & 1) != 0; }
 
 inline void dump_power_control(const char *label) {
   static const char *const TAG = "xr806.wlan_diag";
-  for (uint32_t address = PRCM_BASE; address < PRCM_BASE + PRCM_SIZE; address += 32) {
+  for (uint32_t address = POWER_CONTROL_BASE; address < POWER_CONTROL_BASE + POWER_CONTROL_SIZE; address += 32) {
     uint32_t w[8];
     for (uint8_t i = 0; i < 8; ++i)
       w[i] = cpu_register(address + 4 * i);
     ESP_LOGE(TAG,
              "%s %03" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
              " %08" PRIX32 " %08" PRIX32,
-             label, address - PRCM_BASE, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+             label, address - POWER_CONTROL_BASE, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
     delay(3);
   }
 }
@@ -164,7 +164,7 @@ inline void post_mortem() {
     ESP_LOGE(TAG, "after waiting 3 s more: alive %d", alive ? 1 : 0);
   }
   if (!alive) {
-    volatile uint32_t &hif = cpu_register(PRCM_WLAN_HIF_OVERRIDE);
+    volatile uint32_t &hif = cpu_register(POWER_WLAN_HIF_OVERRIDE);
     hif = hif & ~0x4U;
     delay(20);
     hif = hif | 0x4U;
