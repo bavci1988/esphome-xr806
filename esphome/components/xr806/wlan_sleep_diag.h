@@ -92,6 +92,54 @@ inline void print(const char *label, const Snapshot &s) {
            overdue ? " OVERDUE" : "");
 }
 
+// The WLAN core's memory is mapped into the CPU's address space (FW_ADDR_TO_APP_ADDR in the vendor driver), so it
+// can be read even when the core no longer answers requests.
+inline const volatile uint32_t *app_address(uint32_t wlan_address) {
+  if ((wlan_address & 0xFFF00000) == 0xFFF00000)
+    return reinterpret_cast<const volatile uint32_t *>(0x68000000 + (wlan_address & 0xFFFF));
+  if ((wlan_address & 0xFF000000) == 0x09000000)
+    return reinterpret_cast<const volatile uint32_t *>(0x6800C000 + (wlan_address & 0x3FFFF));
+  return reinterpret_cast<const volatile uint32_t *>(wlan_address | 0x60000000);
+}
+
+// Prints [start, end) as hex words, eight per line; lines that are all zero are left out.
+inline void dump_words(const char *label, uint32_t start, uint32_t end) {
+  static const char *const TAG = "xr806.wlan_diag";
+  for (uint32_t address = start; address < end; address += 32) {
+    const volatile uint32_t *p = app_address(address);
+    uint32_t w[8];
+    uint32_t any = 0;
+    for (uint8_t i = 0; i < 8; ++i)
+      any |= w[i] = p[i];
+    if (any == 0)
+      continue;
+    ESP_LOGE(TAG,
+             "%s %08" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
+             " %08" PRIX32 " %08" PRIX32,
+             label, address, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+    delay(3);  // lets the UART drain
+  }
+}
+
+// State of a WLAN core that stopped answering: where it stands (its stacks hold the return addresses and any
+// exception frame), what it waits for, and what it queued for the CPU. Hardware registers come last, in case the
+// core's bus is switched off.
+inline void post_mortem() {
+  dump_words("sched", 0xFFF01C00, 0xFFF01CA0);  // event words, reasons to stay awake, timer list head
+  uint32_t node = *app_address(TIMER_HEAD);
+  for (uint8_t i = 0; i < MAX_NODES && (node >> 20) == 0xFFF; ++i) {
+    dump_words("timer", node, node + 32);
+    node = *app_address(node);
+  }
+  dump_words("clock", CLOCK_OFFSET & ~0x1FU, (CLOCK_OFFSET & ~0x1FU) + 64);
+  dump_words("hostq", 0xFFF02AA0, 0xFFF02C80);  // ring of messages for the CPU: +0xC read, +0x10 write index
+  dump_words("rxcnt", 0xFFF02280, 0xFFF02300);
+  dump_words("keepalive", 0x0900BB80, 0x0900BCA0);
+  dump_words("stack", 0xFFF0B000, 0xFFF0C000);
+  dump_words("hwtimer", 0x0AC00000, 0x0AC00020);
+  dump_words("power", 0x0AA800A0, 0x0AA800C0);
+}
+
 struct Cycle {
   uint32_t count{0};
   uint32_t start_ms{0};
@@ -129,6 +177,8 @@ inline void after_wake(int result, uint32_t event) {
            wlan_driver_failed() ? 1 : 0);
   print("before", c.before);
   print("after ", after);
+  if (!after.ok && wlan_driver_failed())
+    post_mortem();
 }
 
 }  // namespace esphome::xr806::wlan_sleep_diag
