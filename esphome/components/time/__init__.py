@@ -33,6 +33,7 @@ from esphome.const import (
     PLATFORM_LN882X,
     PLATFORM_RP2040,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import CORE, CoroPriority, EsphomeError, coroutine_with_priority
 from esphome.helpers import cpp_string_escape
@@ -96,6 +97,7 @@ def detect_tz() -> str | None:
         PLATFORM_BK72XX,
         PLATFORM_RTL87XX,
         PLATFORM_LN882X,
+        PLATFORM_XR806,
         PLATFORM_HOST,
     }:
         return None

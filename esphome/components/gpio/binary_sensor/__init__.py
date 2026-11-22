@@ -48,6 +48,7 @@ CONFIG_SCHEMA = (
                 esp8266=True,
                 host=True,
                 ln882x=False,
+                xr806=False,
                 nrf52=True,
                 rp2=True,
                 rtl87xx=False,

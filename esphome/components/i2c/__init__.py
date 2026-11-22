@@ -547,6 +547,7 @@ _platform_filter = filter_source_files_from_platform(
             PlatformFramework.RP2_ARDUINO,
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
+            PlatformFramework.XR806_ARDUINO,
         },
         "i2c_bus_esp_idf.cpp": {
             PlatformFramework.ESP32_ARDUINO,

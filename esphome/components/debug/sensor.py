@@ -14,6 +14,7 @@ from esphome.const import (
     PLATFORM_BK72XX,
     PLATFORM_LN882X,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
     STATE_CLASS_MEASUREMENT,
     UNIT_BYTES,
     UNIT_MILLISECOND,
@@ -59,7 +60,9 @@ CONFIG_SCHEMA = {
     cv.Optional(CONF_MIN_FREE): cv.All(
         cv.Any(
             cv.only_on_esp32,
-            cv.only_on([PLATFORM_BK72XX, PLATFORM_LN882X, PLATFORM_RTL87XX]),
+            cv.only_on(
+                [PLATFORM_BK72XX, PLATFORM_LN882X, PLATFORM_RTL87XX, PLATFORM_XR806]
+            ),
             msg="This feature is only available on ESP32 and LibreTiny (BK72xx, LN882x, RTL87xx)",
         ),
         sensor.sensor_schema(

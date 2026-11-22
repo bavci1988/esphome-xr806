@@ -101,6 +101,7 @@ _WIFI_FIRST_PLATFORMS: frozenset[str] = frozenset(
         Platform.BK72XX,
         Platform.RTL87XX,
         Platform.LN882X,
+        Platform.XR806,
         # Legacy umbrella key for the LibreTiny families (bk72xx /
         # rtl87xx / ln882x); still produced by older configs that
         # haven't migrated to the per-family keys.
@@ -551,7 +552,13 @@ def _consume_wifi_sockets(config: ConfigType) -> ConfigType:
     DHCP/DNS). On ESP32, CONFIG_LWIP_MAX_SOCKETS only controls the POSIX socket
     layer — DHCP/DNS use raw udp_new() which bypasses it entirely.
     """
-    if not (CORE.is_bk72xx or CORE.is_rtl87xx or CORE.is_ln882x or CORE.is_rp2):
+    if not (
+        CORE.is_bk72xx
+        or CORE.is_rtl87xx
+        or CORE.is_ln882x
+        or CORE.is_xr806
+        or CORE.is_rp2
+    ):
         return config
     from esphome.components import socket
 
@@ -714,6 +721,7 @@ CONFIG_SCHEMA = cv.All(
                 bk72xx="none",
                 rtl87xx="none",
                 ln882x="none",
+                xr806="none",
             ): cv.enum(WIFI_POWER_SAVE_MODES, upper=True),
             cv.Optional(CONF_FAST_CONNECT, default=False): _fast_connect_schema,
             cv.Optional(CONF_LEASE_CACHE, default=False): _lease_cache_schema,
@@ -1396,6 +1404,7 @@ FILTER_SOURCE_FILES = filter_source_files_from_platform(
             PlatformFramework.BK72XX_ARDUINO,
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
+            PlatformFramework.XR806_ARDUINO,
         },
         "wifi_component_pico_w.cpp": {PlatformFramework.RP2_ARDUINO},
     }

@@ -16,6 +16,7 @@ from esphome.const import (
     PLATFORM_LN882X,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import CORE
 from esphome.types import ConfigType
@@ -96,6 +97,7 @@ CONFIG_SCHEMA = cv.All(
             PLATFORM_BK72XX,
             PLATFORM_RTL87XX,
             PLATFORM_LN882X,
+            PLATFORM_XR806,
         ]
     ),
 )

@@ -53,6 +53,7 @@ from esphome.const import (  # noqa: F401
     PLATFORM_LN882X,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import CORE, CoroPriority, coroutine_with_priority
 from esphome.core.entity_helpers import WEBSERVER_SORTING_SCHEMA  # noqa: F401
@@ -292,6 +293,7 @@ CONFIG_SCHEMA = cv.All(
             PLATFORM_ESP8266,
             PLATFORM_BK72XX,
             PLATFORM_LN882X,
+            PLATFORM_XR806,
             PLATFORM_RP2,
             PLATFORM_RTL87XX,
         ]

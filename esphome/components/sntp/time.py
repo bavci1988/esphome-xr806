@@ -15,6 +15,7 @@ from esphome.const import (
     PLATFORM_LN882X,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import CORE
 import esphome.final_validate as fv
@@ -102,6 +103,7 @@ CONFIG_SCHEMA = cv.All(
             PLATFORM_RP2,
             PLATFORM_BK72XX,
             PLATFORM_LN882X,
+            PLATFORM_XR806,
             PLATFORM_RTL87XX,
         ]
     ),

@@ -191,6 +191,7 @@ _RECEIVER_SCHEMA = remote_base.validate_triggers(
                 esp8266="4000b",
                 bk72xx="4000b",
                 ln882x="4000b",
+                xr806="4000b",
                 rtl87xx="4000b",
                 rp2="4000b",
             ): cv.All(cv.validate_bytes, cv.int_range(min=64, max=65535)),
@@ -386,6 +387,7 @@ FILTER_SOURCE_FILES = filter_source_files_from_platform(
             PlatformFramework.BK72XX_ARDUINO,
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
+            PlatformFramework.XR806_ARDUINO,
             PlatformFramework.RP2_ARDUINO,
         },
     }

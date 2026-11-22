@@ -81,6 +81,7 @@ from esphome.const import (
     PLATFORM_ESP8266,
     PLATFORM_LN882X,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
     Framework,
     PlatformFramework,
 )
@@ -431,6 +432,7 @@ CONFIG_SCHEMA = cv.All(
                 bk72xx=16384,
                 rtl87xx=16384,
                 ln882x=16384,
+                xr806=16384,
             ): cv.All(cv.validate_bytes, cv.int_range(min=512, max=1048576)),
             cv.SplitDefault(CONF_IDF_SEND_ASYNC, esp32=False): cv.All(
                 cv.boolean, cv.only_on_esp32
@@ -514,6 +516,7 @@ CONFIG_SCHEMA = cv.All(
             PLATFORM_ESP32,
             PLATFORM_ESP8266,
             PLATFORM_LN882X,
+            PLATFORM_XR806,
             PLATFORM_RTL87XX,
         ]
     ),

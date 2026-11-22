@@ -17,6 +17,7 @@ from esphome.const import (
     PLATFORM_ESP8266,
     PLATFORM_LN882X,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import TimePeriod
 
@@ -91,6 +92,7 @@ CONFIG_SCHEMA = cv.All(
             PLATFORM_BK72XX,
             PLATFORM_RTL87XX,
             PLATFORM_LN882X,
+            PLATFORM_XR806,
         ]
     ),
     network.require_ipv4("wireguard"),

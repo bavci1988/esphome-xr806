@@ -494,6 +494,7 @@ CONFIG_SCHEMA = cv.All(
                 rtl87xx=4,  # Moderate RAM, BSD-style sockets
                 host=4,  # Abundant resources
                 ln882x=4,  # Moderate RAM
+                xr806=4,  # Moderate RAM
                 nrf52=4,  # ~256KB RAM, BSD sockets
             ): cv.int_range(min=1, max=10),
             cv.SplitDefault(
@@ -505,6 +506,7 @@ CONFIG_SCHEMA = cv.All(
                 rtl87xx=5,  # Moderate RAM
                 host=8,  # Abundant resources
                 ln882x=5,  # Moderate RAM
+                xr806=5,  # Moderate RAM
                 nrf52=4,  # ~256KB RAM, BSD sockets, Thread (single HA controller)
             ): cv.int_range(min=1, max=20),
             # Max queued messages per connection, and 2 KB of backlog per slot up
@@ -520,6 +522,7 @@ CONFIG_SCHEMA = cv.All(
                 rtl87xx=8,  # Moderate RAM
                 host=16,  # Abundant resources
                 ln882x=8,  # Moderate RAM
+                xr806=8,  # Moderate RAM
             ): cv.int_range(min=1, max=64),
         }
     ).extend(cv.COMPONENT_SCHEMA),

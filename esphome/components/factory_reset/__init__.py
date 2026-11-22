@@ -9,6 +9,7 @@ from esphome.const import (
     PLATFORM_ESP8266,
     PLATFORM_LN882X,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import CORE
 from esphome.final_validate import full_config
@@ -33,6 +34,7 @@ def _validate(config: ConfigType) -> ConfigType:
                 PLATFORM_ESP32,
                 PLATFORM_ESP8266,
                 PLATFORM_LN882X,
+                PLATFORM_XR806,
                 PLATFORM_RTL87XX,
             ]
         )(config)

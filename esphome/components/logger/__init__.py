@@ -27,6 +27,7 @@ from esphome.const import (
     PLATFORM_NRF52,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
     PlatformFramework,
 )
 from esphome.core import CORE, ID, CoroPriority, Lambda, coroutine_with_priority
@@ -161,12 +162,14 @@ def _uart_selection_libretiny() -> dict[str, list[str]]:
         COMPONENT_BK72XX,
         COMPONENT_LN882X,
         COMPONENT_RTL87XX,
+        COMPONENT_XR806,
     )
 
     return {
         COMPONENT_BK72XX: [DEFAULT, UART1, UART2],
         COMPONENT_LN882X: [DEFAULT, UART0, UART1, UART2],
         COMPONENT_RTL87XX: [DEFAULT, UART0, UART1, UART2],
+        COMPONENT_XR806: [DEFAULT, UART0, UART1, UART2],
     }
 
 
@@ -366,6 +369,7 @@ CONFIG_SCHEMA = cv.All(
                 esp32=768,  # Default: 768 bytes (~5-6 messages with 70-byte text plus thread names)
                 bk72xx=768,
                 ln882x=768,
+                xr806=768,
                 rtl87xx=768,
                 nrf52=768,
             ): cv.All(
@@ -374,6 +378,7 @@ CONFIG_SCHEMA = cv.All(
                         PLATFORM_ESP32,
                         PLATFORM_BK72XX,
                         PLATFORM_LN882X,
+                        PLATFORM_XR806,
                         PLATFORM_RTL87XX,
                         PLATFORM_NRF52,
                     ]
@@ -407,6 +412,7 @@ CONFIG_SCHEMA = cv.All(
                 rp2=USB_CDC,
                 bk72xx=DEFAULT,
                 ln882x=DEFAULT,
+                xr806=DEFAULT,
                 rtl87xx=DEFAULT,
                 nrf52=USB_CDC,
                 nrf52_54lm20=USB_CDC,
@@ -422,6 +428,7 @@ CONFIG_SCHEMA = cv.All(
                         PLATFORM_RP2,
                         PLATFORM_BK72XX,
                         PLATFORM_LN882X,
+                        PLATFORM_XR806,
                         PLATFORM_RTL87XX,
                         PLATFORM_NRF52,
                     ]
@@ -855,6 +862,7 @@ FILTER_SOURCE_FILES = filter_source_files_from_platform(
             PlatformFramework.BK72XX_ARDUINO,
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
+            PlatformFramework.XR806_ARDUINO,
         },
         "logger_zephyr.cpp": {PlatformFramework.NRF52_ZEPHYR},
         "task_log_buffer_esp32.cpp": {
@@ -866,6 +874,7 @@ FILTER_SOURCE_FILES = filter_source_files_from_platform(
             PlatformFramework.BK72XX_ARDUINO,
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
+            PlatformFramework.XR806_ARDUINO,
         },
         "task_log_buffer_zephyr.cpp": {PlatformFramework.NRF52_ZEPHYR},
     }
