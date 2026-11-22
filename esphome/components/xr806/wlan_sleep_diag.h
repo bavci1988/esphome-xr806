@@ -115,6 +115,7 @@ inline const volatile uint32_t *app_address(uint32_t wlan_address) {
 // waits for the ALIVE bit ("Device cannot wakeup during 500ms" when it stays clear).
 static constexpr uint32_t POWER_CONTROL_BASE = 0x40040000;
 static constexpr uint32_t POWER_CONTROL_SIZE = 0x240;
+static constexpr uint32_t POWER_SYS3_CTRL = POWER_CONTROL_BASE + 0x90;           // bit 0 clear: domain held in reset
 static constexpr uint32_t POWER_SYS3_STATUS = POWER_CONTROL_BASE + 0x94;         // bit 0: alive
 static constexpr uint32_t POWER_WLAN_HIF_OVERRIDE = POWER_CONTROL_BASE + 0x21C;  // bit 2: wake request
 
@@ -153,13 +154,14 @@ struct Capture {
   uint32_t status_first{0}, hif_first{0}, status_last{0}, hif_last{0};
   uint32_t waited_ms{0};
   bool copied{false};
+  bool domain_reset{false};
   uint32_t *words{nullptr};
 };
 
 // Runs first after a wake that left the driver failed, with the scheduler stopped, so that the driver's recovery
 // task cannot reload the core's firmware before its memory is copied. The memory can only be read while the
 // core's power domain reports alive; reading it otherwise blocks the CPU. When it is not alive, the wake request
-// is set once more and the domain gets 300 ms.
+// is set once more and the domain gets 300 ms; after that the domain is reset with the WLAN processor held.
 XR806_DIAG_FLASH inline void capture(Capture &c) {
   c.words = static_cast<uint32_t *>(malloc(CAPTURE_WORDS * sizeof(uint32_t)));
   volatile uint32_t &hif = cpu_register(POWER_WLAN_HIF_OVERRIDE);
@@ -173,6 +175,18 @@ XR806_DIAG_FLASH inline void capture(Capture &c) {
       ++c.waited_ms;
     }
   }
+  if (!wlan_alive()) {
+    // The domain is down and the wake request does nothing. Take it through its reset, as the driver does for a
+    // restart of the WLAN, but hold the WLAN processor in reset so that it cannot run and overwrite its memory.
+    volatile uint32_t &sys3 = cpu_register(POWER_SYS3_CTRL);
+    c.domain_reset = true;
+    hif = hif | 0x2U;
+    sys3 = sys3 & ~0x1U;
+    delayMicroseconds(2000);
+    sys3 = sys3 | 0x1U;
+    for (uint32_t i = 0; i < 300 && !wlan_alive(); ++i)
+      delayMicroseconds(1000);
+  }
   if (wlan_alive() && c.words != nullptr) {
     uint32_t *out = c.words;
     for (const auto &region : REGIONS) {
@@ -184,6 +198,8 @@ XR806_DIAG_FLASH inline void capture(Capture &c) {
   }
   c.status_last = cpu_register(POWER_SYS3_STATUS);
   c.hif_last = hif;
+  if (c.domain_reset)
+    hif = hif & ~0x2U;
   OS_ThreadResumeScheduler();
 }
 
@@ -191,8 +207,10 @@ XR806_DIAG_FLASH inline void print_capture(Capture &c) {
   static const char *const TAG = "xr806.wlan_diag";
   ESP_LOGE(TAG,
            "WLAN core state: power status %08" PRIX32 " wake control %08" PRIX32 ", after %" PRIu32
-           " ms with the wake request set: %08" PRIX32 " / %08" PRIX32 ", memory %s",
-           c.status_first, c.hif_first, c.waited_ms, c.status_last, c.hif_last, c.copied ? "copied" : "not readable");
+           " ms with the wake request set%s: %08" PRIX32 " / %08" PRIX32 ", memory %s",
+           c.status_first, c.hif_first, c.waited_ms,
+           c.domain_reset ? LOG_STR_LITERAL(" and a reset of the domain") : LOG_STR_LITERAL(""), c.status_last,
+           c.hif_last, c.copied ? LOG_STR_LITERAL("copied") : LOG_STR_LITERAL("not readable"));
   dump_power_control("prcm");
   if (c.copied) {
     const uint32_t *w = c.words;
