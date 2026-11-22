@@ -190,7 +190,7 @@ XR806_DIAG_FLASH inline void capture(Capture &c) {
 XR806_DIAG_FLASH inline void print_capture(Capture &c) {
   static const char *const TAG = "xr806.wlan_diag";
   ESP_LOGE(TAG,
-           "WLAN core hung: power status %08" PRIX32 " wake control %08" PRIX32 ", after %" PRIu32
+           "WLAN core state: power status %08" PRIX32 " wake control %08" PRIX32 ", after %" PRIu32
            " ms with the wake request set: %08" PRIX32 " / %08" PRIX32 ", memory %s",
            c.status_first, c.hif_first, c.waited_ms, c.status_last, c.hif_last, c.copied ? "copied" : "not readable");
   dump_power_control("prcm");
@@ -270,7 +270,9 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
     const uint32_t wlan_ms = ((after.counter + after.offset) - (c.before.counter + c.before.offset)) / 1000;
     if (wlan_ms + 2000 < slept) {
       ESP_LOGE(TAG, "WLAN clock advanced only %" PRIu32 " of %" PRIu32 " ms: the core overslept", wlan_ms, slept);
-      dump_power_control("prcm");
+      // The core runs again, so its memory can be read: what it queued for the CPU and where it stood.
+      capture(hung);
+      print_capture(hung);
     } else if (c.count == 2) {
       dump_power_control("prcm-ok");  // reference values from a good cycle
     }
