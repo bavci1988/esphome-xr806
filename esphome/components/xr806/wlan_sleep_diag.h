@@ -10,6 +10,7 @@
 
 #include <cinttypes>
 #include <cstdint>
+#include <cstdlib>
 #include <malloc.h>
 
 #include "esphome/core/hal.h"
@@ -17,6 +18,7 @@
 #include "wlan_mib.h"
 
 extern "C" {
+#include "kernel/os/os_thread.h"
 #include "kernel/os/os_timer.h"
 #include "sys/sys_heap.h"
 extern volatile int skb_rx_cnt;  // libxrwireless: frames handed up by the WLAN driver
@@ -109,25 +111,6 @@ inline const volatile uint32_t *app_address(uint32_t wlan_address) {
   return reinterpret_cast<const volatile uint32_t *>(wlan_address | 0x60000000);
 }
 
-// Prints [start, end) as hex words, eight per line; lines that are all zero are left out.
-XR806_DIAG_FLASH inline void dump_words(const char *label, uint32_t start, uint32_t end) {
-  static const char *const TAG = "xr806.wlan_diag";
-  for (uint32_t address = start; address < end; address += 32) {
-    const volatile uint32_t *p = app_address(address);
-    uint32_t w[8];
-    uint32_t any = 0;
-    for (uint8_t i = 0; i < 8; ++i)
-      any |= w[i] = p[i];
-    if (any == 0)
-      continue;
-    ESP_LOGE(TAG,
-             "%s %08" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
-             " %08" PRIX32 " %08" PRIX32,
-             label, address, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
-    delay(3);  // lets the UART drain
-  }
-}
-
 // CPU-side power control block. SYS3 is the WLAN core's power domain: the driver wakes it with the WUP bit and
 // waits for the ALIVE bit ("Device cannot wakeup during 500ms" when it stays clear).
 static constexpr uint32_t POWER_CONTROL_BASE = 0x40040000;
@@ -152,48 +135,81 @@ XR806_DIAG_FLASH inline void dump_power_control(const char *label) {
   }
 }
 
-inline bool wait_alive(uint32_t timeout_ms) {
-  for (uint32_t i = 0; i < timeout_ms && !wlan_alive(); ++i)
-    delay(1);
-  return wlan_alive();
+// Parts of the WLAN core's memory that show where a hung core stands: scheduler words and timer list head,
+// clock, message ring for the CPU (+0xC read, +0x10 write index), receive counters, keepalive state, and all
+// stacks, which hold the return addresses and any exception frame.
+struct Region {
+  const char *label;
+  uint32_t start;
+  uint32_t words;
+};
+static constexpr Region REGIONS[] = {
+    {"sched", 0xFFF01C00, 40}, {"clock", 0xFFF05600, 16},     {"hostq", 0xFFF02AA0, 16},
+    {"rxcnt", 0xFFF02280, 32}, {"keepalive", 0x0900BB80, 72}, {"stack", 0xFFF0B000, 1024},
+};
+static constexpr uint32_t CAPTURE_WORDS = 40 + 16 + 16 + 32 + 72 + 1024;
+
+struct Capture {
+  uint32_t status_first{0}, hif_first{0}, status_last{0}, hif_last{0};
+  uint32_t waited_ms{0};
+  bool copied{false};
+  uint32_t *words{nullptr};
+};
+
+// Runs first after a wake that left the driver failed, with the scheduler stopped, so that the driver's recovery
+// task cannot reload the core's firmware before its memory is copied. The memory can only be read while the
+// core's power domain reports alive; reading it otherwise blocks the CPU. When it is not alive, the wake request
+// is set once more and the domain gets 300 ms.
+XR806_DIAG_FLASH inline void capture(Capture &c) {
+  c.words = static_cast<uint32_t *>(malloc(CAPTURE_WORDS * sizeof(uint32_t)));
+  volatile uint32_t &hif = cpu_register(POWER_WLAN_HIF_OVERRIDE);
+  OS_ThreadSuspendScheduler();
+  c.status_first = cpu_register(POWER_SYS3_STATUS);
+  c.hif_first = hif;
+  if (!wlan_alive()) {
+    hif = c.hif_first | 0x4U;
+    while (!wlan_alive() && c.waited_ms < 300) {
+      delayMicroseconds(1000);
+      ++c.waited_ms;
+    }
+  }
+  if (wlan_alive() && c.words != nullptr) {
+    uint32_t *out = c.words;
+    for (const auto &region : REGIONS) {
+      const volatile uint32_t *in = app_address(region.start);
+      for (uint32_t i = 0; i < region.words; ++i)
+        *out++ = in[i];
+    }
+    c.copied = true;
+  }
+  c.status_last = cpu_register(POWER_SYS3_STATUS);
+  c.hif_last = hif;
+  OS_ThreadResumeScheduler();
 }
 
-// State of a WLAN core that stopped answering. Its memory can only be read while its power domain is up, so the
-// CPU-side power registers come first, then attempts to bring the domain up, then the core's own state: where it
-// stands (its stacks hold the return addresses and any exception frame), what it waits for, what it queued.
-XR806_DIAG_FLASH inline void post_mortem() {
+XR806_DIAG_FLASH inline void print_capture(Capture &c) {
   static const char *const TAG = "xr806.wlan_diag";
+  ESP_LOGE(TAG,
+           "WLAN core hung: power status %08" PRIX32 " wake control %08" PRIX32 ", after %" PRIu32
+           " ms with the wake request set: %08" PRIX32 " / %08" PRIX32 ", memory %s",
+           c.status_first, c.hif_first, c.waited_ms, c.status_last, c.hif_last, c.copied ? "copied" : "not readable");
   dump_power_control("prcm");
-  bool alive = wlan_alive();
-  ESP_LOGE(TAG, "WLAN power domain alive: %d", alive ? 1 : 0);
-  if (!alive) {
-    alive = wait_alive(3000);
-    ESP_LOGE(TAG, "after waiting 3 s more: alive %d", alive ? 1 : 0);
+  if (c.copied) {
+    const uint32_t *w = c.words;
+    for (const auto &region : REGIONS) {
+      for (uint32_t i = 0; i < region.words; i += 8, w += 8) {
+        if ((w[0] | w[1] | w[2] | w[3] | w[4] | w[5] | w[6] | w[7]) == 0)
+          continue;
+        ESP_LOGE(TAG,
+                 "%s %08" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
+                 " %08" PRIX32 " %08" PRIX32,
+                 region.label, region.start + 4 * i, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+        delay(3);
+      }
+    }
   }
-  if (!alive) {
-    volatile uint32_t &hif = cpu_register(POWER_WLAN_HIF_OVERRIDE);
-    hif = hif & ~0x4U;
-    delay(20);
-    hif = hif | 0x4U;
-    alive = wait_alive(2000);
-    ESP_LOGE(TAG, "after a new wake request: alive %d", alive ? 1 : 0);
-    dump_power_control("prcm2");
-  }
-  if (!alive)
-    return;
-  dump_words("sched", 0xFFF01C00, 0xFFF01CA0);  // event words, reasons to stay awake, timer list head
-  uint32_t node = *app_address(TIMER_HEAD);
-  for (uint8_t i = 0; i < MAX_NODES && (node >> 20) == 0xFFF; ++i) {
-    dump_words("timer", node, node + 32);
-    node = *app_address(node);
-  }
-  dump_words("clock", CLOCK_OFFSET & ~0x1FU, (CLOCK_OFFSET & ~0x1FU) + 64);
-  dump_words("hostq", 0xFFF02AA0, 0xFFF02C80);  // ring of messages for the CPU: +0xC read, +0x10 write index
-  dump_words("rxcnt", 0xFFF02280, 0xFFF02300);
-  dump_words("keepalive", 0x0900BB80, 0x0900BCA0);
-  dump_words("stack", 0xFFF0B000, 0xFFF0C000);
-  dump_words("hwtimer", 0x0AC00000, 0x0AC00020);
-  dump_words("power", 0x0AA800A0, 0x0AA800C0);
+  free(c.words);
+  c.words = nullptr;
 }
 
 struct Cycle {
@@ -224,8 +240,12 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
   const uint32_t slept = millis() - c.start_ms;
   // Read first: the driver's recovery task clears the flag again within a moment.
   const bool failed = wlan_driver_failed();
+  Capture hung;
+  if (failed)
+    capture(hung);
   Snapshot after;
-  take(after);
+  if (!failed)  // a request to a failed driver only runs into its timeout
+    take(after);
   // Driver state behind a refused suspend (xr_wlan_suspend): its stay_awake timer and bh_error.
   auto *timer = reinterpret_cast<OS_Timer_t *>(xr_drv_common + 0x1C0);
   ESP_LOGI(TAG,
@@ -255,8 +275,8 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
       dump_power_control("prcm-ok");  // reference values from a good cycle
     }
   }
-  if (failed || (!after.ok && wlan_driver_failed()))
-    post_mortem();
+  if (failed)
+    print_capture(hung);
 }
 
 }  // namespace esphome::xr806::wlan_sleep_diag
