@@ -11,7 +11,8 @@ from esphome.components.xr806.build_support import wlan_fw_patch as patch_mod
 
 SECTION = 0x09009C00
 SECTION_SIZE = 0x1000
-CAVE = bytes(range(0x20, 0x20 + 92))
+# Stands in for the frame chooser; ends with the literal the peer data code reaches.
+CAVE = bytes(range(0x20, 0x20 + 88)) + struct.pack("<I", patch_mod.CAVE_LITERAL)
 # wlan_fw_keepalive.S as assembled with GNU as and checked in Unicorn against the firmware's data layout.
 CAVE_CHECKED = bytes.fromhex(
     "24e0ffe7059800281cd1707a06281bd130780007000f052816d3b079800613d1f079002810d1687b8006800e"
@@ -69,7 +70,17 @@ def test_patch_changes_the_code_and_keeps_the_checksum() -> None:
         == bytes.fromhex("00f0dcfa") + patch_mod.THUMB_NOP
     )
     assert _at(patched, patch_mod.CAVE_ADDRESS, len(CAVE)) == CAVE
-    assert _at(patched, patch_mod.PEER_DATA_ADDRESS, 2) == patch_mod.PEER_DATA_PATCHED
+    # ldr r2,=0x0900BC73; subs r2,#0x62; ldrb r2,[r2]; str r2,[sp]; movs r1,r0; movs r0,r4; bl 0x0900A720;
+    # ldr r1,[sp,#8]; cmp r1,#0; beq 0x0900A15E; ldr r0,[sp]; cmp r0,#1; bne 0x0900A220; nop
+    peer_data = _at(
+        patched, patch_mod.PEER_DATA_ADDRESS, len(patch_mod.PEER_DATA_STOCK)
+    )
+    assert peer_data[2:] == bytes.fromhex(
+        "623a127800920100200000f0e8fa0299002903d00098012861d1c046"
+    )
+    literal = ((patch_mod.PEER_DATA_ADDRESS + 4) & ~3) + 4 * peer_data[0]
+    assert peer_data[1] == 0x4A
+    assert _at(patched, literal, 4) == struct.pack("<I", patch_mod.CAVE_LITERAL)
 
 
 def test_patch_refuses_other_code() -> None:

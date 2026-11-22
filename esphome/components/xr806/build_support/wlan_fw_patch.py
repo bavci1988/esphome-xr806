@@ -16,8 +16,10 @@ server 0 sends a different, pre-encrypted frame each time Home Assistant acknowl
    acknowledgements and is no frame index. It is placed at 0x0900A3C8, in the UDP keepalive (0x0900A3C6), which is
    only used for servers with the UDP flag; ESPHome uses TCP only.
 3. The receive filter (0x0900A012) acknowledged data from the peer itself and dropped it, so a command from Home
-   Assistant never reached the host. Data segments are now passed to the host, which wakes it (0x0900A14E);
-   segments without data are still handled by the firmware.
+   Assistant never reached the host. Data segments are now passed to the host, which wakes it (0x0900A140);
+   segments without data are still handled by the firmware. A data segment that also acknowledges the frame in
+   flight is only used as that acknowledgement and dropped: passed on, it stalled the WLAN core. The peer sends
+   the data again and that copy wakes the host.
 4. The frame chooser also ends the keepalive after W frames, W being the byte at 0x0900BC73 (reserved1 of the
    keepalive configuration; 0 = off), which it counts down for every frame built, retries included: with frame W it
    sets the keepalive period (0x0900BC70) to 255 s. Keepalive entry 0 stays enabled, because the receive filter only
@@ -54,16 +56,26 @@ PAYLOAD_SOURCE_STOCK = bytes.fromhex(
     "0d99ca880831"
 )  # ldr r1,[sp,#0x34]; ldrh r2,[r1,#6]; adds r1,#8
 THUMB_NOP = bytes.fromhex("c046")  # mov r8, r8
-# After "cmp r1,#0; beq 0x0900A15E" (no data: done), data is acknowledged by the firmware and dropped.
-PEER_DATA_ADDRESS = 0x0900A14E
-PEER_DATA_STOCK = bytes.fromhex("0022")  # movs r2,#0: start of the acknowledgement
+# The acknowledgement handling of the receive filter: "adds r1,r0,r1; movs r0,r4; bl 0x0900A720; ldr r1,[sp,#8];
+# cmp r1,#0; beq 0x0900A15E", then the firmware acknowledges data itself and drops it. Replaced as a whole.
+PEER_DATA_ADDRESS = 0x0900A140
+PEER_DATA_STOCK = bytes.fromhex(
+    "4118200000f0ecfa0299002907d000220092029a079804992300fff744ff"
+)
+PEER_DATA_END = (
+    0x0900A15E  # movs r0,#1; str r0,[sp,#0xc]: the frame is used up, it is dropped
+)
+PEER_DATA_TO_HOST = 0x0900A220  # return [sp,#0x18], 0 here: the frame goes to the host
+ACK_HANDLER_ADDRESS = 0x0900A720
+IN_FLIGHT_ADDRESS = (
+    0x0900BC11  # server 0: 1 while a keepalive frame waits for its acknowledgement
+)
+CAVE_LITERAL = (
+    0x0900BC73  # a literal of the frame chooser, reused to reach IN_FLIGHT_ADDRESS
+)
 FILTER_DROP_ADDRESS = 0x0900A216
 # ldr r0,[sp,#0x14]; cmp r0,#0; bne 0x0900A220; movs r0,#1 (then str r0,[sp,#0x18])
 FILTER_DROP_STOCK = bytes.fromhex("0598002801d10120")
-PEER_DATA_PATCHED = bytes.fromhex(
-    "67e0"
-)  # b 0x0900A220: return 0, the frame goes to the host
-
 # Layout the host needs, as WLAN core addresses.
 FRAMES_PER_ENTRY_AREA = 128
 KEEPALIVE_ENTRIES = 3
@@ -81,6 +93,56 @@ def thumb_bl(source: int, target: int) -> bytes:
     first = 0xF000 | ((offset >> 12) & 0x7FF)
     second = 0xF800 | ((offset >> 1) & 0x7FF)
     return struct.pack("<HH", first, second)
+
+
+def _thumb(*halfwords: int) -> bytes:
+    return b"".join(struct.pack("<H", h) for h in halfwords)
+
+
+def peer_data_code(cave: bytes) -> bytes:
+    """The replacement for the acknowledgement handling at PEER_DATA_ADDRESS.
+
+    A segment from the peer can carry data and also acknowledge the keepalive frame in flight. Passing such a
+    segment to the sleeping host stalled the WLAN core, so only its acknowledgement is used and the segment is
+    dropped; the peer sends the data again, and that copy goes to the host because nothing is in flight then. The
+    firmware's own acknowledgement number no longer counts data from the peer, so the copy is not taken for old.
+    """
+    literal = cave.find(struct.pack("<I", CAVE_LITERAL))
+    while literal >= 0 and (CAVE_ADDRESS + literal) % 4:
+        literal = cave.find(struct.pack("<I", CAVE_LITERAL), literal + 1)
+    base = (PEER_DATA_ADDRESS + 4) & ~3
+    distance = CAVE_ADDRESS + literal - base
+    if literal < 0 or not 0 <= distance <= 1020:
+        raise WlanFirmwarePatchError("frame chooser literal not reachable")
+    bl_address = PEER_DATA_ADDRESS + 12
+    beq_address = PEER_DATA_ADDRESS + 20
+    bne_address = PEER_DATA_ADDRESS + 26
+    code = (
+        _thumb(
+            0x4A00 | (distance // 4),  # ldr r2,=CAVE_LITERAL
+            0x3A00 | (CAVE_LITERAL - IN_FLIGHT_ADDRESS),  # subs r2,#...
+            0x7812,  # ldrb r2,[r2]
+            0x9200,  # str r2,[sp]: in flight before the handler clears it
+            0x0001,  # movs r1,r0: the new acknowledgement number is the sequence number, without the data
+            0x0020,  # movs r0,r4
+        )
+        + thumb_bl(bl_address, ACK_HANDLER_ADDRESS)
+        + _thumb(
+            0x9902,  # ldr r1,[sp,#8]: data length
+            0x2900,  # cmp r1,#0
+            0xD000 | ((PEER_DATA_END - beq_address - 4) // 2),  # beq: no data, done
+            0x9800,  # ldr r0,[sp]
+            0x2801,  # cmp r0,#1
+            0xD100
+            | (
+                (PEER_DATA_TO_HOST - bne_address - 4) // 2
+            ),  # bne: nothing was in flight, to the host
+            0x46C0,  # nop; falls into PEER_DATA_END: drop, the peer sends the data again
+        )
+    )
+    if len(code) != len(PEER_DATA_STOCK):
+        raise WlanFirmwarePatchError("peer data code has the wrong size")
+    return code
 
 
 def _load_records(image: bytes) -> list[tuple[int, int, int]]:
@@ -182,7 +244,7 @@ def patch(stock: bytes, cave: bytes, verify_hash: bool = True) -> bytes:
             thumb_bl(FILTER_DROP_ADDRESS, CAVE_FILTER_ENTRY) + THUMB_NOP * 2,
         ),
         (CAVE_ADDRESS, None, cave),
-        (PEER_DATA_ADDRESS, PEER_DATA_STOCK, PEER_DATA_PATCHED),
+        (PEER_DATA_ADDRESS, PEER_DATA_STOCK, peer_data_code(cave)),
     )
     for address, expected, new in changes:
         offset = _file_offset(records, address, len(new))
