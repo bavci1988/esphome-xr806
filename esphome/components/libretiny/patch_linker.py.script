@@ -78,6 +78,7 @@ KNOWN_VARIANTS = frozenset({
     "LN882H",
     "RTL8710B",
     "RTL8720C",
+    "XR806",
 })
 
 
@@ -92,6 +93,7 @@ def _inject_keep(host_section):
 
 # Variants not listed here intentionally have no .ld patcher:
 # - RTL8720C: stock linker already consumes *(.sram.text*) into .ram.code_text.
+# - XR806: the LibreTiny linker script consumes *(.sram.text*) into the RAM .text.
 # - BK72xx (all): SDK masks FIQ+IRQ around flash writes, IRAM_ATTR is no-op.
 _PATCHERS_BY_VARIANT = {
     "LN882H": (_inject_keep(_LN_COPY),),

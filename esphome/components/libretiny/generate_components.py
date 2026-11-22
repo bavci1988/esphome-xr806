@@ -138,6 +138,7 @@ COMPONENT_MAP = {
     "rtl87xx": "realtek-amb",
     "bk72xx": "beken-72xx",
     "ln882x": "lightning-ln882x",
+    "xr806": "xradio-xr80x",
 }
 
 # Components with Cortex-M4(F) have LDREX/STREX for native atomic support.
@@ -146,11 +147,13 @@ COMPONENT_SUPPORTS_ATOMICS = {
     "rtl87xx": True,  # Cortex-M4
     "ln882x": True,  # Cortex-M4F
     "bk72xx": False,  # ARM968E-S
+    "xr806": True,  # Cortex-M33
 }
 
 # CODEOWNERS for each component. If not specified, defaults to @kuba2k2.
 COMPONENT_CODEOWNERS = {
     "ln882x": ["@lamauny"],
+    "xr806": ["@bavci1988"],
 }
 
 # Extra imports per component; the CLI looks up process_stacktrace on the platform package.
@@ -158,6 +161,7 @@ COMPONENT_EXTRA_IMPORTS = {
     "bk72xx": "from esphome.stacktrace import process_crash_handler_line as process_stacktrace  # noqa: F401",
     "ln882x": "from esphome.stacktrace import process_crash_handler_line as process_stacktrace  # noqa: F401",
     "rtl87xx": "from esphome.stacktrace import process_crash_handler_line as process_stacktrace  # noqa: F401",
+    "xr806": "from esphome.stacktrace import process_crash_handler_line as process_stacktrace  # noqa: F401",
 }
 
 

@@ -16,6 +16,8 @@
 // LibreTiny families that need it share the same .sram.text input section
 // name; how that section is routed into RAM differs per family:
 //   RTL8720C: stock linker consumes *(.sram.text*) into .ram.code_text.
+//   XR806:    the LibreTiny linker script consumes *(.sram.text*) into the
+//             RAM .text section.
 //   RTL8710B: patch_linker.py.script injects KEEP(*(.sram.text*)) at the
 //             top of .ram_image2.data (which IS in ltchiptool's
 //             sections_ram). The stock linker has KEEP(*(.image2.ram.text*))
@@ -105,7 +107,7 @@ __attribute__((always_inline)) inline uint32_t micros() { return static_cast<uin
 #if defined(USE_LIBRETINY_VARIANT_RTL8710B)
 // The RTL8710B tick is 976.6 us; millis() comes from the system timer instead (rtl8710b_micros.c)
 __attribute__((always_inline)) inline uint32_t millis() { return static_cast<uint32_t>(::millis()); }
-#elif defined(USE_RTL87XX) || defined(USE_LN882X)
+#elif defined(USE_RTL87XX) || defined(USE_LN882X) || defined(USE_XR806)
 static_assert(configTICK_RATE_HZ == 1000, "millis() fast path requires 1 kHz FreeRTOS tick");
 __attribute__((always_inline)) inline uint32_t millis() {
   // xTaskGetTickCountFromISR is mandatory in interrupt context per the FreeRTOS API contract.
