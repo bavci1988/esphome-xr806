@@ -17,6 +17,7 @@ from esphome.const import (
     PLATFORM_LN882X,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 
 # First byte of an ESP32 or ESP8266 app or bootloader image
@@ -45,6 +46,7 @@ _UF2_FAMILIES = {
     0xA38090A8: PLATFORM_LN882X,  # LN882H
     0x22E0D6FC: PLATFORM_RTL87XX,  # RTL8710B
     0xE08F7564: PLATFORM_RTL87XX,  # RTL8720C
+    0x2A9F8E6C: PLATFORM_XR806,  # XR806
 }
 
 # RP2040 flash starts with a 252 byte second stage bootloader and its CRC

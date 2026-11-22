@@ -24,6 +24,7 @@ from esphome.const import (
     PLATFORM_LN882X,
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
+    PLATFORM_XR806,
 )
 from esphome.core import EsphomeError
 from esphome.helpers import ProgressBar, resolve_ip_address
@@ -37,6 +38,8 @@ DEFAULT_OTA_PORTS: dict[str, int] = {
     PLATFORM_BK72XX: 8892,
     PLATFORM_LN882X: 8820,
     PLATFORM_RTL87XX: 8892,
+    # the port of the native XR806 port, so that a device keeps it when it moves to LibreTiny
+    PLATFORM_XR806: 3232,
     PLATFORM_HOST: 8082,
 }
 

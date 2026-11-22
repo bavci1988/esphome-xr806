@@ -60,6 +60,7 @@ class Platform(StrEnum):
     # Scheduled for removal in 2027.7.0.
     RP2040 = "rp2"
     RTL87XX = "rtl87xx"
+    XR806 = "xr806"
     STM32 = "stm32"
 
 
@@ -119,6 +120,7 @@ class PlatformFramework(Enum):
     BK72XX_ARDUINO = (Platform.BK72XX, Framework.ARDUINO)
     RTL87XX_ARDUINO = (Platform.RTL87XX, Framework.ARDUINO)
     LN882X_ARDUINO = (Platform.LN882X, Framework.ARDUINO)
+    XR806_ARDUINO = (Platform.XR806, Framework.ARDUINO)
 
     # Zephyr framework platforms
     NRF52_ZEPHYR = (Platform.NRF52, Framework.ZEPHYR)
@@ -140,6 +142,7 @@ PLATFORM_RP2 = Platform.RP2
 # scheduled for removal in 2027.7.0.
 PLATFORM_RP2040 = Platform.RP2040
 PLATFORM_RTL87XX = Platform.RTL87XX
+PLATFORM_XR806 = Platform.XR806
 PLATFORM_STM32 = Platform.STM32
 
 

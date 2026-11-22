@@ -33,6 +33,7 @@ from esphome.const import (
     PLATFORM_RP2,
     PLATFORM_RTL87XX,
     PLATFORM_STM32,
+    PLATFORM_XR806,
     ErrorFormat,
     Toolchain,
 )
@@ -1017,8 +1018,12 @@ class EsphomeCore:
         return self.target_platform == PLATFORM_LN882X
 
     @property
+    def is_xr806(self):
+        return self.target_platform == PLATFORM_XR806
+
+    @property
     def is_libretiny(self):
-        return self.is_bk72xx or self.is_rtl87xx or self.is_ln882x
+        return self.is_bk72xx or self.is_rtl87xx or self.is_ln882x or self.is_xr806
 
     @property
     def is_nrf52(self):

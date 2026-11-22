@@ -38,7 +38,7 @@ class MillisInternal {
 #elif defined(USE_LIBRETINY_VARIANT_RTL8710B)
     // The tick is 976.6 us here, so millis() reads the system timer (rtl8710b_micros.c)
     return millis();
-#elif defined(USE_LIBRETINY) && (defined(USE_RTL87XX) || defined(USE_LN882X))
+#elif defined(USE_LIBRETINY) && (defined(USE_RTL87XX) || defined(USE_LN882X) || defined(USE_XR806))
     // 1 kHz: xTaskGetTickCount() is already ms.
     static_assert(configTICK_RATE_HZ == 1000, "MillisInternal fast path requires 1 kHz FreeRTOS tick");
     return xTaskGetTickCount();

@@ -1046,6 +1046,7 @@ _filter_platform_sources = filter_source_files_from_platform(
             PlatformFramework.BK72XX_ARDUINO,
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
+            PlatformFramework.XR806_ARDUINO,
         },
         "lwip_fast_select.c": {
             PlatformFramework.ESP32_ARDUINO,
@@ -1053,12 +1054,14 @@ _filter_platform_sources = filter_source_files_from_platform(
             PlatformFramework.BK72XX_ARDUINO,
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
+            PlatformFramework.XR806_ARDUINO,
         },
         "time_64.cpp": {
             PlatformFramework.ESP8266_ARDUINO,
             PlatformFramework.BK72XX_ARDUINO,
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
+            PlatformFramework.XR806_ARDUINO,
         },
         # Per-platform wake implementations — wake.h dispatches to exactly one of
         # these based on USE_*, so the others can be skipped at the source level
@@ -1070,6 +1073,7 @@ _filter_platform_sources = filter_source_files_from_platform(
             PlatformFramework.BK72XX_ARDUINO,
             PlatformFramework.RTL87XX_ARDUINO,
             PlatformFramework.LN882X_ARDUINO,
+            PlatformFramework.XR806_ARDUINO,
         },
         "wake/wake_esp8266.cpp": {
             PlatformFramework.ESP8266_ARDUINO,
