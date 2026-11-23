@@ -34,6 +34,7 @@ from esphome.stacktrace import process_crash_handler_line as process_stacktrace 
 from esphome.types import ConfigType
 
 from .boards import XR806_BOARD_PINS, XR806_BOARDS
+from .gpio import validate_pin
 from .schema import (
     COMPONENT_SCHEMA,
     FINAL_VALIDATE_SCHEMA,  # noqa: F401
@@ -49,7 +50,7 @@ COMPONENT_DATA = LibreTinyComponent(
     name=COMPONENT_XR806,
     boards=XR806_BOARDS,
     board_pins=XR806_BOARD_PINS,
-    pin_validation=None,
+    pin_validation=validate_pin,
     usage_validation=None,
     supports_atomics=True,
 )
