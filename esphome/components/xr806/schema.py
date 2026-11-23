@@ -4,7 +4,14 @@ from esphome import final_validate as fv, pins
 import esphome.codegen as cg
 from esphome.components.const import CONF_ENABLED
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_PROTOCOL, CONF_UART_ID
+from esphome.const import (
+    CONF_ID,
+    CONF_KEEPALIVE,
+    CONF_PLATFORM,
+    CONF_PROTOCOL,
+    CONF_REBOOT_TIMEOUT,
+    CONF_UART_ID,
+)
 from esphome.core import CORE, ID
 from esphome.types import ConfigType
 
@@ -177,10 +184,75 @@ def _final_validate_options(config: ConfigType) -> ConfigType:
             "another component already uses this GPIO",
             path=[CONF_STANDBY, CONF_WAKE_PIN],
         )
-    # UART_BUSY has a single owner.
-    if len(fv.full_config.get().get("uart", [])) > 1:
-        raise cv.Invalid("xr806.standby supports one uart bus", path=[CONF_STANDBY])
+    _final_validate_standby_reachable(config)
     return config
+
+
+def _final_validate_standby_reachable(config: ConfigType) -> None:
+    """Refuse configurations in which a service owner never lets the chip sleep."""
+    full_config = fv.full_config.get()
+    wlan = config[CONF_WLAN]
+    uart_configs = full_config.get("uart", [])
+    # UART_BUSY has a single owner, and only the Tuya low_power host owns the UART.
+    if len(uart_configs) > 1:
+        raise cv.Invalid("xr806.standby supports one uart bus", path=[CONF_STANDBY])
+    tuya_config = full_config.get("tuya")
+    if uart_configs and not (
+        isinstance(tuya_config, dict) and tuya_config.get(CONF_PROTOCOL) == "low_power"
+    ):
+        raise cv.Invalid(
+            "xr806.standby with a uart bus needs tuya with protocol: low_power, "
+            "which decides with the MCU when the UART is idle",
+            path=[CONF_STANDBY],
+        )
+    if "wifi" in full_config and not (
+        wlan[CONF_NETWORK_SUSPEND] or wlan[CONF_STAY_CONNECTED]
+    ):
+        raise cv.Invalid(
+            "xr806.standby with wifi needs xr806.wlan network_suspend or stay_connected; "
+            "otherwise the WLAN link never lets the chip sleep",
+            path=[CONF_WLAN],
+        )
+    if (api_config := full_config.get("api")) is not None and (
+        "outgoing_connection" in api_config
+    ):
+        raise cv.Invalid(
+            "xr806.standby does not support api outgoing_connection, "
+            "which can start network work at any time",
+            path=[CONF_STANDBY],
+        )
+    mqtt_config = full_config.get("mqtt")
+    if wlan[CONF_STAY_CONNECTED] and mqtt_config is not None:
+        keepalive = mqtt_config[CONF_KEEPALIVE]
+        if (
+            config[CONF_STANDBY][CONF_WAKE_AFTER].total_milliseconds
+            >= keepalive.total_milliseconds
+        ):
+            raise cv.Invalid(
+                f"With mqtt and xr806.wlan.stay_connected, xr806.standby.wake_after must be "
+                f"shorter than the mqtt keepalive ({keepalive}), or the broker drops the connection",
+                path=[CONF_STANDBY, CONF_WAKE_AFTER],
+            )
+    if not wlan[CONF_NETWORK_SUSPEND]:
+        return
+    if any(
+        item.get(CONF_PLATFORM) != "web_server" for item in full_config.get("ota", [])
+    ):
+        raise cv.Invalid(
+            "xr806.wlan.network_suspend works only with ota platform web_server: the "
+            "native OTA listener cannot be parked; use stay_connected instead",
+            path=[CONF_WLAN, CONF_NETWORK_SUSPEND],
+        )
+    for domain, domain_config in (("api", api_config), ("mqtt", mqtt_config)):
+        if (
+            domain_config is not None
+            and domain_config[CONF_REBOOT_TIMEOUT].total_milliseconds
+        ):
+            raise cv.Invalid(
+                f"With xr806.wlan.network_suspend, no {domain} connection lasts through a "
+                f"standby: set {domain} reboot_timeout: 0s, or the device keeps rebooting",
+                path=[CONF_WLAN, CONF_NETWORK_SUSPEND],
+            )
 
 
 FINAL_VALIDATE_SCHEMA = _final_validate_options
