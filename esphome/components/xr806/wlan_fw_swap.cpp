@@ -7,6 +7,7 @@
 
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/core/application.h"
+#include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
 #include "esphome/core/log.h"
@@ -67,6 +68,10 @@ static constexpr uint32_t RESTART_DELAY_MS = 500;
 // With load_at_boot: after this many starts in a row without a confirmed connection on the patched firmware, the
 // stock one is used until the next firmware update.
 static constexpr uint8_t BOOT_ATTEMPTS = 3;
+// After a hang the driver's own recovery task runs for a moment; requests to the driver in that window fault the CPU.
+static constexpr uint32_t RECOVERY_DELAY_MS = 3000;
+// A second hang this soon after a restart of the core: the device restarts instead.
+static constexpr uint32_t RECOVERY_REPEAT_MS = 10 * 60 * 1000;
 
 // The first patched instruction pair (two Thumb NOPs where the stock firmware calls the keepalive send), read back
 // from the running WLAN core to confirm the patched firmware was loaded.
@@ -74,6 +79,7 @@ static constexpr uint32_t PATCH_CHECK_ADDRESS = 0x0900A374;
 static constexpr uint32_t PATCH_CHECK_VALUE = 0x46C046C0;
 
 static bool patched_active = false;
+static XR806WlanFirmwareSwap *instance = nullptr;
 
 static bool patched_code_running() {
   uint32_t word = 0;
@@ -82,12 +88,34 @@ static bool patched_code_running() {
 
 bool wlan_fw_patched_active() { return patched_active; }
 
+bool wlan_fw_recover_after_hang() { return instance != nullptr && instance->request_recovery(); }
+
+bool XR806WlanFirmwareSwap::request_recovery() {
+  auto *wifi = wifi::global_wifi_component;
+  const uint32_t now = millis();
+  if (wifi == nullptr || this->recovering_ ||
+      (this->recovered_ms_ != 0 && now - this->recovered_ms_ < RECOVERY_REPEAT_MS))
+    return false;
+  this->restart_patched_ = patched_active || this->phase_ == Phase::VERIFY || this->phase_ == Phase::RESTART;
+  ESP_LOGW(TAG, "Restarting the WLAN core with the %s firmware after it hung in standby",
+           this->restart_patched_ ? LOG_STR_LITERAL("patched") : LOG_STR_LITERAL("stock"));
+  patched_active = false;
+  this->recovering_ = true;
+  this->recovered_ms_ = now;
+  wifi->disable();
+  this->phase_ = Phase::RESTART;
+  this->since_ms_ = now;
+  this->enable_loop();
+  return true;
+}
+
 void XR806WlanFirmwareSwap::setup() {
+  instance = this;
 #ifdef USE_XR806_WLAN_FW_LOAD_AT_BOOT
   // Counts starts on the patched firmware; a confirmed connection resets it. Keyed by the build, so an update
   // tries the patched firmware again.
-  this->attempts_pref_ = global_preferences->make_preference<uint8_t>(fnv1_hash("xr806_wlan_fw") ^
-                                                                      App.get_config_hash());
+  this->attempts_pref_ =
+      global_preferences->make_preference<uint8_t>(fnv1_hash("xr806_wlan_fw") ^ App.get_config_hash());
   uint8_t attempts = 0;
   this->attempts_pref_.load(&attempts);
   if (attempts >= BOOT_ATTEMPTS) {
@@ -95,8 +123,8 @@ void XR806WlanFirmwareSwap::setup() {
     this->phase_ = Phase::FALLBACK;
     return;
   }
-  ESP_LOGI(TAG, "Patched WLAN firmware served at boot (%" PRIu32 " bytes), start %u of %u", served_bytes,
-           attempts + 1, BOOT_ATTEMPTS);
+  ESP_LOGI(TAG, "Patched WLAN firmware served at boot (%" PRIu32 " bytes), start %u of %u", served_bytes, attempts + 1,
+           BOOT_ATTEMPTS);
   ++attempts;
   this->attempts_pref_.save(&attempts);
   global_preferences->sync();
@@ -154,9 +182,9 @@ void XR806WlanFirmwareSwap::loop() {
       this->since_ms_ = now;
       return;
     case Phase::RESTART:
-      if (now - this->since_ms_ < RESTART_DELAY_MS)
+      if (now - this->since_ms_ < (this->recovering_ ? RECOVERY_DELAY_MS : RESTART_DELAY_MS))
         return;
-      this->restart_wlan_(true);
+      this->restart_wlan_(this->restart_patched_);
       wifi->enable();
       this->phase_ = Phase::VERIFY;
       this->since_ms_ = now;
@@ -165,6 +193,14 @@ void XR806WlanFirmwareSwap::loop() {
       if (this->since_ms_ == 0)
         this->since_ms_ = now;
       if (connected) {
+        if (this->recovering_) {
+          this->recovering_ = false;
+          ESP_LOGI(TAG, "Station connected again after the WLAN core restart");
+          if (!this->restart_patched_) {
+            this->phase_ = Phase::STOCK;
+            return;
+          }
+        }
         if (patched_code_running()) {
           patched_active = true;
           ESP_LOGI(TAG, "Station connected; the WLAN core runs the patched firmware");
@@ -182,6 +218,12 @@ void XR806WlanFirmwareSwap::loop() {
       }
       if (now - this->since_ms_ < VERIFY_MS)
         return;
+      if (this->recovering_) {
+        ESP_LOGE(TAG, "No connection after the WLAN core restart; restarting");
+        global_preferences->sync();
+        delay(100);  // let the log reach the UART
+        arch_restart();
+      }
       ESP_LOGW(TAG, "No connection with the patched WLAN firmware; back to the stock firmware until the next boot");
       this->fall_back_(wifi);
       return;

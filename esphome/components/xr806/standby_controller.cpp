@@ -20,8 +20,10 @@ extern "C" {
 #include "lowpower_policy.h"
 #include "wlan_sleep_diag.h"
 #include "wlan_mib.h"
+#include "wlan_power.h"
 #ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
 #include "api_keepalive_offload.h"
+#include "wlan_fw_swap.h"
 #endif
 
 #include "esphome/core/application.h"
@@ -446,12 +448,27 @@ abort:
 #ifdef USE_WIFI
   if (pm_called && (wlan_failed || wlan_driver_failed())) {
     // The WLAN core hung during standby ("Device cannot wakeup"). The driver's own recovery does not bring it back,
-    // and the next request to the driver (from the WLAN component, for example its fallback AP) faults the CPU.
+    // and the next request to the driver (from the WLAN component, for example its fallback AP) faults the CPU
+    // while the domain is down. With the firmware swap component the core is restarted, otherwise the device.
     // Only after the wake sources are released above: pin settings survive the restart.
-    ESP_LOGE(TAG, "The WLAN core stopped answering during standby; restarting");
-    global_preferences->sync();
-    delay(100);  // let the log reach the UART
-    arch_restart();
+    // Bring the power domain back first: with it down, every access to the core blocks the CPU.
+    const uint8_t revived = wlan_power::revive_domain();
+    ESP_LOGE(TAG, "The WLAN core stopped answering during standby; its power domain %s",
+             revived == 0   ? LOG_STR_LITERAL("was up")
+             : revived == 1 ? LOG_STR_LITERAL("came up on the wake request")
+             : revived == 2 ? LOG_STR_LITERAL("came up after a reset")
+                            : LOG_STR_LITERAL("stays down"));
+#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
+    const bool recovering = revived != 3 && wlan_fw_recover_after_hang();
+#else
+    const bool recovering = false;
+#endif
+    if (!recovering) {
+      ESP_LOGE(TAG, "Restarting");
+      global_preferences->sync();
+      delay(100);  // let the log reach the UART
+      arch_restart();
+    }
   }
 #endif
 

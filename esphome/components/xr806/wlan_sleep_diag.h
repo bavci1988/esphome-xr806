@@ -10,12 +10,15 @@
 
 #include <cinttypes>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <malloc.h>
 
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "wlan_mib.h"
+#include "wlan_power.h"
 
 extern "C" {
 #include "kernel/os/os_thread.h"
@@ -111,29 +114,66 @@ inline const volatile uint32_t *app_address(uint32_t wlan_address) {
   return reinterpret_cast<const volatile uint32_t *>(wlan_address | 0x60000000);
 }
 
-// CPU-side power control block. SYS3 is the WLAN core's power domain: the driver wakes it with the WUP bit and
-// waits for the ALIVE bit ("Device cannot wakeup during 500ms" when it stays clear).
-static constexpr uint32_t POWER_CONTROL_BASE = 0x40040000;
-static constexpr uint32_t POWER_CONTROL_SIZE = 0x240;
-static constexpr uint32_t POWER_SYS3_CTRL = POWER_CONTROL_BASE + 0x90;           // bit 0 clear: domain held in reset
-static constexpr uint32_t POWER_SYS3_STATUS = POWER_CONTROL_BASE + 0x94;         // bit 0: alive
-static constexpr uint32_t POWER_WLAN_HIF_OVERRIDE = POWER_CONTROL_BASE + 0x21C;  // bit 2: wake request
+using wlan_power::cpu_register;
+using wlan_power::POWER_CONTROL_BASE;
+using wlan_power::POWER_CONTROL_SIZE;
+using wlan_power::POWER_SYS3_STATUS;
+using wlan_power::POWER_WLAN_HIF_OVERRIDE;
+using wlan_power::wlan_alive;
+static constexpr uint32_t POWER_WORDS = POWER_CONTROL_SIZE / 4;
 
-inline volatile uint32_t &cpu_register(uint32_t address) { return *reinterpret_cast<volatile uint32_t *>(address); }
-inline bool wlan_alive() { return (cpu_register(POWER_SYS3_STATUS) & 1) != 0; }
+XR806_DIAG_FLASH inline void read_power_control(uint32_t *out) {
+  for (uint32_t i = 0; i < POWER_WORDS; ++i)
+    out[i] = cpu_register(POWER_CONTROL_BASE + 4 * i);
+}
 
-XR806_DIAG_FLASH inline void dump_power_control(const char *label) {
+// Prints the power control block in rows of eight words: from words, or read now when words is null. With
+// reference, only the rows that differ from it.
+XR806_DIAG_FLASH inline void print_power_control(const char *label, const uint32_t *words,
+                                                 const uint32_t *reference = nullptr) {
   static const char *const TAG = "xr806.wlan_diag";
-  for (uint32_t address = POWER_CONTROL_BASE; address < POWER_CONTROL_BASE + POWER_CONTROL_SIZE; address += 32) {
-    uint32_t w[8];
-    for (uint8_t i = 0; i < 8; ++i)
-      w[i] = cpu_register(address + 4 * i);
+  for (uint32_t row = 0; row < POWER_WORDS; row += 8) {
+    uint32_t live[8];
+    const uint32_t *w = words != nullptr ? words + row : live;
+    if (words == nullptr) {
+      for (uint8_t i = 0; i < 8; ++i)
+        live[i] = cpu_register(POWER_CONTROL_BASE + 4 * (row + i));
+    }
+    if (reference != nullptr && memcmp(w, reference + row, 8 * sizeof(uint32_t)) == 0)
+      continue;
+    const uint32_t address = POWER_CONTROL_BASE + 4 * row;
     ESP_LOGE(TAG,
              "%s %03" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
              " %08" PRIX32 " %08" PRIX32,
              label, address - POWER_CONTROL_BASE, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
     delay(3);
   }
+}
+
+XR806_DIAG_FLASH inline void dump_power_control(const char *label) { print_power_control(label, nullptr); }
+
+// Power words that a hang changes: LDO and power switch status (0x004, bit 14: switch 5), the WLAN domain's control
+// and status (0x090, 0x094) and the block from DCDC parameters to the WLAN override (0x200-0x22C).
+static constexpr uint16_t POWER_LINE_OFFSETS[] = {0x004, 0x090, 0x094, 0x200, 0x204, 0x208, 0x20C, 0x210,
+                                                  0x214, 0x218, 0x21C, 0x220, 0x224, 0x228, 0x22C};
+static constexpr size_t POWER_LINE_WORDS = sizeof(POWER_LINE_OFFSETS) / sizeof(POWER_LINE_OFFSETS[0]);
+
+XR806_DIAG_FLASH inline void read_power_line(uint32_t *out) {
+  for (size_t i = 0; i < POWER_LINE_WORDS; ++i)
+    out[i] = cpu_register(POWER_CONTROL_BASE + POWER_LINE_OFFSETS[i]);
+}
+
+// One line, only when the words differ from the last line printed with the same label slot.
+XR806_DIAG_FLASH inline void print_power_line(const char *label, const uint32_t *words, uint32_t *last) {
+  static const char *const TAG = "xr806.wlan_diag";
+  if (memcmp(words, last, POWER_LINE_WORDS * sizeof(uint32_t)) == 0)
+    return;
+  memcpy(last, words, POWER_LINE_WORDS * sizeof(uint32_t));
+  char text[POWER_LINE_WORDS * 9 + 1];
+  size_t pos = 0;
+  for (size_t i = 0; i < POWER_LINE_WORDS; ++i)
+    pos += snprintf(text + pos, sizeof(text) - pos, " %08" PRIX32, words[i]);
+  ESP_LOGI(TAG, "power %s (004 090 094 200..22C, printed on change):%s", label, text);
 }
 
 // Parts of the WLAN core's memory that show where a hung core stands: scheduler words and timer list head,
@@ -148,7 +188,9 @@ static constexpr Region REGIONS[] = {
     {"sched", 0xFFF01C00, 40}, {"clock", 0xFFF05600, 16},     {"hostq", 0xFFF02AA0, 16},
     {"rxcnt", 0xFFF02280, 32}, {"keepalive", 0x0900BB80, 72}, {"stack", 0xFFF0B000, 1024},
 };
-static constexpr uint32_t CAPTURE_WORDS = 40 + 16 + 16 + 32 + 72 + 1024;
+static constexpr uint32_t MEMORY_WORDS = 40 + 16 + 16 + 32 + 72 + 1024;
+// The buffer also holds the power control block as found, before the wake request or the reset changes it.
+static constexpr uint32_t CAPTURE_WORDS = MEMORY_WORDS + POWER_WORDS;
 
 struct Capture {
   uint32_t status_first{0}, hif_first{0}, status_last{0}, hif_last{0};
@@ -166,26 +208,18 @@ XR806_DIAG_FLASH inline void capture(Capture &c) {
   c.words = static_cast<uint32_t *>(malloc(CAPTURE_WORDS * sizeof(uint32_t)));
   volatile uint32_t &hif = cpu_register(POWER_WLAN_HIF_OVERRIDE);
   OS_ThreadSuspendScheduler();
+  if (c.words != nullptr)
+    read_power_control(c.words + MEMORY_WORDS);
   c.status_first = cpu_register(POWER_SYS3_STATUS);
   c.hif_first = hif;
   if (!wlan_alive()) {
-    hif = c.hif_first | 0x4U;
-    while (!wlan_alive() && c.waited_ms < 300) {
-      delayMicroseconds(1000);
-      ++c.waited_ms;
-    }
+    hif = c.hif_first | wlan_power::HIF_WAKE;
+    wlan_power::wait_alive(300, &c.waited_ms);
   }
   if (!wlan_alive()) {
-    // The domain is down and the wake request does nothing. Take it through its reset, as the driver does for a
-    // restart of the WLAN, but hold the WLAN processor in reset so that it cannot run and overwrite its memory.
-    volatile uint32_t &sys3 = cpu_register(POWER_SYS3_CTRL);
+    // The domain is down and the wake request does nothing.
     c.domain_reset = true;
-    hif = hif | 0x2U;
-    sys3 = sys3 & ~0x1U;
-    delayMicroseconds(2000);
-    sys3 = sys3 | 0x1U;
-    for (uint32_t i = 0; i < 300 && !wlan_alive(); ++i)
-      delayMicroseconds(1000);
+    wlan_power::reset_domain(true);
   }
   if (wlan_alive() && c.words != nullptr) {
     uint32_t *out = c.words;
@@ -199,7 +233,7 @@ XR806_DIAG_FLASH inline void capture(Capture &c) {
   c.status_last = cpu_register(POWER_SYS3_STATUS);
   c.hif_last = hif;
   if (c.domain_reset)
-    hif = hif & ~0x2U;
+    hif = hif & ~wlan_power::HIF_HOLD_CPU;
   OS_ThreadResumeScheduler();
 }
 
@@ -211,7 +245,11 @@ XR806_DIAG_FLASH inline void print_capture(Capture &c) {
            c.status_first, c.hif_first, c.waited_ms,
            c.domain_reset ? LOG_STR_LITERAL(" and a reset of the domain") : LOG_STR_LITERAL(""), c.status_last,
            c.hif_last, c.copied ? LOG_STR_LITERAL("copied") : LOG_STR_LITERAL("not readable"));
-  dump_power_control("prcm");
+  if (c.words != nullptr) {
+    // As found, then what the wake request and the reset changed.
+    print_power_control("prcm", c.words + MEMORY_WORDS);
+    print_power_control("prcm-now", nullptr, c.words + MEMORY_WORDS);
+  }
   if (c.copied) {
     const uint32_t *w = c.words;
     for (const auto &region : REGIONS) {
@@ -235,6 +273,9 @@ struct Cycle {
   uint32_t start_ms{0};
   int rx{0}, tx{0};
   Snapshot before;
+  uint32_t power_before[POWER_LINE_WORDS]{};
+  uint32_t printed_before[POWER_LINE_WORDS]{};
+  uint32_t printed_after[POWER_LINE_WORDS]{};
 };
 
 inline Cycle &cycle() {
@@ -249,6 +290,7 @@ XR806_DIAG_FLASH inline void before_standby() {
   c.rx = skb_rx_cnt;
   c.tx = skb_tx_cnt;
   take(c.before);
+  read_power_line(c.power_before);
   c.start_ms = millis();
 }
 
@@ -256,6 +298,8 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
   static const char *const TAG = "xr806.wlan_diag";
   auto &c = cycle();
   const uint32_t slept = millis() - c.start_ms;
+  uint32_t power_after[POWER_LINE_WORDS];
+  read_power_line(power_after);
   // Read first: the driver's recovery task clears the flag again within a moment.
   const bool failed = wlan_driver_failed();
   Capture hung;
@@ -283,6 +327,8 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
            static_cast<unsigned>(heap_end - heap_start));
   print("before", c.before);
   print("after ", after);
+  print_power_line("before", c.power_before, c.printed_before);
+  print_power_line("after ", power_after, c.printed_after);
   if (c.before.ok && after.ok) {
     // The core's clock must advance as far as the CPU's; less means the core slept past its own timers.
     const uint32_t wlan_ms = ((after.counter + after.offset) - (c.before.counter + c.before.offset)) / 1000;
