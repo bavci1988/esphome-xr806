@@ -162,7 +162,7 @@ bool XR806StandbyController::may_quiesce() const {
 }
 
 void XR806StandbyController::loop() {
-  if (this->busy_ || this->state_.disabled() || this->is_any_transport_unowned_())
+  if (this->busy_ || this->is_any_transport_unowned_())
     return;
   const uint32_t now = App.get_loop_component_start_time();
   if (this->boot_hold_ms_ != 0) {
@@ -297,7 +297,8 @@ void XR806StandbyController::attempt_standby_() {
                static_cast<unsigned>(this->wake_pin_));
       break;
     case XR806_STANDBY_PIN_ACTIVE:
-      ESP_LOGW(TAG, "Wake input already active; standby refused");
+      // The MCU raised its wake line at the last moment
+      ESP_LOGD(TAG, "Wake input already active; standby postponed");
       break;
     case XR806_STANDBY_PIN_INVALID:
     case XR806_STANDBY_PIN_MODE:
@@ -308,21 +309,38 @@ void XR806StandbyController::attempt_standby_() {
   }
   if (result.status != XR806_STANDBY_ENTERED) {
     this->cancel_prepared_(prepared);
-    this->state_.finished(millis(), false);
-  }
-
-  if (this->state_.disabled()) {
-    ESP_LOGE(TAG, "PM permanently disabled after three unsuccessful attempts");
-    this->mark_failed();
+    // Activity at the last moment postpones; a wake source that cannot be armed is a failure.
+    if (result.status == XR806_STANDBY_REFUSED || result.status == XR806_STANDBY_PIN_ACTIVE) {
+      this->state_.not_entered(millis());
+    } else {
+      this->state_.finished(millis(), false);
+      this->report_failure_();
+    }
   }
   this->busy_ = false;
+}
+
+void XR806StandbyController::report_failure_() {
+  ESP_LOGW(TAG, "Standby attempt failed (%u in a row); next attempt after %" PRIu32 " s awake",
+           static_cast<unsigned>(this->state_.failures()), this->state_.awake_hold_ms() / 1000);
+  this->status_set_warning();
 }
 
 void XR806StandbyController::resumed_(int pm_return, uint32_t event) {
   auto &p = lowpower_policy();
   const int wake_io = this->has_wake_pin_ ? static_cast<int>(this->wake_pin_) - XR806_WAKE_PIN_FIRST : -1;
   const bool expected = XR806StandbyCoordinatorState::expected_wake(pm_return, event, wake_io, this->stay_connected_);
-  this->state_.finished(millis(), expected);
+  if (pm_return != 0 && !expected) {
+    // PM did not suspend, e.g. a wakelock was still held after the wait: nothing went wrong
+    this->state_.not_entered(millis());
+  } else {
+    this->state_.finished(millis(), expected);
+    if (expected) {
+      this->status_clear_warning();
+    } else {
+      this->report_failure_();
+    }
+  }
   // Every participant must assess the wake/abort independently.
   // In particular the MCU decides whether to send CMD12/00.
   if (!this->no_uart_)
