@@ -122,9 +122,10 @@ void XR806StandbyController::dump_config() {
                 "  Timer: %u ms; quiet: %u ms; min awake: %u ms",
                 static_cast<unsigned>(this->wake_after_ms_), static_cast<unsigned>(this->quiet_ms_),
                 static_cast<unsigned>(this->min_awake_ms_));
-  if (this->boot_hold_ms_ != 0)
+  if (this->boot_hold_ms_ != 0) {
     ESP_LOGCONFIG(TAG, "  No standby before %u s after boot (safe_mode boot check)",
                   static_cast<unsigned>(this->boot_hold_ms_ / 1000));
+  }
   ESP_LOGCONFIG(TAG,
                 "  Network during standby: %s\n"
                 "  External sync: %s; required UART participant: %s",
