@@ -1,0 +1,5 @@
+substitutions:
+  pwm_pin: PB4
+
+packages:
+  libretiny_pwm: !include common.yaml

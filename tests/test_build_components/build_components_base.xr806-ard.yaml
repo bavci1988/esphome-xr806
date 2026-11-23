@@ -1,0 +1,19 @@
+esphome:
+  name: componenttestespxr806
+  friendly_name: $component_name
+
+xr806:
+  board: wxu
+  # Until a LibreTiny release has XR806
+  framework:
+    version: 1.14.0
+    source: https://github.com/bavci1988/bk7236-libretiny.git#pr/xr806-family
+
+logger:
+  level: VERY_VERBOSE
+
+packages:
+  component_under_test: !include
+    file: $component_test_file
+    vars:
+      component_test_file: $component_test_file

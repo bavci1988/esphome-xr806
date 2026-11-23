@@ -1,0 +1,20 @@
+# Standby that parks the WLAN link, with the web server, MQTT and no UART
+xr806:
+  standby:
+    enabled: true
+    wake_after: 1min
+  wlan:
+    listen_interval: 3
+    network_suspend: true
+
+wifi:
+  ssid: MySSID
+  password: password1
+
+web_server:
+
+mqtt:
+  broker: 192.168.1.2
+
+ota:
+  - platform: web_server

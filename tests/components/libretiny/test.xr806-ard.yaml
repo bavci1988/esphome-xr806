@@ -1,0 +1,2 @@
+packages:
+  libretiny: !include common.yaml

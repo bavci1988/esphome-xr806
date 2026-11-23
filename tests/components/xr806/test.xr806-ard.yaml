@@ -1,0 +1,33 @@
+# Standby with the WLAN kept up and a Tuya MCU that decides when the module sleeps (TRV16)
+packages:
+  uart: !include ../../test_build_components/common/uart/xr806-ard.yaml
+
+xr806:
+  standby:
+    enabled: true
+    wake_after: 3s
+    quiet_time: 250ms
+    min_awake_time: 5s
+    wake_pin: PA20
+    wake_edge: falling
+    require_external_sync: true
+  wlan:
+    dtim: 3
+    stay_connected: true
+
+wifi:
+  ssid: MySSID
+  password: password1
+  power_save_mode: light
+
+api:
+
+ota:
+  - platform: esphome
+
+tuya:
+  uart_id: uart_bus
+  protocol: low_power
+  mcu_wake_pin:
+    number: PB4
+    inverted: true
