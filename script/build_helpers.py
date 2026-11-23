@@ -409,6 +409,14 @@ def compile_and_get_binary(
     for flag in cxx_build_flags or ():
         CORE.add_cxx_build_flag(flag)
 
+    # A target platform (e.g. xr806) is not configured on the host, but tests of its
+    # platform-independent headers need its source files. Its schema is not run, and
+    # the manifest override suppresses its to_code.
+    for component_name in components:
+        component = get_component(component_name)
+        if component is not None and component.is_target_platform:
+            config.setdefault(component_name, {})
+
     # Register platforms from the extra config (benchmark.yaml) so
     # USE_SENSOR, USE_LIGHT, etc. defines are emitted without needing
     # real entity instances.
