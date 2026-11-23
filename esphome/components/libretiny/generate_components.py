@@ -27,7 +27,8 @@ Any manual changes WILL BE LOST on regeneration.
 
 To customize this component:
   - Pin validators: Create gpio.py with validate_pin() or validate_usage()
-  - Schema extensions: Create schema.py with COMPONENT_SCHEMA or COMPONENT_PIN_SCHEMA
+  - Schema extensions: Create schema.py with COMPONENT_SCHEMA or COMPONENT_PIN_SCHEMA,
+    and optionally FINAL_VALIDATE_SCHEMA and component_extra_to_code() for its options
 
 Platform-specific code should be added to the main libretiny component
 (__init__.py in esphome/components/libretiny/) rather than here.
@@ -80,7 +81,7 @@ CONFIG_SCHEMA.prepend_extra(_set_core_data)
 
 
 async def to_code(config: ConfigType) -> MockObj:
-    return await libretiny.component_to_code(config)
+    {TO_CODE}
 
 
 @pins.PIN_SCHEMA_REGISTRY.register("{COMPONENT_LOWER}", PIN_SCHEMA)
@@ -126,12 +127,18 @@ VAR_SCHEMA = "COMPONENT_SCHEMA"
 VAR_PIN_SCHEMA = "COMPONENT_PIN_SCHEMA"
 VAR_GPIO_PIN = "validate_pin"
 VAR_GPIO_USAGE = "validate_usage"
+VAR_FINAL_VALIDATE = "FINAL_VALIDATE_SCHEMA"
+VAR_TO_CODE = "component_extra_to_code"
 
 # lines for code snippets
 SCHEMA_BASE = "libretiny.BASE_SCHEMA.extend({})"
 SCHEMA_EXTRA = f"libretiny.BASE_SCHEMA.extend({VAR_SCHEMA})"
 PIN_SCHEMA_BASE = "libretiny.gpio.BASE_PIN_SCHEMA"
 PIN_SCHEMA_EXTRA = f"libretiny.BASE_PIN_SCHEMA.extend({VAR_PIN_SCHEMA})"
+TO_CODE_BASE = "return await libretiny.component_to_code(config)"
+TO_CODE_EXTRA = f"""var = await libretiny.component_to_code(config)
+    await {VAR_TO_CODE}(config)
+    return var"""
 
 # supported root components
 COMPONENT_MAP = {
@@ -200,6 +207,7 @@ def write_component_code(
     schema_py = component_dir.joinpath("schema.py")
     init_py = component_dir.joinpath("__init__.py")
 
+    final_validate = None
     # gather all imports
     imports = {
         "gpio": set(),
@@ -216,6 +224,7 @@ def write_component_code(
         PIN_VALIDATION="None",
         USAGE_VALIDATION="None",
         SUPPORTS_ATOMICS=str(COMPONENT_SUPPORTS_ATOMICS.get(component, False)),
+        TO_CODE=TO_CODE_BASE,
         CODEOWNERS=repr(codeowners),
     )
 
@@ -235,6 +244,12 @@ def write_component_code(
         if VAR_PIN_SCHEMA in schema_code:
             values["PIN_SCHEMA"] = PIN_SCHEMA_EXTRA
             imports["schema"].add(VAR_PIN_SCHEMA)
+        if VAR_FINAL_VALIDATE in schema_code:
+            # read by the config loader from this module
+            final_validate = f"from .schema import {VAR_FINAL_VALIDATE}  # noqa: F401"
+        if f"def {VAR_TO_CODE}(" in schema_code:
+            values["TO_CODE"] = TO_CODE_EXTRA
+            imports["schema"].add(VAR_TO_CODE)
 
     # add import lines if needed
     import_lines = "\n".join(
@@ -242,6 +257,8 @@ def write_component_code(
     )
     if extra := COMPONENT_EXTRA_IMPORTS.get(component):
         import_lines = f"{extra}\n{import_lines}"
+    if final_validate:
+        import_lines = f"{import_lines}\n{final_validate}"
     code = subst_many(
         code,
         ("IMPORTS", import_lines),
