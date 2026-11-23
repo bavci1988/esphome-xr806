@@ -1,5 +1,8 @@
 """XR806 power management options: standby and the WLAN power settings."""
 
+from collections.abc import Callable
+import logging
+
 from esphome import final_validate as fv, pins
 import esphome.codegen as cg
 from esphome.components.const import CONF_ENABLED
@@ -10,12 +13,15 @@ from esphome.const import (
     CONF_PLATFORM,
     CONF_PROTOCOL,
     CONF_REBOOT_TIMEOUT,
+    CONF_TOOLCHAIN,
     CONF_UART_ID,
 )
 from esphome.core import CORE, ID
 from esphome.types import ConfigType
 
 CONF_WLAN = "wlan"
+CONF_LOWPOWER = "lowpower"
+CONF_OTA_DIAGNOSTIC_READONLY = "ota_diagnostic_readonly"
 CONF_NETWORK_SUSPEND = "network_suspend"
 CONF_STAY_CONNECTED = "stay_connected"
 CONF_DTIM = "dtim"
@@ -36,6 +42,8 @@ CONF_WAKE_PIN = "wake_pin"
 CONF_WAKE_EDGE = "wake_edge"
 # safe_mode counts from its own setup(), a little after boot.
 BOOT_HOLD_MARGIN_MS = 2000
+
+_LOGGER = logging.getLogger(__name__)
 
 xr806_ns = cg.esphome_ns.namespace("xr806")
 XR806WiFiStandby = xr806_ns.class_("XR806WiFiStandby", cg.Component)
@@ -128,14 +136,91 @@ STANDBY_SCHEMA = cv.Schema(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
-COMPONENT_SCHEMA = {
-    cv.GenerateID(CONF_TUYA_HOST_ID): cv.declare_id(XR806TuyaLowPowerHost),
-    cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
-    cv.Optional(CONF_STANDBY): STANDBY_SCHEMA,
+# The first versions of these options took a whole number of milliseconds.
+_OLD_MS_KEYS = {
+    CONF_WAKE_AFTER: "wake_after_ms",
+    CONF_QUIET_TIME: "quiet_ms",
+    CONF_MIN_AWAKE_TIME: "min_awake_ms",
 }
 
 
+def _old_ms_value(old_key: str) -> Callable[[ConfigType], ConfigType]:
+    """The old keys took a bare number of milliseconds; give it the unit the new keys need."""
+
+    def validator(config: ConfigType) -> ConfigType:
+        if isinstance(config, dict) and isinstance(config.get(old_key), int):
+            config = {**config, old_key: f"{config[old_key]}ms"}
+        return config
+
+    return validator
+
+
+def _renamed_ms_keys() -> list[Callable[[ConfigType], ConfigType]]:
+    """Accept the old millisecond keys of the native XR806 port, with a deprecation warning."""
+    validators = []
+    for key, old_key in _OLD_MS_KEYS.items():
+        validators.append(_old_ms_value(old_key))
+        validators.append(
+            cv.rename_key(old_key, key, removed_in="2027.6.0", component="xr806")
+        )
+    return validators
+
+
+def _ignored_option(key: str, reason: str) -> Callable[[object], object]:
+    """An option of the native XR806 port that has no effect here."""
+
+    def validator(value: object) -> object:
+        _LOGGER.warning("xr806: '%s' is ignored: %s", key, reason)
+        return value
+
+    return validator
+
+
+COMPONENT_SCHEMA = {
+    cv.GenerateID(CONF_TUYA_HOST_ID): cv.declare_id(XR806TuyaLowPowerHost),
+    cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
+    cv.Optional(CONF_STANDBY): cv.All(*_renamed_ms_keys(), STANDBY_SCHEMA),
+    # Options of the native XR806 port, so its configurations keep validating
+    cv.Optional(CONF_LOWPOWER): cv.All(
+        cv.boolean,
+        _ignored_option(CONF_LOWPOWER, "'standby:' enables power management"),
+    ),
+    cv.Optional(CONF_OTA_DIAGNOSTIC_READONLY): cv.All(
+        cv.boolean,
+        _ignored_option(
+            CONF_OTA_DIAGNOSTIC_READONLY, "the LibreTiny OTA has no diagnostic mode"
+        ),
+    ),
+    cv.Optional(CONF_TOOLCHAIN): cv.All(
+        cv.string, _ignored_option(CONF_TOOLCHAIN, "LibreTiny builds with PlatformIO")
+    ),
+}
+
+
+# UART0: TX PB0, RX PB1 (on Tuya WXU modules, the line to the MCU)
+_UART0_PINS = (32, 33)
+
+
+def _final_validate_logger_uart() -> None:
+    full_config = fv.full_config.get()
+    logger_config = full_config.get("logger")
+    if (
+        logger_config is None
+        or str(logger_config.get("hardware_uart", "")).upper() != "UART0"
+    ):
+        return
+    for index, uart in enumerate(full_config.get("uart", [])):
+        for key in ("tx_pin", "rx_pin"):
+            if (pin := uart.get(key)) is not None and pin["number"] in _UART0_PINS:
+                raise cv.Invalid(
+                    "logger hardware_uart UART0 would send the logs on the uart bus "
+                    "(PB0/PB1); keep the logger on UART2",
+                    path=["uart", index, key],
+                )
+
+
 def _final_validate_options(config: ConfigType) -> ConfigType:
+    _final_validate_logger_uart()
     wlan = config[CONF_WLAN]
     standby = config.get(CONF_STANDBY)
     if wlan[CONF_NETWORK_SUSPEND] and standby is None:
