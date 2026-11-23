@@ -331,8 +331,9 @@ void XR806StandbyController::resumed_(int pm_return, uint32_t event) {
   const int wake_io = this->has_wake_pin_ ? static_cast<int>(this->wake_pin_) - XR806_WAKE_PIN_FIRST : -1;
   const bool expected = XR806StandbyCoordinatorState::expected_wake(pm_return, event, wake_io, this->stay_connected_);
   if (pm_return != 0 && !expected) {
-    // PM did not suspend, e.g. a wakelock was still held after the wait: nothing went wrong
-    this->state_.not_entered(millis());
+    // PM did not suspend, e.g. a wakelock was still held after the wait
+    if (this->state_.pm_refused(millis()))
+      this->report_failure_();
   } else {
     this->state_.finished(millis(), expected);
     if (expected) {

@@ -15,6 +15,8 @@ class XR806StandbyCoordinatorState {
   static constexpr uint32_t WAKE_INTERNAL = 0xf0000000u;
   // After an unexpected wake, the wait before the next attempt doubles up to this.
   static constexpr uint32_t MAX_BACKOFF_MS = 10 * 60 * 1000;
+  // PM refusals in a row (e.g. a wakelock that is never released) that count as one failure.
+  static constexpr uint8_t MAX_PM_REFUSALS = 3;
 
   void configure(uint32_t quiet_ms, uint32_t awake_ms) {
     quiet_ms_ = quiet_ms;
@@ -64,11 +66,23 @@ class XR806StandbyCoordinatorState {
   void finished(uint32_t now, bool expected_resume) {
     stable_ = false;
     last_wake_ms_ = now;
+    pm_refusals_ = 0;
     if (expected_resume) {
       failures_ = 0;
     } else if (failures_ < UINT8_MAX) {
       ++failures_;
     }
+  }
+
+  // Consume one request that PM refused to suspend. An occasional refusal is no failure; one that
+  // repeats counts as one. Returns true when it counted.
+  bool pm_refused(uint32_t now) {
+    if (++pm_refusals_ < MAX_PM_REFUSALS) {
+      this->not_entered(now);
+      return false;
+    }
+    this->finished(now, false);
+    return true;
   }
 
   // Consume one request that did not reach the sleep (activity at the last moment, the wake
@@ -104,6 +118,7 @@ class XR806StandbyCoordinatorState {
   uint32_t stable_since_ms_{0};
   uint32_t observed_generation_{0};
   uint8_t failures_{0};
+  uint8_t pm_refusals_{0};
   bool booted_{false};
   bool stable_{false};
 };

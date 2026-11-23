@@ -54,6 +54,23 @@ TEST(XR806StandbyCoordinatorState, DueNeedsRequestOwnersAndStableGeneration) {
   EXPECT_TRUE(state.due(AWAKE_MS + 2 * QUIET_MS, 2, true, true));
 }
 
+TEST(XR806StandbyCoordinatorState, RepeatedPmRefusalCountsAsOneFailure) {
+  XR806StandbyCoordinatorState state;
+  state.configure(QUIET_MS, AWAKE_MS);
+  state.boot(0);
+  for (uint8_t i = 1; i < XR806StandbyCoordinatorState::MAX_PM_REFUSALS; ++i)
+    EXPECT_FALSE(state.pm_refused(0));
+  EXPECT_EQ(state.failures(), 0);
+  EXPECT_TRUE(state.pm_refused(0));
+  EXPECT_EQ(state.failures(), 1);
+  // The count starts again after a failure, and an expected wake clears it
+  EXPECT_FALSE(state.pm_refused(0));
+  state.finished(0, true);
+  for (uint8_t i = 1; i < XR806StandbyCoordinatorState::MAX_PM_REFUSALS; ++i)
+    EXPECT_FALSE(state.pm_refused(0));
+  EXPECT_EQ(state.failures(), 0);
+}
+
 struct ExpectedWakeCase {
   int pm_return;
   uint32_t events;
