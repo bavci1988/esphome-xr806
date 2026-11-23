@@ -2,7 +2,7 @@
 
 #include "esphome/core/defines.h"
 
-#ifdef USE_XR806_STANDBY_CONTROLLER
+#if defined(USE_XR806_UART_STANDBY) && defined(USE_XR806_STANDBY_CONTROLLER)
 
 #include "esphome/components/uart/uart_component_libretiny.h"
 #include "esphome/core/component.h"
@@ -36,4 +36,4 @@ class XR806UARTStandby final : public Component {
 
 }  // namespace esphome::xr806
 
-#endif  // USE_XR806_STANDBY_CONTROLLER
+#endif  // USE_XR806_UART_STANDBY && USE_XR806_STANDBY_CONTROLLER

@@ -18,8 +18,8 @@ namespace esphome::xr806 {
 /// While standby is being prepared the client is disabled, which sends a DISCONNECT, so the broker can keep the
 /// device's birth message instead of publishing the will (best effort: confirmed on a host broker, not yet on WXU
 /// hardware). The client sends the DISCONNECT and closes the socket on its own task, so MQTT votes idle a fixed time
-/// after it was disabled. On wake,
-/// or when the attempt is cancelled, the client is enabled again unless it was already disabled before.
+/// after it was disabled. On wake, or when the attempt is cancelled, the client is enabled again unless it was
+/// already disabled before.
 class XR806MQTTStandby final : public Component, public XR806StandbyParticipant {
  public:
   void setup() override;
@@ -37,9 +37,10 @@ class XR806MQTTStandby final : public Component, public XR806StandbyParticipant 
 
  protected:
   void restore_();
-  /// The client is off and its connection closed
+  /// The client is off and had the time to close its connection
   bool quiet_(const mqtt::MQTTClientComponent *client) const;
 
+  uint32_t parked_ms_{0};
   bool parked_{false};
   /// The client was enabled when it was parked, so it is enabled again afterwards
   bool reenable_{false};

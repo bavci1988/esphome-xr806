@@ -1,6 +1,6 @@
 #include "uart_standby.h"
 
-#ifdef USE_XR806_STANDBY_CONTROLLER
+#if defined(USE_XR806_UART_STANDBY) && defined(USE_XR806_STANDBY_CONTROLLER)
 
 #include <xr806_pm.h>
 
@@ -65,4 +65,4 @@ void XR806UARTStandby::loop() {
 
 }  // namespace esphome::xr806
 
-#endif  // USE_XR806_STANDBY_CONTROLLER
+#endif  // USE_XR806_UART_STANDBY && USE_XR806_STANDBY_CONTROLLER

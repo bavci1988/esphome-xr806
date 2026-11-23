@@ -241,6 +241,7 @@ async def _standby_to_code(config: ConfigType) -> None:
     await cg.register_component(controller, cfg)
 
     if uart_configs := CORE.config.get("uart"):
+        cg.add_define("USE_XR806_UART_STANDBY")
         uart = await cg.get_variable(uart_configs[0][CONF_ID])
         await _participant("uart_standby.h", cfg[CONF_UART_STANDBY_ID], uart)
     if has_http:
