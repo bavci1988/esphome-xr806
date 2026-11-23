@@ -20,7 +20,7 @@ namespace esphome::xr806 {
 /// hardware). The client sends the DISCONNECT and closes the socket on its own task, so MQTT votes idle a fixed time
 /// after it was disabled. On wake, or when the attempt is cancelled, the client is enabled again unless it was
 /// already disabled before. With stay_connected the connection stays open instead, and MQTT votes idle while the
-/// client is connected.
+/// client is connected, or after it waited 10 s for a broker it cannot reach.
 class XR806MQTTStandby final : public Component, public XR806StandbyParticipant {
  public:
   void setup() override;
@@ -41,8 +41,13 @@ class XR806MQTTStandby final : public Component, public XR806StandbyParticipant 
   /// The client is off and had the time to close its connection
   bool quiet_(const mqtt::MQTTClientComponent *client) const;
 
+  /// With stay_connected: connected, off, or waited long enough for the broker
+  bool connection_quiet_(mqtt::MQTTClientComponent *client) const;
+
   uint32_t parked_ms_{0};
+  uint32_t connect_wait_since_ms_{0};
   bool parked_{false};
+  bool connect_waiting_{false};
   /// The client was enabled when it was parked, so it is enabled again afterwards
   bool reenable_{false};
   bool shutting_down_{false};

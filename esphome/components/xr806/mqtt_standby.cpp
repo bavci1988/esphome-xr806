@@ -13,6 +13,8 @@ ESPHOME_LOG_TAG(TAG, "xr806.mqtt_standby");
 
 // Time for the DISCONNECT and the closing of the connection after the client was disabled.
 static constexpr uint32_t DISCONNECT_WAIT_MS = 1000;
+// With stay_connected: how long a standby waits for the client to connect to the broker.
+static constexpr uint32_t CONNECT_WAIT_MS = 10000;
 
 static bool keeps_connection() {
   auto *controller = standby_controller();
@@ -52,9 +54,13 @@ void XR806MQTTStandby::standby_preflight(bool requested) {
     return;
   }
   if (keeps_connection()) {
-    // The connection stays open and the broker's next packet wakes the chip; a client that is
-    // still connecting keeps it awake
-    lowpower_policy().set_mqtt_idle(client->is_connected() || client->is_disabled());
+    // The connection stays open and the broker's next packet wakes the chip. A client that is still
+    // connecting keeps it awake for a while; a broker that cannot be reached must not stop standby.
+    if (!client->is_connected() && !client->is_disabled() && !this->connect_waiting_) {
+      this->connect_waiting_ = true;
+      this->connect_wait_since_ms_ = App.get_loop_component_start_time();
+    }
+    lowpower_policy().set_mqtt_idle(this->connection_quiet_(client));
     return;
   }
   if (!this->parked_) {
@@ -74,18 +80,25 @@ bool XR806MQTTStandby::quiet_(const mqtt::MQTTClientComponent *client) const {
          App.get_loop_component_start_time() - this->parked_ms_ >= DISCONNECT_WAIT_MS;
 }
 
+bool XR806MQTTStandby::connection_quiet_(mqtt::MQTTClientComponent *client) const {
+  return client->is_connected() || client->is_disabled() ||
+         (this->connect_waiting_ &&
+          App.get_loop_component_start_time() - this->connect_wait_since_ms_ >= CONNECT_WAIT_MS);
+}
+
 bool XR806MQTTStandby::prepare_for_standby() {
   auto *client = mqtt::global_mqtt_client;
   if (client == nullptr)
     return false;
   if (keeps_connection())
-    return client->is_connected() || client->is_disabled();
+    return this->connection_quiet_(client);
   return this->quiet_(client);
 }
 
 void XR806MQTTStandby::restore_() {
   // Claim the blocker before the client starts network work again
   lowpower_policy().set_mqtt_idle(false);
+  this->connect_waiting_ = false;
   if (!this->parked_)
     return;
   this->parked_ = false;
