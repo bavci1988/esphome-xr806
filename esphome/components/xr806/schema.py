@@ -308,14 +308,16 @@ def _final_validate_standby_reachable(config: ConfigType) -> None:
         )
     mqtt_config = full_config.get("mqtt")
     if wlan[CONF_STAY_CONNECTED] and mqtt_config is not None:
+        # The client pings once a keepalive has passed, and brokers drop it after 1.5 keepalives,
+        # so the chip must wake up at least twice per keepalive.
         keepalive = mqtt_config[CONF_KEEPALIVE]
         if (
-            config[CONF_STANDBY][CONF_WAKE_AFTER].total_milliseconds
-            >= keepalive.total_milliseconds
+            config[CONF_STANDBY][CONF_WAKE_AFTER].total_milliseconds * 2
+            > keepalive.total_milliseconds
         ):
             raise cv.Invalid(
-                f"With mqtt and xr806.wlan.stay_connected, xr806.standby.wake_after must be "
-                f"shorter than the mqtt keepalive ({keepalive}), or the broker drops the connection",
+                f"With mqtt and xr806.wlan.stay_connected, xr806.standby.wake_after must be at "
+                f"most half the mqtt keepalive ({keepalive}), or the broker drops the connection",
                 path=[CONF_STANDBY, CONF_WAKE_AFTER],
             )
     if not wlan[CONF_NETWORK_SUSPEND]:
