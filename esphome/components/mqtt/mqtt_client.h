@@ -361,6 +361,7 @@ class MQTTClientComponent final : public Component {
   void set_enable_on_boot(bool enable_on_boot) { this->enable_on_boot_ = enable_on_boot; }
   void enable();
   void disable();
+  bool is_disabled() const { return this->state_ == MQTT_CLIENT_DISABLED; }
 
   void on_shutdown() override;
   bool teardown() override;
