@@ -936,9 +936,9 @@ async def to_code(config):
                         f"WIFI_AP_WISP_DNS_{i}", int.from_bytes(ip.packed, "little")
                     )
         cg.add_define("USE_WIFI_AP")
-        # The LN882H radio cannot run the AP and STA together; the fallback AP
-        # takes turns with the networks instead.
-        if CORE.is_ln882x:
+        # The LN882H and XR806 radios cannot run the AP and STA together; the
+        # fallback AP takes turns with the networks instead.
+        if CORE.is_ln882x or CORE.is_xr806:
             cg.add_define("USE_WIFI_AP_EXCLUSIVE")
         # The Pico W driver drops the AP station events; wifi_component_pico_w.cpp counts them
         if CORE.is_rp2:
