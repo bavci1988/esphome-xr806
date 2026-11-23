@@ -19,7 +19,8 @@ namespace esphome::xr806 {
 /// device's birth message instead of publishing the will (best effort: confirmed on a host broker, not yet on WXU
 /// hardware). The client sends the DISCONNECT and closes the socket on its own task, so MQTT votes idle a fixed time
 /// after it was disabled. On wake, or when the attempt is cancelled, the client is enabled again unless it was
-/// already disabled before.
+/// already disabled before. With stay_connected the connection stays open instead, and MQTT votes idle while the
+/// client is connected.
 class XR806MQTTStandby final : public Component, public XR806StandbyParticipant {
  public:
   void setup() override;
