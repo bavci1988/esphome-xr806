@@ -13,7 +13,8 @@ Any manual changes WILL BE LOST on regeneration.
 
 To customize this component:
   - Pin validators: Create gpio.py with validate_pin() or validate_usage()
-  - Schema extensions: Create schema.py with COMPONENT_SCHEMA or COMPONENT_PIN_SCHEMA
+  - Schema extensions: Create schema.py with COMPONENT_SCHEMA or COMPONENT_PIN_SCHEMA,
+    and optionally FINAL_VALIDATE_SCHEMA and component_extra_to_code() for its options
 
 Platform-specific code should be added to the main libretiny component
 (__init__.py in esphome/components/libretiny/) rather than here.
@@ -33,6 +34,11 @@ from esphome.stacktrace import process_crash_handler_line as process_stacktrace 
 from esphome.types import ConfigType
 
 from .boards import XR806_BOARD_PINS, XR806_BOARDS
+from .schema import (
+    COMPONENT_SCHEMA,
+    FINAL_VALIDATE_SCHEMA,  # noqa: F401
+    component_extra_to_code,
+)
 
 CODEOWNERS = ["@bavci1988"]
 AUTO_LOAD = ["libretiny"]
@@ -59,7 +65,7 @@ def _set_core_data(config: ConfigType) -> ConfigType:
 # by every LibreTiny platform, and prepending this platform's _set_core_data
 # onto the shared object would run it for every platform's validation once two
 # platform modules are imported in one process (device-builder, tests).
-CONFIG_SCHEMA = libretiny.BASE_SCHEMA.extend({})
+CONFIG_SCHEMA = libretiny.BASE_SCHEMA.extend(COMPONENT_SCHEMA)
 
 PIN_SCHEMA = libretiny.gpio.BASE_PIN_SCHEMA
 
@@ -67,7 +73,9 @@ CONFIG_SCHEMA.prepend_extra(_set_core_data)
 
 
 async def to_code(config: ConfigType) -> MockObj:
-    return await libretiny.component_to_code(config)
+    var = await libretiny.component_to_code(config)
+    await component_extra_to_code(config)
+    return var
 
 
 @pins.PIN_SCHEMA_REGISTRY.register("xr806", PIN_SCHEMA)
