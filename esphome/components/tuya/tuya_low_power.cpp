@@ -420,6 +420,8 @@ void TuyaUART::poll_low_power_autobaud_() {
   if (this->parent_ != nullptr && this->parent_->get_baud_rate() != baud) {
     this->parent_->set_baud_rate(baud);
     this->parent_->load_settings(false);
+    // Bytes received at the previous rate could start a bogus frame that swallows the reply
+    this->discard_available();
   }
   if (this->parent_ == nullptr || !this->parent_->is_connected()) {
     ESP_LOGE(LP_TAG, "Unable to configure MCU UART for %u baud", static_cast<unsigned>(baud));
@@ -1149,22 +1151,22 @@ void TuyaUART::process_low_power_queue_() {
   this->send_raw_command_(command);
 }
 
-void TuyaUART::send_low_power_direct_(uint8_t command, const std::vector<uint8_t> &payload) {
+void TuyaUART::send_low_power_direct_(uint8_t command, const uint8_t *payload, size_t len) {
   // ACKs and time replies must not wait behind a pending CMD09 write.
-  if (payload.size() > 65535)
+  if (len > 65535)
     return;
   this->lp_v3_idle_since_ms_ = App.get_loop_component_start_time();
   const uint8_t header[] = {
-      0x55, 0xAA, 0x00, command, static_cast<uint8_t>(payload.size() >> 8), static_cast<uint8_t>(payload.size()),
+      0x55, 0xAA, 0x00, command, static_cast<uint8_t>(len >> 8), static_cast<uint8_t>(len),
   };
   uint8_t checksum = 0;
   for (uint8_t b : header)
     checksum += b;
-  for (uint8_t b : payload)
-    checksum += b;
+  for (size_t i = 0; i < len; ++i)
+    checksum += payload[i];
   this->write_array(header, sizeof(header));
-  if (!payload.empty())
-    this->write_array(payload.data(), payload.size());
+  if (len != 0)
+    this->write_array(payload, len);
   this->write_byte(checksum);
 }
 
@@ -1204,7 +1206,7 @@ void TuyaUART::send_low_power_network_() {
 
 void TuyaUART::send_low_power_time_(uint8_t command) {
   // Local calendar time (HC32: CMD06, version-3 MCU: CMD1C). No duplicate timezone/DST adjustment.
-  std::vector<uint8_t> payload(8, 0);
+  std::array<uint8_t, 8> payload{};
 #ifdef USE_TIME
   if (this->time_id_ != nullptr) {
     const auto now = this->time_id_->now();
@@ -1228,7 +1230,7 @@ void TuyaUART::send_low_power_time_(uint8_t command) {
   } else {
     ESP_LOGD(LP_TAG, "Sending local time to the MCU (CMD%02X)", command);
   }
-  this->send_low_power_direct_(command, payload);
+  this->send_low_power_direct_(command, payload.data(), payload.size());
 }
 
 void TuyaUART::handle_low_power_command_(uint8_t command, uint8_t version, const uint8_t *data, size_t len) {

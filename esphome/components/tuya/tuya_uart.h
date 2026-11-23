@@ -2,6 +2,7 @@
 
 #include <cinttypes>
 #include <memory>
+#include <initializer_list>
 #include <vector>
 
 #include "tuya.h"
@@ -157,7 +158,14 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   void send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType datapoint_type, const uint8_t *data,
                                  size_t len);
   void handle_low_power_command_(uint8_t command, uint8_t version, const uint8_t *data, size_t len);
-  void send_low_power_direct_(uint8_t command, const std::vector<uint8_t> &payload);
+  void send_low_power_direct_(uint8_t command, const uint8_t *payload, size_t len);
+  // A literal payload stays on the stack; ACKs and sleep answers go out without a heap allocation.
+  void send_low_power_direct_(uint8_t command, std::initializer_list<uint8_t> payload) {
+    this->send_low_power_direct_(command, payload.begin(), payload.size());
+  }
+  void send_low_power_direct_(uint8_t command, const std::vector<uint8_t> &payload) {
+    this->send_low_power_direct_(command, payload.data(), payload.size());
+  }
   void send_low_power_time_(uint8_t command);
   void send_low_power_network_();
   void update_low_power_sleep_lock_();
