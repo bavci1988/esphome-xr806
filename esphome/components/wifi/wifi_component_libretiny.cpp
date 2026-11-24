@@ -883,6 +883,20 @@ void WiFiComponent::on_powerdown() {
 }
 #endif
 
+#ifdef USE_XR806
+void WiFiComponent::on_powerdown() {
+  // Leave the AP so it no longer holds the association when we come back; otherwise the
+  // authentication of the first join after a reboot (e.g. after OTA) times out.
+  // XR806 reports WL_CONNECTED only once it has an IP; associated without one is WL_IDLE_STATUS
+  const WiFiStatus status = WiFi.status();
+  if (status != WL_CONNECTED && status != WL_IDLE_STATUS)
+    return;
+  ESP_LOGD(TAG, "Disconnecting before powerdown");
+  WiFi.disconnect();
+  delay(100);  // NOLINT: once per reboot or deep sleep, lets the deauth go out
+}
+#endif
+
 bool WiFiComponent::wifi_disconnect_() {
   // Reset state first so disconnect events aren't ignored
   // and wifi_sta_connect_status_() returns IDLE instead of CONNECTING
