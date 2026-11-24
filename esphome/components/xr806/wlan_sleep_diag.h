@@ -189,14 +189,57 @@ static constexpr Region REGIONS[] = {
     {"rxcnt", 0xFFF02280, 32}, {"keepalive", 0x0900BB80, 72}, {"stack", 0xFFF0B000, 1024},
 };
 static constexpr uint32_t MEMORY_WORDS = 40 + 16 + 16 + 32 + 72 + 1024;
-// The buffer also holds the power control block as found, before the wake request or the reset changes it.
-static constexpr uint32_t CAPTURE_WORDS = MEMORY_WORDS + POWER_WORDS;
+// Power control of the WLAN domain itself (its sleep-on-WFI register is 0x0AA800A0) and its timer. The CPU
+// reaches them only through the domain's bus, so a hung core is read directly only while its power switch is on.
+static constexpr Region WLAN_SIDE[] = {{"wpmu", 0x0AA80000, 64}, {"wtimer", 0x0AC00000, 16}};
+static constexpr uint32_t WLAN_SIDE_WORDS = 64 + 16;
+// The buffer also holds the power control block as found, before the wake request or the reset changes it, and
+// the WLAN side as found and after the wake request.
+static constexpr uint32_t POWER_OFFSET = MEMORY_WORDS;
+static constexpr uint32_t SIDE_FOUND_OFFSET = POWER_OFFSET + POWER_WORDS;
+static constexpr uint32_t SIDE_WOKEN_OFFSET = SIDE_FOUND_OFFSET + WLAN_SIDE_WORDS;
+static constexpr uint32_t CAPTURE_WORDS = SIDE_WOKEN_OFFSET + WLAN_SIDE_WORDS;
+
+// Power switch 5 (bit 14 of 0x004) is on while the WLAN domain is powered, in the hang too.
+inline bool wlan_switch_on() { return (cpu_register(POWER_CONTROL_BASE + 0x004) & (1U << 14)) != 0; }
+
+XR806_DIAG_FLASH inline void read_wlan_side(uint32_t *out) {
+  for (const auto &region : WLAN_SIDE) {
+    const volatile uint32_t *in = app_address(region.start);
+    for (uint32_t i = 0; i < region.words; ++i)
+      *out++ = in[i];
+  }
+}
+
+// Rows of eight words per WLAN-side region; with reference, only the rows that differ from it.
+XR806_DIAG_FLASH inline void print_wlan_side(const char *label, const uint32_t *words,
+                                             const uint32_t *reference = nullptr) {
+  static const char *const TAG = "xr806.wlan_diag";
+  for (const auto &region : WLAN_SIDE) {
+    for (uint32_t i = 0; i < region.words; i += 8, words += 8) {
+      if (reference != nullptr) {
+        const bool same = memcmp(words, reference, 8 * sizeof(uint32_t)) == 0;
+        reference += 8;
+        if (same)
+          continue;
+      }
+      const uint32_t *w = words;
+      ESP_LOGE(TAG,
+               "%s %s %08" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
+               " %08" PRIX32 " %08" PRIX32,
+               label, region.label, region.start + 4 * i, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+      delay(3);
+    }
+  }
+}
 
 struct Capture {
   uint32_t status_first{0}, hif_first{0}, status_last{0}, hif_last{0};
   uint32_t waited_ms{0};
   bool copied{false};
   bool domain_reset{false};
+  bool side_found{false};  // the WLAN side was read as found
+  bool side_woken{false};  // and again after the wake request
   uint32_t *words{nullptr};
 };
 
@@ -209,12 +252,20 @@ XR806_DIAG_FLASH inline void capture(Capture &c) {
   volatile uint32_t &hif = cpu_register(POWER_WLAN_HIF_OVERRIDE);
   OS_ThreadSuspendScheduler();
   if (c.words != nullptr)
-    read_power_control(c.words + MEMORY_WORDS);
+    read_power_control(c.words + POWER_OFFSET);
   c.status_first = cpu_register(POWER_SYS3_STATUS);
   c.hif_first = hif;
+  if (!wlan_alive() && wlan_switch_on() && c.words != nullptr) {
+    read_wlan_side(c.words + SIDE_FOUND_OFFSET);
+    c.side_found = true;
+  }
   if (!wlan_alive()) {
     hif = c.hif_first | wlan_power::HIF_WAKE;
     wlan_power::wait_alive(300, &c.waited_ms);
+    if (!wlan_alive() && c.side_found && wlan_switch_on()) {
+      read_wlan_side(c.words + SIDE_WOKEN_OFFSET);
+      c.side_woken = true;
+    }
   }
   if (!wlan_alive()) {
     // The domain is down and the wake request does nothing.
@@ -247,9 +298,13 @@ XR806_DIAG_FLASH inline void print_capture(Capture &c) {
            c.hif_last, c.copied ? LOG_STR_LITERAL("copied") : LOG_STR_LITERAL("not readable"));
   if (c.words != nullptr) {
     // As found, then what the wake request and the reset changed.
-    print_power_control("prcm", c.words + MEMORY_WORDS);
-    print_power_control("prcm-now", nullptr, c.words + MEMORY_WORDS);
+    print_power_control("prcm", c.words + POWER_OFFSET);
+    print_power_control("prcm-now", nullptr, c.words + POWER_OFFSET);
   }
+  if (c.side_found)
+    print_wlan_side("found", c.words + SIDE_FOUND_OFFSET);
+  if (c.side_woken)
+    print_wlan_side("after wake request", c.words + SIDE_WOKEN_OFFSET, c.words + SIDE_FOUND_OFFSET);
   if (c.copied) {
     const uint32_t *w = c.words;
     for (const auto &region : REGIONS) {
@@ -303,8 +358,15 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
   // Read first: the driver's recovery task clears the flag again within a moment.
   const bool failed = wlan_driver_failed();
   Capture hung;
-  if (failed)
+  if (failed) {
+    if (!wlan_alive() && wlan_switch_on()) {
+      // Experimental: this read of the hung domain may block the CPU until the watchdog restarts it.
+      ESP_LOGW(TAG, "Reading the hung WLAN core's own power registers; a restart right after this line means the "
+                    "read blocked");
+      delay(20);  // let the line reach the UART
+    }
     capture(hung);
+  }
   Snapshot after;
   if (!failed)  // a request to a failed driver only runs into its timeout
     take(after);
@@ -339,6 +401,19 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
       print_capture(hung);
     } else if (c.count == 2) {
       dump_power_control("prcm-ok");  // reference values from a good cycle
+      // The same WLAN-side registers through the running firmware, which is safe while the core answers.
+      uint32_t *side = static_cast<uint32_t *>(malloc(WLAN_SIDE_WORDS * sizeof(uint32_t)));
+      if (side != nullptr) {
+        uint32_t *out = side;
+        bool ok = true;
+        for (const auto &region : WLAN_SIDE) {
+          for (uint32_t i = 0; i < region.words && ok; i += 16, out += 16)
+            ok = wlan_read_words(region.start + 4 * i, out, 16) == 0;  // region sizes are multiples of 16
+        }
+        if (ok)
+          print_wlan_side("ok", side);
+        free(side);
+      }
     }
   }
   if (failed)
