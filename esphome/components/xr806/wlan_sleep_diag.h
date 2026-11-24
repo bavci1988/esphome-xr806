@@ -189,10 +189,14 @@ static constexpr Region REGIONS[] = {
     {"rxcnt", 0xFFF02280, 32}, {"keepalive", 0x0900BB80, 72}, {"stack", 0xFFF0B000, 1024},
 };
 static constexpr uint32_t MEMORY_WORDS = 40 + 16 + 16 + 32 + 72 + 1024;
-// Power control of the WLAN domain itself (its sleep-on-WFI register is 0x0AA800A0) and its timer. The CPU
-// reaches them only through the domain's bus, so a hung core is read directly only while its power switch is on.
-static constexpr Region WLAN_SIDE[] = {{"wpmu", 0x0AA80000, 64}, {"wtimer", 0x0AC00000, 16}};
-static constexpr uint32_t WLAN_SIDE_WORDS = 64 + 16;
+// Registers of the WLAN domain's own power control (its sleep-on-WFI register is 0x0AA800A0) and timer, read
+// one by one: only those the WLAN firmware itself reads. 0x0AA800C4 and up are hardware spinlocks, where a read
+// takes the lock, so a plain dump of the block leaves the core spinning. The CPU reaches them only through the
+// domain's bus, so a hung core is read directly only while its power switch is on.
+static constexpr uint32_t WLAN_SIDE[] = {0x0AA80018, 0x0AA80040, 0x0AA80044, 0x0AA80048, 0x0AA80080,
+                                         0x0AA80084, 0x0AA80090, 0x0AA80094, 0x0AA80098, 0x0AA8009C,
+                                         0x0AA800A0, 0x0AC00004, 0x0AC00014, 0x0AC0001C};
+static constexpr uint32_t WLAN_SIDE_WORDS = sizeof(WLAN_SIDE) / sizeof(WLAN_SIDE[0]);
 // The buffer also holds the power control block as found, before the wake request or the reset changes it, and
 // the WLAN side as found and after the wake request.
 static constexpr uint32_t POWER_OFFSET = MEMORY_WORDS;
@@ -204,33 +208,22 @@ static constexpr uint32_t CAPTURE_WORDS = SIDE_WOKEN_OFFSET + WLAN_SIDE_WORDS;
 inline bool wlan_switch_on() { return (cpu_register(POWER_CONTROL_BASE + 0x004) & (1U << 14)) != 0; }
 
 XR806_DIAG_FLASH inline void read_wlan_side(uint32_t *out) {
-  for (const auto &region : WLAN_SIDE) {
-    const volatile uint32_t *in = app_address(region.start);
-    for (uint32_t i = 0; i < region.words; ++i)
-      *out++ = in[i];
-  }
+  for (uint32_t i = 0; i < WLAN_SIDE_WORDS; ++i)
+    out[i] = *app_address(WLAN_SIDE[i]);
 }
 
-// Rows of eight words per WLAN-side region; with reference, only the rows that differ from it.
+// One line: address=value for each WLAN-side register; with reference, only the ones that differ from it.
 XR806_DIAG_FLASH inline void print_wlan_side(const char *label, const uint32_t *words,
                                              const uint32_t *reference = nullptr) {
   static const char *const TAG = "xr806.wlan_diag";
-  for (const auto &region : WLAN_SIDE) {
-    for (uint32_t i = 0; i < region.words; i += 8, words += 8) {
-      if (reference != nullptr) {
-        const bool same = memcmp(words, reference, 8 * sizeof(uint32_t)) == 0;
-        reference += 8;
-        if (same)
-          continue;
-      }
-      const uint32_t *w = words;
-      ESP_LOGE(TAG,
-               "%s %s %08" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
-               " %08" PRIX32 " %08" PRIX32,
-               label, region.label, region.start + 4 * i, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
-      delay(3);
-    }
+  char text[WLAN_SIDE_WORDS * 18 + 1];
+  size_t pos = 0;
+  for (uint32_t i = 0; i < WLAN_SIDE_WORDS; ++i) {
+    if (reference != nullptr && words[i] == reference[i])
+      continue;
+    pos += snprintf(text + pos, sizeof(text) - pos, " %05" PRIX32 "=%08" PRIX32, WLAN_SIDE[i] & 0xFFFFF, words[i]);
   }
+  ESP_LOGE(TAG, "WLAN side %s:%s", label, pos == 0 ? LOG_STR_LITERAL(" unchanged") : text);
 }
 
 struct Capture {
@@ -406,10 +399,8 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
       if (side != nullptr) {
         uint32_t *out = side;
         bool ok = true;
-        for (const auto &region : WLAN_SIDE) {
-          for (uint32_t i = 0; i < region.words && ok; i += 16, out += 16)
-            ok = wlan_read_words(region.start + 4 * i, out, 16) == 0;  // region sizes are multiples of 16
-        }
+        for (uint32_t i = 0; i < WLAN_SIDE_WORDS && ok; ++i)
+          ok = wlan_read_words(WLAN_SIDE[i], out + i, 1) == 0;
         if (ok)
           print_wlan_side("ok", side);
         free(side);
