@@ -12,7 +12,11 @@
 #elif defined(USE_XR806)
 #include "esphome/components/web_server_xr806/web_server_xr806.h"
 #else
+// The library's ESP8266 send_P() calls its own deprecated beginResponse_P()
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <ESPAsyncWebServer.h>
+#pragma GCC diagnostic pop
 #endif
 
 #if USE_ESP32 || defined(USE_XR806)

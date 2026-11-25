@@ -394,7 +394,10 @@ async def to_code(config: ConfigType) -> None:
         if "ota" in CORE.config:
             # OTA state updates are informative, NOT evidence that the
             # OTA listener and flash writer are already disarmed.
-            cg.add_define("USE_OTA_STATE_LISTENER")
+            from esphome.components import ota
+
+            # One add_global_state_listener() slot for the standby OTA guard
+            ota.request_ota_state_listeners()
             cg.add_global(
                 cg.RawStatement(
                     '#include "esphome/components/xr806/standby_ota_guard.h"'

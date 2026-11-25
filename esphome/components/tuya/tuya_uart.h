@@ -6,6 +6,8 @@
 
 #include "tuya.h"
 #include "esphome/components/uart/uart.h"
+#include "esphome/core/frame_reader.h"
+#include "esphome/core/helpers.h"
 
 #ifdef USE_TUYA_LOW_POWER
 #include <array>
@@ -28,6 +30,14 @@
 #endif
 
 namespace esphome::tuya {
+
+// Longest frame accepted, as in Tasmota; keeps the reader's positions 8 bit
+static constexpr size_t MAX_FRAME_SIZE = 255;
+
+// 55 AA, version, command, payload length (2, BE), payload, checksum
+using TuyaLength = PayloadLengthU16BE<LengthField{.offset = 4, .trailer = 1}>;
+void warn_too_long(size_t len);
+using TuyaFrame = FrameFormat<FrameHeader<0x55, 0xAA>, WarnIfLonger<TuyaLength, MAX_FRAME_SIZE, warn_too_long>>;
 
 enum class TuyaCommandType : uint8_t {
   HEARTBEAT = 0x00,
@@ -120,9 +130,9 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
 
  protected:
   void dump_mcu_config_();
-  void handle_char_(uint8_t c);
+  /// Returns false for a frame that fails the checksum
+  bool handle_frame_(const uint8_t *frame, size_t len);
   void handle_datapoints_(const uint8_t *buffer, size_t len);
-  bool validate_message_();
 
   void handle_command_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len);
   void notify_mcu_ready_() {
@@ -139,6 +149,7 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   bool check_low_power_uart_rx_errors_();
   uint32_t low_power_uart_rx_error_count_() const;
   void dump_low_power_config_();
+  // A byte or frame arrived: stops a pending sleep handshake
   void on_low_power_rx_byte_();
   void preempt_low_power_sleep_();
   void handle_low_power_frame_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len);
@@ -266,6 +277,7 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   uint32_t lp_wake_guard_until_{0};
   uint32_t lp_mcu_wake_pulse_until_{0};
   uint32_t lp_mcu_woken_ms_{0};      // End of the last wake pulse
+  uint32_t lp_mcu_heard_ms_{0};      // Last valid frame from the MCU
   bool lp_mcu_wake_fresh_{false};    // The last wake pulse is not answered yet
   uint32_t lp_product_probe_ms_{0};  // Last product query of a recovery
   enum class ProductProbe : uint8_t { PRODUCT_PROBE_NONE, PRODUCT_PROBE_QUEUED, PRODUCT_PROBE_DIRECT };
@@ -298,11 +310,13 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   uint32_t last_command_timestamp_ = 0;
   uint32_t last_rx_char_timestamp_ = 0;
   std::unique_ptr<char[]> product_;
-  std::vector<uint8_t> rx_message_;
   std::vector<TuyaCommand> command_queue_;
   optional<TuyaCommandType> expected_response_{};
   uint8_t wifi_status_ = -1;
   bool product_invalid_{false};
+  // Holds commands back while a received frame is handled
+  bool handling_frame_{false};
+  LengthFrameReader<MAX_FRAME_SIZE, TuyaFrame> reader_;
 };
 
 #ifdef USE_TUYA_LOW_POWER

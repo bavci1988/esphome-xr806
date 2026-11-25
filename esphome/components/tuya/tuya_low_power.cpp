@@ -19,7 +19,6 @@
 namespace esphome::tuya {
 
 static const char *const LP_TAG = "tuya.low_power";
-static constexpr uint32_t LP_RX_TIMEOUT_MS = 300;
 // A version-3 MCU (firmware 1.0.9) reports changes made at the device only when asked.
 static constexpr uint32_t LP_V3_STATUS_POLL_MS = 60000;
 static constexpr uint32_t LP_COMMAND_DELAY_MS = 10;
@@ -100,7 +99,7 @@ bool TuyaUART::check_low_power_uart_rx_errors_() {
            static_cast<unsigned>(count));
   this->cancel_low_power_preflight_(true);
   this->cancel_low_power_standby_();
-  this->rx_message_.clear();
+  this->reader_.reset();
   this->lp_session_.command_timeout();
   this->lp_wire_.transport_fault();  // Do not replay an ambiguous CMD09/ACK.
   this->expected_response_.reset();
@@ -119,6 +118,7 @@ bool TuyaUART::check_low_power_uart_rx_errors_() {
 }
 
 void TuyaUART::loop_low_power_() {
+  // An RX error counted while loop() read the frames is handled before anything is sent
   if (this->check_low_power_uart_rx_errors_())
     this->discard_available();
   this->poll_low_power_product_probe_();
@@ -169,7 +169,7 @@ void TuyaUART::loop_low_power_() {
 
 void TuyaUART::poll_low_power_v3_status_() {
   if (!this->lp_v3_ || this->lp_v3_pushes_ || !this->lp_session_.ready() || !this->lp_wire_.idle() ||
-      !this->command_queue_.empty() || !this->rx_message_.empty())
+      !this->command_queue_.empty() || this->reader_.receiving())
     return;
   const uint32_t now = App.get_loop_component_start_time();
   if (now - this->lp_v3_last_poll_ms_ < LP_V3_STATUS_POLL_MS)
@@ -212,10 +212,13 @@ void TuyaUART::preempt_low_power_sleep_() {
 }
 
 void TuyaUART::handle_low_power_frame_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len) {
+  // Only a valid frame shows that the MCU is awake; noise on the line of a sleeping MCU does not
+  this->lp_mcu_heard_ms_ = millis();
   if (this->auto_baud_ && this->lp_autobaud_.searching()) {
-    // validate_message_ already checked the full checksum. Keep the scanner
+    // handle_frame_ already checked the full checksum. Keep the scanner
     // independent so bad/wrong frames cannot unlock the boot state machine.
-    if (!this->lp_autobaud_.accept_frame(this->rx_message_.data(), this->rx_message_.size(),
+    // buffer is the payload inside the whole frame: 6 header bytes before it, the checksum after it.
+    if (!this->lp_autobaud_.accept_frame(buffer - TuyaLength::KNOWN_AT, len + TuyaLength::KNOWN_AT + 1,
                                          App.get_loop_component_start_time())) {
       // Show what the MCU sent, so a reply the scan does not recognize can be diagnosed.
       char hex[3 * 12 + 1];
@@ -426,7 +429,7 @@ void TuyaUART::poll_low_power_autobaud_() {
     this->status_set_warning(LOG_STR("MCU UART baud rate"));
     return;
   }
-  this->rx_message_.clear();  // Drop a partial frame from the previous rate.
+  this->reader_.reset();  // Drop a partial frame from the previous rate.
   this->lp_autobaud_.probe_sent(App.get_loop_component_start_time());
   this->send_low_power_product_query_(true);
   if (this->lp_autobaud_.attempts() % 8 == 0) {
@@ -458,7 +461,7 @@ void TuyaUART::poll_low_power_product_recovery_() {
   // direct CMD01 recovery probe used to re-establish the MCU identity.
   const bool idle = !this->lp_session_.busy() && !this->lp_wire_.active() &&
                     (this->lp_wire_.faulted() || this->command_queue_.empty()) &&
-                    !this->expected_response_.has_value() && this->rx_message_.empty();
+                    !this->expected_response_.has_value() && !this->reader_.receiving();
   if (this->lp_product_retry_.active()) {
     if (!this->lp_product_retry_.due(now) || !idle) {
       return;
@@ -491,8 +494,7 @@ void TuyaUART::poll_low_power_product_recovery_() {
 }
 
 bool TuyaUART::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
-  // A validated CMD38 frame is still present in rx_message_ until the
-  // parser callback returns. Only that specific frame can be disregarded.
+  // Called from the CMD38 handler, the frame being handled is not a frame still coming in.
   const bool guard_elapsed =
       static_cast<int32_t>(App.get_loop_component_start_time() - this->lp_wake_guard_until_) >= 0;
   const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
@@ -503,7 +505,7 @@ bool TuyaUART::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
          this->lp_uart_rx_errors_.unchanged(this->low_power_uart_rx_error_count_()) &&
          !this->lp_standby_.recovery_required() && this->command_queue_.empty() && !this->lp_mcu_wake_pulse_active_ &&
          !this->lp_awake_notification_pending_ && !this->expected_response_.has_value() &&
-         this->lp_mcu_update_ == McuUpdate::MCU_UPDATE_IDLE && (in_cmd38_handler || this->rx_message_.empty());
+         this->lp_mcu_update_ == McuUpdate::MCU_UPDATE_IDLE && (in_cmd38_handler || !this->reader_.receiving());
 }
 
 void TuyaUART::update_low_power_sleep_lock_() {
@@ -1082,10 +1084,8 @@ void TuyaUART::low_power_standby_resumed(bool expected_source, bool wake_gpio, b
 
 void TuyaUART::process_low_power_queue_() {
   const uint32_t now = App.get_loop_component_start_time();
-  // The byte and command timestamps of tuya_uart.cpp come from millis(), so compare them with it.
+  // The command timestamp of tuya_uart.cpp comes from millis(), so compare it with millis().
   const uint32_t wire_now = millis();
-  if (static_cast<uint32_t>(wire_now - this->last_rx_char_timestamp_) > LP_RX_TIMEOUT_MS)
-    this->rx_message_.clear();
   if (this->mcu_wake_pulse_running_())
     return;
 
@@ -1116,7 +1116,7 @@ void TuyaUART::process_low_power_queue_() {
   }
 
   if (this->lp_session_.busy() || this->lp_wire_.active() || this->lp_wire_.faulted() ||
-      this->expected_response_.has_value() || !this->rx_message_.empty() ||
+      this->expected_response_.has_value() || this->reader_.receiving() || this->handling_frame_ ||
       static_cast<uint32_t>(wire_now - this->last_command_timestamp_) <= LP_COMMAND_DELAY_MS)
     return;
   // Before the product info only CMD01 may go out. Writes wait until the MCU's state is known, while the MCU
@@ -1132,7 +1132,7 @@ void TuyaUART::process_low_power_queue_() {
   // A low-power MCU sleeps whenever it is idle and listens only after a pulse on its wake line; the command goes
   // out once the pulse is over. A version-0 MCU can fall asleep right after its own answer, so for it neither a
   // recent byte nor a pulse that it has already answered counts: only a fresh, unanswered pulse.
-  const bool awake = this->lp_v3_ ? wire_now - this->last_rx_char_timestamp_ <= LP_MCU_SILENT_MS ||
+  const bool awake = this->lp_v3_ ? wire_now - this->lp_mcu_heard_ms_ <= LP_MCU_SILENT_MS ||
                                         wire_now - this->lp_mcu_woken_ms_ <= LP_MCU_SILENT_MS
                                   : this->lp_mcu_wake_fresh_ && wire_now - this->lp_mcu_woken_ms_ <= LP_MCU_SILENT_MS;
   if (this->mcu_wake_pin_ != nullptr && (this->lp_mcu_asleep_ || !awake)) {
@@ -1144,6 +1144,8 @@ void TuyaUART::process_low_power_queue_() {
   this->command_queue_.erase(next);
   if (this->lp_v3_ && is_low_power_write(command))
     command.cmd = static_cast<TuyaCommandType>(0x06);
+  // A partial frame kept by an idle flush must not merge into the reply
+  this->reader_.drop_kept();
   this->send_raw_command_(command);
 }
 
@@ -1151,6 +1153,8 @@ void TuyaUART::send_low_power_direct_(uint8_t command, const std::vector<uint8_t
   // ACKs and time replies must not wait behind a pending CMD09 write.
   if (payload.size() > 65535)
     return;
+  // A partial frame kept by an idle flush must not merge into the reply
+  this->reader_.drop_kept();
   this->lp_v3_idle_since_ms_ = App.get_loop_component_start_time();
   const uint8_t header[] = {
       0x55, 0xAA, 0x00, command, static_cast<uint8_t>(payload.size() >> 8), static_cast<uint8_t>(payload.size()),

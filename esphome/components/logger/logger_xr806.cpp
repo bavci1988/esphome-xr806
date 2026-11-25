@@ -54,9 +54,6 @@ void HOT Logger::write_msg_(const char *msg, uint16_t len) {
   }
 }
 
-// Config validation allows only UART2, the WXU console.
-const LogString *Logger::get_uart_selection_() { return LOG_STR("UART2"); }
-
 }  // namespace esphome::logger
 
 #endif  // USE_XR806
