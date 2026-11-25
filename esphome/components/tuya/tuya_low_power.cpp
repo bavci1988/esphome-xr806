@@ -118,11 +118,10 @@ bool TuyaUART::check_low_power_uart_rx_errors_() {
   this->lp_session_.command_timeout();
   this->lp_wire_.transport_fault();  // Do not replay an ambiguous CMD09/ACK.
   this->expected_response_.reset();
-  if (!this->command_queue_.empty()) {
-    ESP_LOGW(LP_TAG, "Discarded %u queued MCU commands after UART RX loss",
-             static_cast<unsigned>(this->command_queue_.size()));
-    this->command_queue_.clear();
-  }
+  // As after an ACK timeout: unsent writes wait for the full resync, queued handshake commands are stale.
+  auto &queue = this->command_queue_;
+  queue.erase(std::remove_if(queue.begin(), queue.end(), [](const TuyaCommand &c) { return !is_low_power_write(c); }),
+              queue.end());
   this->lp_network_status_ = 0xFF;
   this->invalidate_low_power_mode_epoch_();
   // The direct CMD01 retry is permitted while the wire is quarantined;
@@ -1141,13 +1140,14 @@ void TuyaUART::process_low_power_queue_() {
     return;
   // Before the product info only CMD01 may go out. Writes wait until the MCU's state is known, while the MCU
   // sleeps under its standby consent, and during an MCU firmware update.
-  // Writes also wait until a report series the MCU started on its own is over.
+  // With a wake line, writes also wait until a report series the MCU started on its own is over. Without one,
+  // a write must go out while the MCU is still awake from its reports.
   auto next = std::find_if(this->command_queue_.begin(), this->command_queue_.end(), [this, now](const TuyaCommand &c) {
     if (!this->lp_session_.has_product())
       return c.cmd == TuyaCommandType::PRODUCT_QUERY;
     return !is_low_power_write(c) ||
-           (this->lp_session_.ready() && this->lp_session_.quiet(now) && !this->lp_standby_.requested() &&
-            this->lp_mcu_update_ == McuUpdate::MCU_UPDATE_IDLE);
+           (this->lp_session_.ready() && (this->mcu_wake_pin_ == nullptr || this->lp_session_.quiet(now)) &&
+            !this->lp_standby_.requested() && this->lp_mcu_update_ == McuUpdate::MCU_UPDATE_IDLE);
   });
   if (next == this->command_queue_.end())
     return;
@@ -1329,7 +1329,7 @@ void TuyaUART::handle_low_power_command_(uint8_t command, uint8_t version, const
         ESP_LOGW(LP_TAG, "Malformed CMD01 product info: retrying at 500ms intervals (bounded)");
         return;
       }
-      // parse() limits len to 512, so the raw descriptor fits our fixed
+      // The frame reader limits a frame to MAX_FRAME_SIZE, so the raw descriptor fits our fixed
       // diagnostics buffer without an extra allocation and without an
       // implementation-dependent nothrow-new/abort path.
       std::memcpy(this->lp_product_text_.data(), data, len);
