@@ -12,9 +12,9 @@ namespace esphome::xr806::wlan_power {
 #define XR806_WLAN_POWER_FLASH __attribute__((noinline, section(".xip_text.wlan_power")))
 
 static constexpr uint32_t POWER_CONTROL_BASE = 0x40040000;
-static constexpr uint32_t POWER_CONTROL_SIZE = 0x240;
-static constexpr uint32_t POWER_SYS3_CTRL = POWER_CONTROL_BASE + 0x90;           // bit 0 clear: domain held in reset
-static constexpr uint32_t POWER_SYS3_STATUS = POWER_CONTROL_BASE + 0x94;         // bit 0: alive
+static constexpr uint32_t POWER_CONTROL_SIZE = 0x270;                     // up to the RC oscillator calibration control
+static constexpr uint32_t POWER_SYS3_CTRL = POWER_CONTROL_BASE + 0x90;    // bit 0 clear: domain held in reset
+static constexpr uint32_t POWER_SYS3_STATUS = POWER_CONTROL_BASE + 0x94;  // bit 0: alive
 static constexpr uint32_t POWER_WLAN_HIF_OVERRIDE = POWER_CONTROL_BASE + 0x21C;  // bit 1: hold CPU, bit 2: wake
 static constexpr uint32_t HIF_HOLD_CPU = 0x2;
 static constexpr uint32_t HIF_WAKE = 0x4;

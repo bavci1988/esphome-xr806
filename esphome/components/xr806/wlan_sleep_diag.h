@@ -152,10 +152,12 @@ XR806_DIAG_FLASH inline void print_power_control(const char *label, const uint32
 
 XR806_DIAG_FLASH inline void dump_power_control(const char *label) { print_power_control(label, nullptr); }
 
-// Power words that a hang changes: LDO and power switch status (0x004, bit 14: switch 5), the WLAN domain's control
-// and status (0x090, 0x094) and the block from DCDC parameters to the WLAN override (0x200-0x22C).
-static constexpr uint16_t POWER_LINE_OFFSETS[] = {0x004, 0x090, 0x094, 0x200, 0x204, 0x208, 0x20C, 0x210,
-                                                  0x214, 0x218, 0x21C, 0x220, 0x224, 0x228, 0x22C};
+// Power words that a hang changes: LDO and power switch status (0x004, bit 14: switch 5), power control config
+// (0x074, bits 6-7: when the 32 kHz calibration starts), the WLAN domain's control and status (0x090, 0x094), the
+// block from DCDC parameters to the WLAN override (0x200-0x22C), the 32 kHz clock sources (0x23C), the wake-up
+// source clocks (0x240) and the RC oscillator calibration control (0x260, 0x264).
+static constexpr uint16_t POWER_LINE_OFFSETS[] = {0x004, 0x074, 0x090, 0x094, 0x200, 0x204, 0x208, 0x20C, 0x210, 0x214,
+                                                  0x218, 0x21C, 0x220, 0x224, 0x228, 0x22C, 0x23C, 0x240, 0x260, 0x264};
 static constexpr size_t POWER_LINE_WORDS = sizeof(POWER_LINE_OFFSETS) / sizeof(POWER_LINE_OFFSETS[0]);
 
 XR806_DIAG_FLASH inline void read_power_line(uint32_t *out) {
@@ -173,7 +175,7 @@ XR806_DIAG_FLASH inline void print_power_line(const char *label, const uint32_t 
   size_t pos = 0;
   for (size_t i = 0; i < POWER_LINE_WORDS; ++i)
     pos += snprintf(text + pos, sizeof(text) - pos, " %08" PRIX32, words[i]);
-  ESP_LOGI(TAG, "power %s (004 090 094 200..22C, printed on change):%s", label, text);
+  ESP_LOGI(TAG, "power %s (004 074 090 094 200..22C 23C 240 260 264, printed on change):%s", label, text);
 }
 
 // Parts of the WLAN core's memory that show where a hung core stands: scheduler words and timer list head,
@@ -322,6 +324,7 @@ struct Cycle {
   int rx{0}, tx{0};
   Snapshot before;
   uint32_t power_before[POWER_LINE_WORDS]{};
+  uint32_t monitor_first{0};
   uint32_t printed_before[POWER_LINE_WORDS]{};
   uint32_t printed_after[POWER_LINE_WORDS]{};
 };
@@ -332,6 +335,24 @@ inline Cycle &cycle() {
 }
 
 // Right before the PM call: read only, print after the wake so no UART traffic delays standby.
+// The 32 kHz clock of the WLAN core comes from the RC oscillator calibration unit (no 32 kHz crystal on this
+// module). Its monitor flags a glitch or an over-long level on that clock; it is cleared before every standby.
+static constexpr uint32_t RC_CALIBRATION_BASE = 0x40046000;
+static constexpr uint32_t RC_CALIBRATION_DCXO_COUNT = RC_CALIBRATION_BASE + 0x08;
+static constexpr uint32_t RC_CALIBRATION_MONITOR = RC_CALIBRATION_BASE + 0x0C;
+static constexpr uint32_t MONITOR_ENABLE = 1U << 4;
+static constexpr uint32_t MONITOR_CLEAR = (1U << 5) | (1U << 2);
+static constexpr uint32_t MONITOR_FLAGS = (1U << 6) | (1U << 7);  // long level found, glitch found
+
+XR806_DIAG_FLASH inline void print_clock_monitor(const char *label, uint32_t monitor) {
+  static const char *const TAG = "xr806.wlan_diag";
+  ESP_LOGW(TAG,
+           "32 kHz clock monitor %s: %08" PRIX32 ", long level %u (longest %" PRIu32 "), glitch %u (widest %" PRIu32
+           "), calibration count %08" PRIX32,
+           label, monitor, (monitor >> 6) & 1U, monitor >> 16, (monitor >> 7) & 1U, (monitor >> 8) & 0x7FU,
+           cpu_register(RC_CALIBRATION_DCXO_COUNT));
+}
+
 XR806_DIAG_FLASH inline void before_standby() {
   auto &c = cycle();
   ++c.count;
@@ -339,6 +360,11 @@ XR806_DIAG_FLASH inline void before_standby() {
   c.tx = skb_tx_cnt;
   take(c.before);
   read_power_line(c.power_before);
+  volatile uint32_t &monitor = cpu_register(RC_CALIBRATION_MONITOR);
+  if (c.count == 1)
+    c.monitor_first = monitor;
+  monitor = MONITOR_ENABLE | MONITOR_CLEAR;
+  monitor = MONITOR_ENABLE;
   c.start_ms = millis();
 }
 
@@ -348,6 +374,7 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
   const uint32_t slept = millis() - c.start_ms;
   uint32_t power_after[POWER_LINE_WORDS];
   read_power_line(power_after);
+  const uint32_t monitor = cpu_register(RC_CALIBRATION_MONITOR);
   // Read first: the driver's recovery task clears the flag again within a moment.
   const bool failed = wlan_driver_failed();
   Capture hung;
@@ -384,11 +411,17 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
   print("after ", after);
   print_power_line("before", c.power_before, c.printed_before);
   print_power_line("after ", power_after, c.printed_after);
+  if (c.count == 1)
+    print_clock_monitor("at boot", c.monitor_first);
+  if ((monitor & MONITOR_FLAGS) != 0 || failed || c.count == 1)
+    print_clock_monitor("during standby", monitor);
   if (c.before.ok && after.ok) {
     // The core's clock must advance as far as the CPU's; less means the core slept past its own timers.
     const uint32_t wlan_ms = ((after.counter + after.offset) - (c.before.counter + c.before.offset)) / 1000;
     if (wlan_ms + 2000 < slept) {
       ESP_LOGE(TAG, "WLAN clock advanced only %" PRIu32 " of %" PRIu32 " ms: the core overslept", wlan_ms, slept);
+      if ((monitor & MONITOR_FLAGS) == 0)
+        print_clock_monitor("during standby", monitor);
       // The core runs again, so its memory can be read: what it queued for the CPU and where it stood.
       capture(hung);
       print_capture(hung);
