@@ -4,6 +4,8 @@
 
 #if defined(USE_XR806_HTTP_STANDBY) && defined(USE_XR806_STANDBY_CONTROLLER)
 
+#include <atomic>
+
 #include "esphome/core/component.h"
 #include "standby_controller.h"
 
@@ -12,7 +14,9 @@ namespace esphome::xr806 {
 /// Standby owner of the web server listener and its PM wakelock.
 ///
 /// ESPAsyncWebServer serves its clients on the lwIP thread and cannot report its open
-/// connections. With stay_connected the listener stays open: a new request wakes the chip.
+/// connections. With stay_connected the listener stays open: a new request wakes the chip, and
+/// the chip stays awake for a fixed time after each request, so a page and its follow-up
+/// requests load without a standby in between.
 /// Otherwise the listener is closed before standby and the clients get a fixed time to finish.
 /// While the captive portal serves the setup access point, the chip stays awake.
 class XR806HTTPStandby final : public Component, public XR806StandbyParticipant {
@@ -37,6 +41,10 @@ class XR806HTTPStandby final : public Component, public XR806StandbyParticipant 
 
   void *lock_{nullptr};
   uint32_t parked_ms_{0};
+  uint32_t last_request_ms_{0};
+  // Set on the lwIP thread by a request, taken by the main loop.
+  std::atomic<bool> request_seen_{false};
+  bool holding_{false};
   bool lock_held_{false};
   bool parked_{false};
   bool shutting_down_{false};

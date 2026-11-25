@@ -18,6 +18,8 @@ ESPHOME_LOG_TAG(TAG, "xr806.http_standby");
 
 // Time for requests already accepted to finish after the listener closed.
 static constexpr uint32_t CLIENT_DRAIN_MS = 2000;
+// With stay_connected: time awake after a request, for the requests that follow it.
+static constexpr uint32_t REQUEST_HOLD_MS = 5000;
 
 static AsyncWebServer *http_server() {
   auto *base = web_server_base::global_web_server_base;
@@ -64,6 +66,15 @@ void XR806HTTPStandby::setup() {
     return;
   }
   lowpower_policy().set_http_idle(false);
+  if (auto *server = http_server(); server != nullptr) {
+    // Runs on the lwIP thread for every request, once its headers and body are in. The vote
+    // also stops a standby that is being entered right now.
+    server->addMiddleware([this](AsyncWebServerRequest * /*request*/, ArMiddlewareNext next) {
+      this->request_seen_.store(true, std::memory_order_release);
+      lowpower_policy().set_http_idle(false);
+      next();
+    });
+  }
 }
 
 void XR806HTTPStandby::dump_config() { ESP_LOGCONFIG(TAG, "XR806 HTTP standby: listener and captive portal guarded"); }
@@ -96,6 +107,11 @@ void XR806HTTPStandby::restore_() {
 }
 
 void XR806HTTPStandby::standby_preflight(bool requested) {
+  const uint32_t now = App.get_loop_component_start_time();
+  if (this->request_seen_.exchange(false, std::memory_order_acq_rel)) {
+    this->holding_ = true;
+    this->last_request_ms_ = now;
+  }
   if (!requested) {
     this->restore_();
     return;
@@ -104,14 +120,21 @@ void XR806HTTPStandby::standby_preflight(bool requested) {
   if (!this->may_quiesce() || server == nullptr)
     return;  // Fail closed until the shared server actually exists.
   auto *controller = standby_controller();
+  if (this->holding_ && controller != nullptr && controller->stay_connected()) {
+    if (now - this->last_request_ms_ < REQUEST_HOLD_MS) {
+      this->restore_();
+      return;
+    }
+    this->holding_ = false;
+  }
   if (controller == nullptr || !controller->stay_connected()) {
     if (!this->parked_) {
       // Stop new requests; the accepted ones get CLIENT_DRAIN_MS to finish.
       server->end();
       this->parked_ = true;
-      this->parked_ms_ = App.get_loop_component_start_time();
+      this->parked_ms_ = now;
     }
-    if (App.get_loop_component_start_time() - this->parked_ms_ < CLIENT_DRAIN_MS)
+    if (now - this->parked_ms_ < CLIENT_DRAIN_MS)
       return;
   }
   if (this->release_lock_())
