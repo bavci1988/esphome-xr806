@@ -4,6 +4,7 @@
 // No sequence numbers exist in the original protocol: serializing writes
 // prevents local overlap but cannot prove an arbitrarily late same-CMD ACK
 // belongs to the latest transaction. An ambiguous timeout blocks new writes.
+// Waiting commands: CMD01, CMD02, CMD09, and for a version-3 MCU the write (CMD06) and status query (CMD08).
 #include <cstddef>
 #include <cstdint>
 
@@ -11,7 +12,8 @@ namespace esphome::tuya {
 
 class TuyaLowPowerWireTransactions {
  public:
-  enum class Kind : uint8_t { NONE, PRODUCT, NETWORK, WRITE };
+  // REPORT: a version-3 write (CMD06) or status query (CMD08), both answered by the MCU's CMD07 report
+  enum class Kind : uint8_t { NONE, PRODUCT, NETWORK, WRITE, REPORT };
   static constexpr uint32_t ACK_TIMEOUT_MS = 1500;
 
   bool begin(uint8_t command, uint32_t now) {
@@ -23,6 +25,8 @@ class TuyaLowPowerWireTransactions {
       kind_ = Kind::NETWORK;
     } else if (command == 0x09) {
       kind_ = Kind::WRITE;
+    } else if (command == 0x06 || command == 0x08) {
+      kind_ = Kind::REPORT;
     } else {
       return false;  // Direct replies/notifications must not claim a queue slot.
     }
@@ -39,9 +43,12 @@ class TuyaLowPowerWireTransactions {
       case Kind::PRODUCT:
         return command == 0x01 && len != 0;
       case Kind::NETWORK:
-        return command == 0x02 && len == 0;
+        // Empty, or the two pin bytes of a version-3 MCU's working-mode answer
+        return command == 0x02 && (len == 0 || len == 2);
       case Kind::WRITE:
         return command == 0x09 && len == 0;
+      case Kind::REPORT:
+        return command == 0x07 && len >= 4;
       default:
         return false;
     }

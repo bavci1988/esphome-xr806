@@ -42,12 +42,9 @@ static bool network_is_connected() {
 
 void TuyaUART::setup() {
 #ifdef USE_TUYA_LOW_POWER
-  if (this->is_low_power_()) {
-    // Validation rejects force_time_sync and status_pin for this protocol.
-    this->setup_low_power_();
-    return;
-  }
-#endif
+  // Validation rejects force_time_sync and status_pin for this protocol.
+  this->setup_low_power_();
+#else
   this->set_interval(HEARTBEAT_INTERVAL_ID, 15000, [this] { this->send_empty_command_(TuyaCommandType::HEARTBEAT); });
 #ifdef USE_TIME
   if (this->force_time_sync_) {
@@ -59,27 +56,26 @@ void TuyaUART::setup() {
   if (this->status_pin_ != nullptr) {
     this->status_pin_->digital_write(false);
   }
+#endif
 }
 
 void TuyaUART::loop() {
 #ifdef USE_TUYA_LOW_POWER
-  if (this->is_low_power_()) {
-    if (this->init_failed_) {
-      // The MCU UART could not be set to a scanned baud rate. Act on none of its frames.
-      this->discard_available();
-      return;
-    }
-    // After an RX overflow or a framing error, drop what is waiting rather than accept a damaged MCU frame
-    if (this->check_low_power_uart_rx_errors_())
-      this->discard_available();
-    if (this->available() != 0) {
-      // Any byte that arrived, not only a complete frame, stops a pending sleep handshake
-      this->on_low_power_rx_byte_();
-      // A partial frame left over from a quiet line, e.g. from an MCU that fell asleep mid-frame, must not swallow
-      // the header of a new frame the MCU sends on its own
-      if (App.get_loop_component_start_time() - this->last_rx_char_timestamp_ >= RECEIVE_TIMEOUT)
-        this->reader_.drop_kept();
-    }
+  if (this->init_failed_) {
+    // The MCU UART could not be set to a scanned baud rate. Act on none of its frames.
+    this->discard_available();
+    return;
+  }
+  // After an RX overflow or a framing error, drop what is waiting rather than accept a damaged MCU frame
+  if (this->check_low_power_uart_rx_errors_())
+    this->discard_available();
+  if (this->available() != 0) {
+    // Any byte that arrived, not only a complete frame, stops a pending sleep handshake
+    this->on_low_power_rx_byte_();
+    // A partial frame left over from a quiet line, e.g. from an MCU that fell asleep mid-frame, must not swallow
+    // the header of a new frame the MCU sends on its own
+    if (App.get_loop_component_start_time() - this->last_rx_char_timestamp_ >= RECEIVE_TIMEOUT)
+      this->reader_.drop_kept();
   }
 #endif
   auto handler = [this](const uint8_t *frame, size_t len) { return this->handle_frame_(frame, len); };
@@ -89,12 +85,10 @@ void TuyaUART::loop() {
                     RECEIVE_TIMEOUT);
   this->handling_frame_ = false;
 #ifdef USE_TUYA_LOW_POWER
-  if (this->is_low_power_()) {
-    this->loop_low_power_();
-    return;
-  }
+  this->loop_low_power_();
+#else
+  this->process_command_queue_();
 #endif
-  process_command_queue_();
 }
 
 void TuyaUART::dump_config() {
@@ -142,15 +136,14 @@ void warn_too_long(size_t len) {
 bool TuyaUART::handle_frame_(const uint8_t *frame, size_t len) {
 #ifdef USE_TUYA_LOW_POWER
   // Each frame, also one that fails the checksum, stops a pending sleep handshake, as its first byte did before
-  if (this->is_low_power_())
-    this->on_low_power_rx_byte_();
+  this->on_low_power_rx_byte_();
 #endif
   // Last byte: sum of all bytes before it, header included, modulo 256
   const uint8_t rx_checksum = frame[len - 1];
   const uint8_t calc_checksum = sum_bytes(frame, len - 1);
   if (rx_checksum != calc_checksum) {
 #ifdef USE_TUYA_LOW_POWER
-    if (this->is_low_power_() && this->lp_standby_.requested())
+    if (this->lp_standby_.requested())
       this->cancel_low_power_standby_();
 #endif
     ESP_LOGW(TAG, "Tuya Received invalid message checksum %02X!=%02X", rx_checksum, calc_checksum);
@@ -160,7 +153,7 @@ bool TuyaUART::handle_frame_(const uint8_t *frame, size_t len) {
   const uint8_t command = frame[3];
 #ifdef USE_TUYA_LOW_POWER
   // The HC32 firmware 1.3.1 sends version 0; other TRV16 MCU firmware sends version 3 like standard Tuya MCUs.
-  if (this->is_low_power_() && version != 0 && version != 3) {
+  if (version != 0 && version != 3) {
     ESP_LOGW(TAG, "Invalid low-power MCU frame version: %u", version);
     return false;
   }
@@ -178,11 +171,8 @@ bool TuyaUART::handle_frame_(const uint8_t *frame, size_t len) {
 
 void TuyaUART::handle_command_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len) {
 #ifdef USE_TUYA_LOW_POWER
-  if (this->is_low_power_()) {
-    this->handle_low_power_frame_(command, version, buffer, len);
-    return;
-  }
-#endif
+  this->handle_low_power_frame_(command, version, buffer, len);
+#else
   TuyaCommandType command_type = (TuyaCommandType) command;
 
   if (this->expected_response_.has_value() && this->expected_response_ == command_type) {
@@ -385,6 +375,7 @@ void TuyaUART::handle_command_(uint8_t command, uint8_t version, const uint8_t *
     default:
       ESP_LOGE(TAG, "Invalid command (0x%02X) received", command);
   }
+#endif
 }
 
 void TuyaUART::handle_datapoints_(const uint8_t *buffer, size_t len) {
@@ -471,12 +462,6 @@ void TuyaUART::handle_datapoints_(const uint8_t *buffer, size_t len) {
 }
 
 void TuyaUART::send_raw_command_(TuyaCommand command) {
-#ifdef USE_TUYA_LOW_POWER
-  if (this->is_low_power_()) {
-    this->send_low_power_raw_command_(command);
-    return;
-  }
-#endif
   uint8_t len_hi = (uint8_t) (command.payload.size() >> 8);
   uint8_t len_lo = (uint8_t) (command.payload.size() & 0xFF);
   uint8_t version = 0;
@@ -517,11 +502,8 @@ void TuyaUART::send_raw_command_(TuyaCommand command) {
 
 void TuyaUART::process_command_queue_() {
 #ifdef USE_TUYA_LOW_POWER
-  if (this->is_low_power_()) {
-    this->process_low_power_queue_();
-    return;
-  }
-#endif
+  this->process_low_power_queue_();
+#else
   uint32_t now = millis();
   uint32_t delay = now - this->last_command_timestamp_;
 
@@ -550,12 +532,12 @@ void TuyaUART::process_command_queue_() {
     if (!this->expected_response_.has_value())
       this->command_queue_.erase(command_queue_.begin());
   }
+#endif
 }
 
 void TuyaUART::send_command_(TuyaCommand command) {
 #ifdef USE_TUYA_LOW_POWER
-  if (this->is_low_power_())
-    this->preempt_low_power_sleep_();
+  this->preempt_low_power_sleep_();
 #endif
   command_queue_.push_back(std::move(command));
   process_command_queue_();
@@ -568,11 +550,8 @@ void TuyaUART::send_empty_command_(TuyaCommandType command) {
 void TuyaUART::send_datapoint_command(uint8_t datapoint_id, TuyaDatapointType datapoint_type, const uint8_t *data,
                                       size_t len) {
 #ifdef USE_TUYA_LOW_POWER
-  if (this->is_low_power_()) {
-    this->send_low_power_datapoint_(datapoint_id, datapoint_type, data, len);
-    return;
-  }
-#endif
+  this->send_low_power_datapoint_(datapoint_id, datapoint_type, data, len);
+#else
   std::vector<uint8_t> buffer;
   buffer.reserve(4 + len);
   buffer.push_back(datapoint_id);
@@ -582,6 +561,7 @@ void TuyaUART::send_datapoint_command(uint8_t datapoint_id, TuyaDatapointType da
   buffer.insert(buffer.end(), data, data + len);
 
   this->send_command_(TuyaCommand{.cmd = TuyaCommandType::DATAPOINT_DELIVER, .payload = std::move(buffer)});
+#endif
 }
 
 void TuyaUART::set_status_pin_() {

@@ -24,7 +24,6 @@ struct TuyaLowPowerProductInfo {
   uint32_t mcu_wake_pulse_ms{50};
   // mwkp: active level of the wake line to the MCU; the original firmware defaults to low.
   bool mcu_wake_active_high{false};
-  bool parsed{false};
 
   /// Index of the value after `"key":` in s[0..len), or len if the key is missing or malformed.
   static size_t find_key(const char *s, size_t len, const char *key) {
@@ -79,17 +78,15 @@ struct TuyaLowPowerProductInfo {
 
   bool parse(const uint8_t *data, size_t len) {
     *this = {};
-    if (data == nullptr || len < 12 || len > 512)
+    if (data == nullptr || len < 12)
       return false;
     const char *s = reinterpret_cast<const char *>(data);
     if (s[0] != '{' || s[len - 1] != '}')
       return false;
     // Like the original WXU, only p and v are required. MCU firmware versions differ in the rest; without
     // wk, mwk or sm the fields stay -1, and standby is refused because it needs sm=1 and a matching wk.
-    parsed = get_string(s, len, "p", pid) && get_string(s, len, "v", version);
-    if (!parsed) {
-      pid[0] = '\0';
-      version[0] = '\0';
+    if (!get_string(s, len, "p", pid) || !get_string(s, len, "v", version)) {
+      *this = {};
       return false;
     }
     (void) get_integer(s, len, "wk", wake_gpio);
