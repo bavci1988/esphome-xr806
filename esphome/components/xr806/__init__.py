@@ -486,7 +486,10 @@ async def to_code(config: ConfigType) -> None:
         if "ota" in CORE.config:
             # OTA state updates are informative, NOT evidence that the
             # OTA listener and flash writer are already disarmed.
-            cg.add_define("USE_OTA_STATE_LISTENER")
+            from esphome.components import ota
+
+            # One add_global_state_listener() slot for the standby OTA guard
+            ota.request_ota_state_listeners()
             cg.add_global(
                 cg.RawStatement(
                     '#include "esphome/components/xr806/standby_ota_guard.h"'
@@ -540,7 +543,8 @@ async def to_code(config: ConfigType) -> None:
             await cg.register_component(standby_wlan, {})
 
     tuya_config = CORE.config.get("tuya")
-    if tuya_config and tuya_config.get(CONF_PROTOCOL) == "low_power":
+    # An AutoLoad marker (tuya loaded only as a base class) is not a configuration.
+    if isinstance(tuya_config, dict) and tuya_config.get(CONF_PROTOCOL) == "low_power":
         await _tuya_low_power_host(config[CONF_TUYA_HOST_ID], tuya_config)
 
 
