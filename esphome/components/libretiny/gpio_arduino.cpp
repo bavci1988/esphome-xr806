@@ -98,7 +98,8 @@ void ArduinoInternalGPIOPin::attach_interrupt_(void (*func)(void *), void *arg, 
 #endif
 }
 
-#ifdef USE_BK72XX
+// Not on BK7236: the ARMINO SDK has no GPIO config register at this address
+#if defined(USE_BK72XX) && !defined(USE_LIBRETINY_VARIANT_BK7236)
 // BDK GPIO config register (REG_GPIO_0_CONFIG, GCFG_OUTPUT_BIT): 0 enables the output, bit 1 is the output level
 static constexpr uintptr_t BK_GPIO_CFG_BASE = 0x00802800;
 static constexpr uint32_t BK_GPIO_OUTPUT_BIT = 1 << 1;
@@ -138,7 +139,7 @@ static void rtl_preset_level(uint8_t pin, bool level) {
 void ArduinoInternalGPIOPin::pin_mode(gpio::Flags flags) {
   const int mode = flags_to_mode(flags);
   this->output_ = flags & gpio::FLAG_OUTPUT;
-#ifdef USE_BK72XX
+#if defined(USE_BK72XX) && !defined(USE_LIBRETINY_VARIANT_BK7236)
   if (mode == OUTPUT && bk_enter_output(this->pin_, this->level_))
     return;
 #endif
