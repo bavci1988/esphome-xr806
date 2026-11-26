@@ -98,4 +98,7 @@ static inline void rom_frame_send(uint32_t vif, uint8_t *d, uint32_t len) {
 #define rom_sleep_prepare() ROM_FN(0x00005151, int (*)(void))() /* three firmware functions, then 1 */
 #define rom_sleep_save_time() ROM_FN(0x0000519D, void (*)(void))()
 #define rom_umul64(a, b) ROM_FN(0x0001F9BC, uint64_t (*)(uint32_t, uint32_t))(a, b)
-#define rom_udiv64(n, d) ROM_FN(0x0001F4E8, uint64_t (*)(uint64_t, uint64_t))(n, d)
+/* 64-bit by 64-bit division, low word of the quotient; the halves are passed one by one so that the compiler needs no
+   64-bit shift helper. */
+#define rom_udiv64_32(n_lo, n_hi, d_lo, d_hi) \
+  ROM_FN(0x0001F4E8, uint32_t (*)(uint32_t, uint32_t, uint32_t, uint32_t))(n_lo, n_hi, d_lo, d_hi)

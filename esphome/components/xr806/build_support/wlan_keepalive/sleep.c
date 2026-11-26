@@ -8,11 +8,19 @@
  * (the compare, or a request of the host) restarts the CPU in the firmware's reset code, which sees its marker at
  * 0xFFF00000 and continues in the ROM's warm start (0x54E6); the handler below is never returned to.
  *
- * Behaviour is the vendor's, with two additions:
- * - a record of the last entry (sleep_record), which the host reads after the core stopped answering: with the ROM's
- *   wake counter it tells whether the core never restarted after "go" or stopped during the warm start;
- * - the wake compare is never written closer than SLEEP_MIN_TICKS ahead of the counter. The compare is a match of a
- *   24-bit counter, so a value at or behind the counter would only match after a wrap-around (512 s).
+ * Behaviour is the vendor's, with these additions:
+ * - a record of the last entry (sleep_record), which the host reads after the core stopped answering, and a count of
+ *   the warm starts that reached the firmware's reset code (sleep_warm_start). The record replaces what could be
+ *   read from the vendor code's stack frames after a hang;
+ * - two checks of the arithmetic, which the real values never fail: a lead time longer than the sleep no longer
+ *   wraps around to the longest sleep (20 s), and the wake compare is at least SLEEP_MIN_TICKS ahead of the counter;
+ * - timers are never started with less than 4 us (sleep_timer_start, installed in the firmware's function table):
+ *   the ROM writes such a delay straight into the hardware timer, while its own timer processing never programs
+ *   less than 4 us. The handler below restarts its paused timers with "expiry - now", which is 0 or negative when
+ *   the timer became due in between.
+ *
+ * In the hangs recorded so far the wake compare was about 300 ms ahead and neither it nor the host's wake request
+ * restarted the core, so none of these checks is expected to end the hangs; the record is there to find the cause.
  */
 
 #include <stdint.h>
@@ -24,6 +32,9 @@
 #endif
 #ifndef PATCH_BUSY_CHECK
 #error "PATCH_BUSY_CHECK: Thumb address of the firmware's busy check (02.132: 0xFFF0959D, 02.138: 0xFFF095E5)"
+#endif
+#ifndef PATCH_TIMER_START
+#error "PATCH_TIMER_START: Thumb address of the firmware's timer start (02.132: 0xFFF09041, 02.138: 0xFFF09089)"
 #endif
 
 #define REG(address) (*(volatile uint32_t *) (address))
@@ -40,19 +51,20 @@
 #define WAKE_COUNT REG(0xFFF055F8U + 0x2C) /* counted by the ROM's warm start */
 #define SLEEP_TOTAL_US REG(0xFFF055F8U + 0x30)
 
-/* Clock data: +0x14 period of the low-frequency clock in 1/2560 us (from the host), +0x18 lead time for the wake in
-   us, +0x1C flag for a clock 64 times faster, +0x20 longest sleep in us. */
+/* Clock data: +0x14 period of the low-frequency clock in 1/2560 us (rewritten before every sleep by the ROM, from the
+   hardware calibration or, in one firmware state, the host's value), +0x18 lead time for the wake in us, +0x1C flag
+   for a clock 64 times faster (always 0), +0x20 longest sleep in us (20 s). */
 #define CLOCK_DATA 0xFFF05274U
 #define LF_PERIOD REG(CLOCK_DATA + 0x14)
 #define WAKE_LEAD_US REG(CLOCK_DATA + 0x18)
 #define LF_FAST BYTE(CLOCK_DATA + 0x1C)
 #define SLEEP_MAX_US REG(CLOCK_DATA + 0x20)
 
-#define TIMER_COUNTER REG(0x0AC00004U) /* us */
-#define IRQ_PENDING REG(0x0AC80084U)
+#define TIMER_COUNTER REG(0x0AC00004U)  /* us */
+#define LF_CALIBRATION REG(0x0AC80084U) /* bit 0: valid; the measured period above bit 13 */
 #define IRQ_ENABLE REG(0x0AC80058U)
 #define IRQ_STATUS REG(0x0AC80098U)
-#define SLEEP_ALLOW REG(0x0AC80034U)
+#define STAY_AWAKE REG(0x0AC80034U) /* 1: a wake request is being served */
 #define SLEEP_GO REG(0x0AC80048U)
 #define LF_COUNTER REG(0x0AC8006CU) /* 24 bits */
 #define WAKE_COMPARE REG(0x0AC80070U)
@@ -62,22 +74,45 @@
 #define SLEEP_MIN_TICKS 64U /* about 2 ms */
 #define LF_COUNTER_MASK 0x00FFFFFFU
 
+#define SLEEP_RECORD_MAGIC 0x31504C53U /* "SLP1" */
+
 /* Read by the host through the WLAN RAM window after a hang. */
 struct sleep_record {
+  uint32_t magic;
   uint32_t entries;        /* times "go" was written */
-  uint32_t wakes_at_entry; /* the ROM's wake counter then; still the same after a hang: the core never restarted */
+  uint32_t warm_starts;    /* times the reset code ran after a sleep; one less than entries: the CPU never restarted */
+  uint32_t wakes_at_entry; /* the ROM's wake counter at the entry; it counts a little later in the warm start */
   uint32_t sleep_us;       /* time to the next timer */
-  uint32_t ticks;          /* the same after lead time and conversion */
-  uint32_t counter;        /* low-frequency counter at entry */
-  uint32_t compare;        /* wake compare written */
-  uint32_t timer_us;       /* microsecond counter at entry */
+  uint32_t slept_us;       /* the same after lead time and limit */
+  uint32_t lead_us;
+  uint32_t ticks;
+  uint32_t counter;  /* low-frequency counter at entry */
+  uint32_t compare;  /* wake compare written */
+  uint32_t timer_us; /* microsecond counter at entry */
   uint32_t lf_period;
-  uint32_t irq_status;
-  uint32_t irq_pending;
-  uint32_t short_sleeps; /* entries where the compare had to be moved ahead */
+  uint32_t lf_calibration;
+  uint32_t irq_status; /* bit 1: a wake request was pending at the entry */
+  uint32_t power_control;
+  uint32_t irq_flags;    /* interrupt mask the handler saved */
+  uint32_t remaining;    /* of the paused beacon timer */
+  uint16_t short_sleeps; /* entries where the compare had to be moved ahead */
+  uint16_t lead_wraps;   /* entries with a lead time longer than the sleep */
 };
 
-struct sleep_record sleep_record = {0};
+volatile struct sleep_record sleep_record = {.magic = SLEEP_RECORD_MAGIC};
+
+/* For the firmware's function table instead of its timer start. */
+void sleep_timer_start(void *node, int32_t us) {
+  if (us < 4)
+    us = 4;
+  ROM_FN(PATCH_TIMER_START, void (*)(void *, int32_t))(node, us);
+}
+
+/* For the reset code instead of the ROM's warm start. */
+void sleep_warm_start(void) {
+  sleep_record.warm_starts++;
+  ROM_FN(0x000054E7, void (*)(void))();
+}
 
 /* The vendor's 0x0900B5AC and the ROM's 0x52D6 in one: never returns. */
 static void sleep_enter(uint32_t us) __attribute__((noreturn, noinline));
@@ -85,35 +120,46 @@ static void sleep_enter(uint32_t us) {
   SLEEP_CORRECTION_A = 0;
   SLEEP_CORRECTION_B = 0;
   uint32_t period = LF_PERIOD;
-  us += (uint32_t) rom_udiv64((uint64_t) period << 2, 0xA00); /* four periods of the clock */
-  us -= WAKE_LEAD_US;
+  us += rom_udiv64_32(period << 2, period >> 30, 0xA00, 0); /* four periods of the clock */
+  uint32_t lead = WAKE_LEAD_US;
+  if (us > lead) {
+    us -= lead;
+  } else {
+    us = 0; /* the vendor code wraps around here and sleeps the longest time */
+    sleep_record.lead_wraps++;
+  }
   if (us > SLEEP_MAX_US)
     us = SLEEP_MAX_US;
   SLEEP_TOTAL_US += us;
   uint8_t fast = LF_FAST;
-  uint32_t ticks = (uint32_t) rom_udiv64(rom_umul64(us, fast ? 0x1E000U : 0xA00U), period);
+  uint64_t scaled = rom_umul64(us, fast ? 0x1E000U : 0xA00U);
+  uint32_t ticks = rom_udiv64_32((uint32_t) scaled, (uint32_t) (scaled >> 32), period, 0);
   if (fast)
     ticks >>= 6;
+  sleep_record.entries++;
+  sleep_record.wakes_at_entry = WAKE_COUNT;
+  sleep_record.slept_us = us;
+  sleep_record.lead_us = lead;
+  sleep_record.ticks = ticks;
+  sleep_record.timer_us = TIMER_COUNTER;
+  sleep_record.lf_period = period;
+  sleep_record.lf_calibration = LF_CALIBRATION;
+  sleep_record.irq_status = IRQ_STATUS;
+  sleep_record.power_control = POWER_CONTROL;
+
   uint32_t counter = LF_COUNTER;
   uint32_t compare = ((counter + ticks) & LF_COUNTER_MASK) - SLEEP_CORRECTION_A - SLEEP_CORRECTION_B - 4;
-  if (((compare - counter) & LF_COUNTER_MASK) - SLEEP_MIN_TICKS >= (LF_COUNTER_MASK >> 1)) {
+  if (ticks < SLEEP_MIN_TICKS + 4) {
     compare = (counter + SLEEP_MIN_TICKS) & LF_COUNTER_MASK;
     sleep_record.short_sleeps++;
   }
-  sleep_record.entries++;
-  sleep_record.wakes_at_entry = WAKE_COUNT;
-  sleep_record.ticks = ticks;
   sleep_record.counter = counter;
   sleep_record.compare = compare;
-  sleep_record.timer_us = TIMER_COUNTER;
-  sleep_record.lf_period = period;
-  sleep_record.irq_status = IRQ_STATUS;
-  sleep_record.irq_pending = IRQ_PENDING;
 
   WAKE_COMPARE = compare;
   IRQ_ENABLE = 0x90; /* only the wake interrupts */
   POWER_CONTROL &= ~0x40000U;
-  SLEEP_ALLOW = 0;
+  STAY_AWAKE = 0;
   SLEEP_GO = 1;
   for (;;) {
   }
@@ -127,7 +173,8 @@ void sleep_event(void) {
   void *other_timer = other + 0x18;
   uint32_t remaining = 200000;
   if (beacon[0x0F] == 1) {
-    remaining = *(uint32_t *) (beacon + 0x18) - rom_now_us();
+    uint32_t now = rom_now_us();
+    remaining = *(uint32_t *) (beacon + 0x18) - now;
     beacon[0x0F] = 2;
     rom_timer_stop(beacon_timer);
   }
@@ -137,27 +184,30 @@ void sleep_event(void) {
   uint32_t sleep_us = rom_next_timer_us();
   if (sleep_us >= SLEEP_MIN_US) {
     uint32_t delay;
-    uint32_t now = TIMER_COUNTER;
-    if (now < 2000 && !(IRQ_PENDING & 1) && HALF(PATCH_STATE) != 2) {
-      delay = 2010 - now; /* shortly after a start: not yet */
+    uint32_t counter = TIMER_COUNTER;
+    uint32_t calibration = LF_CALIBRATION;
+    if (counter < 2000 && !(calibration & 1) && HALF(PATCH_STATE) != 2) {
+      delay = 2010 - counter; /* shortly after a start, clock not measured yet */
     } else if (ROM_FN(PATCH_BUSY_CHECK, int (*)(void))()) {
       delay = 20000;
     } else {
       uint32_t flags = rom_irq_lock();
       if (AWAKE == 0)
-        SLEEP_ALLOW = 0;
+        STAY_AWAKE = 0;
       rom_irq_unlock(flags);
       flags = rom_irq_lock();
       if (EVENTS <= 4 && AWAKE == 0) {
         SLEEPING_FLAG |= 1;
         sleep_record.sleep_us = sleep_us;
+        sleep_record.irq_flags = flags;
+        sleep_record.remaining = remaining;
         if (rom_sleep_prepare()) {
           rom_sleep_save_time();
           sleep_enter(sleep_us);
         }
         SLEEPING_FLAG &= ~1;
       }
-      SLEEP_ALLOW = 1;
+      STAY_AWAKE = 1;
       rom_irq_unlock(flags);
       if (AWAKE != 0)
         goto resume;
@@ -171,6 +221,8 @@ resume:
     beacon[0x0F] = 1;
     rom_timer_start_exact(beacon_timer, remaining);
   }
-  if ((other[3] >> 1) & 3)
-    rom_timer_start_exact(other_timer, *(uint32_t *) (other + 0x80) + *(uint32_t *) (other + 0x14) - rom_now_us());
+  if ((other[3] >> 1) & 3) {
+    uint32_t now = rom_now_us();
+    rom_timer_start_exact(other_timer, *(uint32_t *) (other + 0x80) + *(uint32_t *) (other + 0x14) - now);
+  }
 }
