@@ -5,6 +5,7 @@ import logging
 
 from esphome import final_validate as fv, pins
 import esphome.codegen as cg
+from esphome.components import ota
 from esphome.components.const import CONF_ENABLED
 import esphome.config_validation as cv
 from esphome.const import (
@@ -413,7 +414,7 @@ async def _standby_to_code(config: ConfigType) -> None:
     if "mdns" in CORE.config:
         await _participant("mdns_standby.h", cfg[CONF_MDNS_STANDBY_ID])
     if ota_configs := CORE.config.get("ota"):
-        cg.add_define("USE_OTA_STATE_LISTENER")
+        ota.request_ota_state_listeners()
         ota_guard = await _participant("standby_ota_guard.h", cfg[CONF_OTA_GUARD_ID])
         # Web server uploads share the HTTP listener and its vote; native OTA has a listener of its own.
         cg.add(
