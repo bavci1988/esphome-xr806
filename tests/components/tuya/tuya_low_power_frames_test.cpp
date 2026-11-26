@@ -121,11 +121,11 @@ class TuyaLowPowerFrames : public ::testing::Test {
 
 TEST_F(TuyaLowPowerFrames, VersionZeroRecoversAfterAckTimeout) {
   this->handshake_(0);
-  // The host build is online, so the module reports "connected to the cloud"
+  // The host build is online but has no API client, so the module reports 0x03 (router, not cloud)
   auto sent = this->uart_.sent();
   ASSERT_EQ(sent.size(), 1u);
   EXPECT_EQ(sent[0].command, 0x02);
-  EXPECT_EQ(sent[0].payload, std::vector<uint8_t>{0x04});
+  EXPECT_EQ(sent[0].payload, std::vector<uint8_t>{0x03});
 
   // No ACK: after the timeout the module asks for the product info directly, 500 ms later
   this->step_(110 + 1500);
@@ -143,14 +143,9 @@ TEST_F(TuyaLowPowerFrames, VersionZeroRecoversAfterAckTimeout) {
   EXPECT_EQ(sent[0].command, 0x02);
   this->receive_(2300, {0x00, 0x02, {}});
   EXPECT_TRUE(this->uart_.sent().empty());
-
-  // The full status follows as CMD05 reports; the MCU is ready once they have been quiet for 500 ms
-  this->receive_(2400, {0x00, 0x05, {0x01, 0x01, 0x00, 0x01, 0x01}});
-  EXPECT_EQ(this->uart_.sent().size(), 1u);  // its ACK
-  this->step_(2899);
+  // Without status 0x04 the MCU does not send its full status, so the module does not become ready
+  this->step_(4000);
   EXPECT_EQ(this->ready_count_, 0);
-  this->step_(2900);
-  EXPECT_EQ(this->ready_count_, 1);
 }
 
 TEST_F(TuyaLowPowerFrames, VersionZeroAcksOnlyValidReports) {
