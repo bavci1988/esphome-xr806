@@ -362,6 +362,7 @@ void TuyaUART::send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType
   for (auto &queued : this->command_queue_) {
     if (is_low_power_write(queued) && queued.payload[0] == datapoint_id) {
       queued.payload = std::move(buffer);
+      this->remember_queued_value_(datapoint_id, datapoint_type, data, len);
       return;
     }
   }
@@ -370,7 +371,32 @@ void TuyaUART::send_low_power_datapoint_(uint8_t datapoint_id, TuyaDatapointType
     return;
   }
   this->command_queue_.push_back(TuyaCommand{.cmd = LP_WRITE_CMD, .payload = std::move(buffer)});
+  this->remember_queued_value_(datapoint_id, datapoint_type, data, len);
   this->update_low_power_sleep_lock_();
+}
+
+// A queued write is the value the MCU will have. The base setters skip a value equal to the known one, so the known
+// value must be the queued one: a request back to the last reported value then replaces the queued write instead of
+// being dropped. The MCU's next report overwrites it either way.
+void TuyaUART::remember_queued_value_(uint8_t datapoint_id, TuyaDatapointType datapoint_type, const uint8_t *data,
+                                      size_t len) {
+  for (auto &datapoint : this->datapoints_) {
+    if (datapoint.id != datapoint_id || datapoint.type != datapoint_type)
+      continue;
+    datapoint.len = len;
+    if (datapoint_type == TuyaDatapointType::STRING) {
+      datapoint.value_string.assign(reinterpret_cast<const char *>(data), len);
+    } else if (datapoint_type == TuyaDatapointType::RAW) {
+      datapoint.value_raw.assign(data, data + len);
+    } else {
+      // Boolean, integer, enum and bitmask: big-endian, as the base setters encode them
+      uint32_t value = 0;
+      for (size_t i = 0; i < len && i < 4; i++)
+        value = (value << 8) | data[i];
+      datapoint.value_uint = value;
+    }
+    return;
+  }
 }
 
 void TuyaUART::begin_mcu_wake_pulse_() {

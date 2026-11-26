@@ -245,4 +245,26 @@ TEST_F(TuyaLowPowerFrames, VersionThreeWriteSurvivesLostConfirmation) {
   EXPECT_TRUE(kept_write);
 }
 
+TEST_F(TuyaLowPowerFrames, RequestBackToTheReportedValueReplacesAQueuedWrite) {
+  this->handshake_(3);
+  this->uart_.sent();
+  this->receive_(200, {0x03, 0x02, {}});
+  this->receive_(300, {0x03, 0x07, {0x01, 0x01, 0x00, 0x01, 0x00, 0x02, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x05}});
+  this->uart_.sent();
+
+  // A write to DP2 is in flight, so the DP1 write waits in the queue
+  this->tuya_.set_integer_datapoint_value(2, 9);
+  this->step_(400);
+  ASSERT_EQ(this->uart_.sent().size(), 1u);
+  this->tuya_.set_boolean_datapoint_value(1, true);
+  // Back to the reported value (off) before the queued write went out: it replaces the queued "on"
+  this->tuya_.set_boolean_datapoint_value(1, false);
+  this->receive_(500, {0x03, 0x07, {0x02, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x09}});
+  this->step_(510);
+  auto sent = this->uart_.sent();
+  ASSERT_EQ(sent.size(), 1u);
+  EXPECT_EQ(sent[0].command, 0x06);
+  EXPECT_EQ(sent[0].payload, (std::vector<uint8_t>{0x01, 0x01, 0x00, 0x01, 0x00}));
+}
+
 }  // namespace esphome::tuya::testing

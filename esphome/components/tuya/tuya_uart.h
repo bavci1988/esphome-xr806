@@ -151,6 +151,7 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
                                  size_t len);
   void handle_low_power_command_(uint8_t command, uint8_t version, const uint8_t *data, size_t len);
   void send_low_power_direct_(uint8_t command, const uint8_t *data, size_t len);
+  void remember_queued_value_(uint8_t datapoint_id, TuyaDatapointType datapoint_type, const uint8_t *data, size_t len);
   // The list lives on the stack, so short replies need no heap
   void send_low_power_direct_(uint8_t command, std::initializer_list<uint8_t> payload) {
     this->send_low_power_direct_(command, payload.begin(), payload.size());
