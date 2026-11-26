@@ -87,3 +87,15 @@ static inline void rom_frame_send(uint32_t vif, uint8_t *d, uint32_t len) {
   *(uint32_t *) (d + 0x84) |= 2;
   ROM_FN(0x0000E045, void (*)(uint8_t *))(d);
 }
+
+/* Sleep path (sleep.c). Addresses without the Thumb bit are ARM code. */
+#define rom_timer_start_exact(node, us) ROM_FN(0x0000EE47, void (*)(void *, uint32_t))(node, us)
+#define rom_now_us() ROM_FN(0x0000E649, uint32_t (*)(void))()        /* microsecond counter plus its offset */
+#define rom_next_timer_us() ROM_FN(0x00005425, uint32_t (*)(void))() /* 0x7FFFFFFF without a timer */
+#define rom_irq_lock() ROM_FN(0x0000EBD4, uint32_t (*)(void))()      /* masks IRQ and FIQ, returns the old mask */
+#define rom_irq_unlock(flags) ROM_FN(0x0000EBE8, void (*)(uint32_t))(flags)
+#define rom_set_bits(word, bits) ROM_FN(0x0000EC04, void (*)(volatile uint32_t *, uint32_t))(word, bits)
+#define rom_sleep_prepare() ROM_FN(0x00005151, int (*)(void))() /* three firmware functions, then 1 */
+#define rom_sleep_save_time() ROM_FN(0x0000519D, void (*)(void))()
+#define rom_umul64(a, b) ROM_FN(0x0001F9BC, uint64_t (*)(uint32_t, uint32_t))(a, b)
+#define rom_udiv64(n, d) ROM_FN(0x0001F4E8, uint64_t (*)(uint64_t, uint64_t))(n, d)
