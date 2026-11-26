@@ -28,6 +28,7 @@ from esphome.components.libretiny.const import (
     FAMILY_BK7231N,
     FAMILY_BK7231Q,
     FAMILY_BK7231T,
+    FAMILY_BK7236,
     FAMILY_BK7251,
 )
 import esphome.config_validation as cv
@@ -84,6 +85,8 @@ def _unsupported_family_message(family: str) -> str | None:
         )
     if family == FAMILY_BK7231Q:
         return "bk72xx_ble does not support BK7231Q: this SoC has no BLE"
+    if family == FAMILY_BK7236:
+        return "bk72xx_ble does not support BK7236 yet: it runs the ARMINO SDK, not the BDK BLE stack"
     return None
 
 

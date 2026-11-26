@@ -4,6 +4,7 @@ from esphome.components import remote_base
 from esphome.components.libretiny import get_libretiny_family
 from esphome.components.libretiny.const import (
     FAMILY_BK7231Q,
+    FAMILY_BK7236,
     FAMILY_BK7238,
     KEY_BOARD,
     KEY_LIBRETINY,
@@ -55,9 +56,10 @@ def validate_board(config: ConfigType) -> ConfigType:
     """Only the legacy IRDA block, with its NEC decoder and interrupt, is supported."""
     family = get_libretiny_family()
     board = CORE.data[KEY_LIBRETINY][KEY_BOARD]
-    # The BK7238 has no IRDA block and the BK7231Q SDK registers no IRDA interrupt. BK7252N/BK7253 have
-    # a different block but report the BK7251 family, so only the board id tells them apart.
-    if family in (FAMILY_BK7238, FAMILY_BK7231Q) or any(
+    # The BK7238 has no IRDA block, the BK7231Q SDK registers no IRDA interrupt and the BK7236 uses the ARMINO
+    # SDK instead of the BDK. BK7252N/BK7253 have a different block but report the BK7251 family, so only the
+    # board id tells them apart.
+    if family in (FAMILY_BK7238, FAMILY_BK7231Q, FAMILY_BK7236) or any(
         model in board.lower() for model in ("bk7252n", "bk7253")
     ):
         raise cv.Invalid(

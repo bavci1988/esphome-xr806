@@ -17,6 +17,7 @@ from esphome.components.esp32 import (
     VARIANT_ESP32S31,
     get_esp32_variant,
 )
+from esphome.components.libretiny import validate_deep_sleep_supported
 from esphome.components.zephyr import zephyr_add_prj_conf, zephyr_enable_poweroff
 from esphome.config_helpers import filter_source_files_from_platform
 import esphome.config_validation as cv
@@ -387,6 +388,7 @@ CONFIG_SCHEMA = cv.All(
     cv.only_on([PLATFORM_ESP32, PLATFORM_ESP8266, PLATFORM_BK72XX, PLATFORM_NRF52]),
     cv.key_requires(CONF_WAKEUP_PIN_MODE, CONF_WAKEUP_PIN),
     validate_config,
+    validate_deep_sleep_supported,
 )
 
 

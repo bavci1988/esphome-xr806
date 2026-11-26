@@ -30,6 +30,7 @@ from esphome.core.config import BOARD_MAX_LENGTH
 from esphome.helpers import copy_file_if_changed, write_file
 from esphome.platformio.toolchain import copy_ccache_script
 from esphome.storage_json import StorageJSON
+from esphome.types import ConfigType
 
 from . import gpio  # noqa: F401
 from .const import (
@@ -42,6 +43,7 @@ from .const import (
     FAMILIES,
     FAMILY_BK7231N,
     FAMILY_BK7231T,
+    FAMILY_BK7236,
     FAMILY_BK7238,
     FAMILY_COMPONENT,
     FAMILY_FRIENDLY,
@@ -178,6 +180,18 @@ def get_libretiny_component(core_obj=None):
 
 def get_libretiny_family(core_obj=None):
     return (core_obj or CORE).data[KEY_LIBRETINY][KEY_FAMILY]
+
+
+def supports_deep_sleep() -> bool:
+    """Whether LibreTiny implements deep sleep for this family; the BK7236 core does not yet."""
+    return get_libretiny_family() != FAMILY_BK7236
+
+
+def validate_deep_sleep_supported(config: ConfigType) -> ConfigType:
+    """Reject a component that needs deep sleep on a family whose LibreTiny core has none."""
+    if CORE.is_libretiny and not supports_deep_sleep():
+        raise cv.Invalid(f"Deep sleep is not supported on {get_libretiny_family()} yet")
+    return config
 
 
 def get_libretiny_board(core_obj: EsphomeCore | None = None) -> str:
