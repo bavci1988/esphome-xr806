@@ -344,6 +344,31 @@ static constexpr uint32_t RC_CALIBRATION_BASE = 0x40046000;
 static constexpr uint32_t RC_CALIBRATION_DCXO_COUNT = RC_CALIBRATION_BASE + 0x08;
 static constexpr uint32_t RC_CALIBRATION_MONITOR = RC_CALIBRATION_BASE + 0x0C;
 static constexpr uint32_t MONITOR_ENABLE = 1U << 4;
+
+// Experiment: calibrate the 32 kHz clock more often. The SDK sets a base interval of 640 slow clock cycles with
+// phase 3 at 24 times that, about every 480 ms once settled; here 320 cycles and 10 times, about every 100 ms.
+// Stop, configure and start as HAL_RcoscCali_Config/Start do.
+static constexpr uint32_t CALIBRATION_CTRL0 = POWER_CONTROL_BASE + 0x260;  // bit 29 enable, bit 16 timer, 0-12 time
+static constexpr uint32_t CALIBRATION_CTRL1 = POWER_CONTROL_BASE + 0x264;  // bits 8-10 phase 3, 4-6 phase 2, 0 mode
+static constexpr uint32_t CALIBRATION_ENABLE = (1U << 29) | (1U << 16);
+static constexpr uint32_t CALIBRATION_TIME_MASK = 0x1FFFU;
+static constexpr uint32_t CALIBRATION_PHASE3_MASK = 7U << 8;
+static constexpr uint32_t CALIBRATION_TIME = 320;
+static constexpr uint32_t CALIBRATION_PHASE3_10 = 0U << 8;
+
+XR806_DIAG_FLASH inline void calibrate_more_often() {
+  static const char *const TAG = "xr806.wlan_diag";
+  volatile uint32_t &ctrl0 = cpu_register(CALIBRATION_CTRL0);
+  volatile uint32_t &ctrl1 = cpu_register(CALIBRATION_CTRL1);
+  const uint32_t before0 = ctrl0, before1 = ctrl1;
+  ctrl0 = ctrl0 & ~CALIBRATION_ENABLE;
+  ctrl1 = (ctrl1 & ~CALIBRATION_PHASE3_MASK) | CALIBRATION_PHASE3_10;
+  ctrl0 = (ctrl0 & ~CALIBRATION_TIME_MASK) | CALIBRATION_TIME;
+  ctrl0 = ctrl0 | CALIBRATION_ENABLE;
+  delayMicroseconds(200);
+  ESP_LOGW(TAG, "Experiment: 32 kHz calibration more often: %08" PRIX32 " %08" PRIX32 " -> %08" PRIX32 " %08" PRIX32,
+           before0, before1, static_cast<uint32_t>(ctrl0), static_cast<uint32_t>(ctrl1));
+}
 static constexpr uint32_t MONITOR_CLEAR = (1U << 5) | (1U << 2);
 
 XR806_DIAG_FLASH inline void print_clock_monitor(const char *label, uint32_t monitor) {
@@ -363,8 +388,11 @@ XR806_DIAG_FLASH inline void before_standby() {
   take(c.before);
   read_power_line(c.power_before);
   volatile uint32_t &monitor = cpu_register(RC_CALIBRATION_MONITOR);
-  if (c.count == 1)
+  if (c.count == 1) {
     c.monitor_first = monitor;
+    calibrate_more_often();
+    delay(20);  // let the line reach the UART before standby
+  }
   c.monitor_awake = monitor;
   monitor = MONITOR_ENABLE | MONITOR_CLEAR;
   monitor = MONITOR_ENABLE;
