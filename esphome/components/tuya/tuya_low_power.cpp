@@ -439,7 +439,7 @@ void TuyaUART::poll_low_power_autobaud_() {
   // A repeated probe at the same rate must not restart the UART.
   if (this->parent_->get_baud_rate() != baud) {
     this->parent_->set_baud_rate(baud);
-#if defined(USE_ESP8266) || defined(USE_ESP32) || defined(USE_XR806)
+#if defined(USE_ESP8266) || defined(USE_ESP32) || defined(USE_XR806) || defined(USE_LIBRETINY)
     // Validation allows auto_baud only on these platforms, where load_settings() exists
     this->parent_->load_settings(false);
 #endif
