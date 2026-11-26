@@ -17,7 +17,8 @@ typedef void (*rom_timer_callback)(void *);
 static inline void rom_timer_start(void *node, uint32_t us) {
   ROM_FN(0x0000EE47, void (*)(void *, uint32_t))(node, us < ROM_TIMER_MIN_US ? ROM_TIMER_MIN_US : us);
 }
-#define rom_timer_stop(node) ROM_FN(0x0000EDDD, void (*)(void *))(node) /* dispatches through slot 0xFFF0046C */
+#define rom_timer_stop(node) \
+  ROM_FN(0x0000EDDD, void (*)(void *))(node) /* start and stop go through slots 0xFFF00468/6C */
 
 /* Message to the host: {u16 length, u16 type, payload}. */
 #define rom_msg_alloc(len) ROM_FN(0x0000E5ED, uint8_t *(*) (uint32_t))(len)
