@@ -39,6 +39,10 @@ static inline void rom_timer_start(void *node, uint32_t us) {
 static inline const uint8_t *rom_vif_info(uint32_t vif) {
   return *(const uint8_t *const *) (0xFFF06108U + vif * 4 + 0x340 + 0x3C);
 }
+/* The per-interface MAC state that rom_frame_send reads the rate from. */
+static inline int rom_vif_ready(uint32_t vif) {
+  return *(const uint8_t *const *) (ROM_MAC_STATE + 0x14 + vif * 4) != 0;
+}
 
 /* Hands a built data frame to the MAC: what the vendor keepalive did after building its frame (0x0900A5DA in
    02.132), with the descriptor fields it set. len includes the cipher tail. */

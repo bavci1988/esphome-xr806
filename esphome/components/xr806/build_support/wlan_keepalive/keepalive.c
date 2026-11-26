@@ -166,6 +166,11 @@ static uint32_t frames_acked(void) {
 
 /* Builds the frame and hands it to the MAC; 0 when no buffer was free. */
 static int send_frame(uint32_t k) {
+  /* Without an association (lost while the host sleeps) there is nothing to build the header from; the frame then
+     counts as not acknowledged, and the retry limit ends the keepalive. */
+  const uint8_t *vif = rom_vif_info(ka.vif);
+  if (vif == 0 || !rom_vif_ready(ka.vif))
+    return 0;
   uint8_t *desc = rom_frame_alloc(ROM_FRAME_TYPE_DATA, 0, 1);
   if (desc == 0)
     return 0;
@@ -176,7 +181,6 @@ static int send_frame(uint32_t k) {
   zero(hdr, total + ka.enc_tail);
 
   /* 802.11 QoS data to the AP: addr1 = BSSID, addr2 = own address, addr3 = destination */
-  const uint8_t *vif = rom_vif_info(ka.vif);
   uint16_t fc = 0x0188 | (ka.enc_hdr ? 0x4000 : 0);
   hdr[0] = fc;
   hdr[1] = fc >> 8;
@@ -349,9 +353,9 @@ static int peer_segment(const uint8_t *tcp, uint32_t data_len) {
     ka.enabled = 0; /* closed: no more frames, and the host learns of it at once */
     return 0;
   }
-  if ((int32_t) (get_be32(tcp + 4) - ka.ack) < 0)
-    return ka.host_sleep; /* old segment */
-  if (!(flags & TCP_ACK))
+  /* A segment below the host's rcv_nxt (data sent again, a TCP keepalive probe) or without ACK (a SYN) needs an
+     answer that only the host's TCP can give. */
+  if ((int32_t) (get_be32(tcp + 4) - ka.ack) < 0 || !(flags & TCP_ACK))
     return 0;
   if (data_len == 0)
     return acked || ka.host_sleep; /* used up here; lwIP gets other ACKs while the host is awake */
