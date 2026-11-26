@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cinttypes>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -13,10 +14,6 @@
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
-
-#ifdef USE_WEBSERVER
-#include "esphome/components/web_server/web_server.h"
-#endif
 
 namespace esphome::web_server_xr806 {
 
@@ -259,10 +256,7 @@ bool AsyncWebServer::begin() {
 
 void AsyncWebServer::end() {
   // Event streams own their sockets apart from the client list; close them too.
-#ifdef USE_WEBSERVER
-  for (auto *source = AsyncEventSource::first_source; source != nullptr; source = source->next_source())
-    source->close_all();
-#endif
+  AsyncStreamResponse::close_all();
   this->clients_.clear();
   this->stop_accepting();
 }
@@ -270,15 +264,7 @@ void AsyncWebServer::end() {
 void AsyncWebServer::stop_accepting() { this->listener_.reset(); }
 
 bool AsyncWebServer::has_active_connections() const {
-  if (!this->clients_.empty() || millis() - this->last_accept_ms_ < FOLLOW_UP_MS)
-    return true;
-#ifdef USE_WEBSERVER
-  for (auto *source = AsyncEventSource::first_source; source != nullptr; source = source->next_source()) {
-    if (!source->empty())
-      return true;
-  }
-#endif
-  return false;
+  return !this->clients_.empty() || millis() - this->last_accept_ms_ < FOLLOW_UP_MS || AsyncStreamResponse::any_open();
 }
 
 void AsyncWebServer::dispatch_(Client &c) {
@@ -613,189 +599,116 @@ void AsyncWebServer::loop() {
   this->clients_.remove_if([](const Client &c) { return c.socket == nullptr; });
 }
 
-#ifdef USE_WEBSERVER
-AsyncEventSource *AsyncEventSource::first_source =
+AsyncStreamResponse *AsyncStreamResponse::first_stream =
     nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-void AsyncEventSource::close_all() {
-  this->sessions_.clear();
-  this->listing_session_ = nullptr;
+AsyncStreamResponse::~AsyncStreamResponse() {
+  for (AsyncStreamResponse **link = &first_stream; *link != nullptr; link = &(*link)->next_stream_) {
+    if (*link == this) {
+      *link = this->next_stream_;
+      break;
+    }
+  }
 }
 
-bool AsyncEventSource::canHandle(AsyncWebServerRequest *req) const {
-  if (req->method() != HTTP_GET)
-    return false;
-  char url[AsyncWebServerRequest::URL_BUF_SIZE];
-  return req->url_to(url) == this->path_;
+bool AsyncStreamResponse::any_open() {
+  for (auto *stream = first_stream; stream != nullptr; stream = stream->next_stream_) {
+    if (stream->socket_ != nullptr)
+      return true;
+  }
+  return false;
 }
-void AsyncEventSource::handleRequest(AsyncWebServerRequest *req) {
-  // Keep one enumeration cursor per browser. The previous shared cursor
-  // restarted for all users on every new connection.
-  if (this->sessions_.size() >= 2) {
-    // A phone that only hid the tab keeps its old stream open; the browser asking now is the one to serve.
+
+void AsyncStreamResponse::close_all() {
+  for (auto *stream = first_stream; stream != nullptr; stream = stream->next_stream_)
+    stream->close();
+}
+
+void AsyncStreamResponse::begin(AsyncWebServerRequest *request, const char *status, const char *content_type,
+                                std::span<const HttpHeader> headers, const char *body) {
+  auto socket = request->take_socket();
+  // Without a socket the stream stays unattached and its owner frees it
+  if (socket == nullptr)
+    return;
+  size_t open = 0;
+  AsyncStreamResponse *oldest = nullptr;
+  for (auto *stream = first_stream; stream != nullptr; stream = stream->next_stream_) {
+    if (stream->socket_ != nullptr) {
+      open++;
+      oldest = stream;
+    }
+  }
+  if (open >= MAX_STREAMS) {
     ESP_LOGD(TAG, "Closing the oldest event stream for a new one");
-    this->sessions_.erase(this->sessions_.begin());
+    oldest->close();
   }
-  auto sock = req->take_socket();
-  if (sock == nullptr)
-    return;
-  Session session{};
-  session.socket = std::move(sock);
-  session.last_progress = App.get_loop_component_start_time();
-  session.pending = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n"
-                    "Connection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n";
-  session.entities_iterator = std::make_unique<web_server::ListEntitiesIterator>(this->web_server_, this);
-  session.entities_iterator->begin(this->web_server_->include_internal_);
-  this->sessions_.push_back(std::move(session));
-  // WebServer::loop() drives the event streams and stops itself while none is open.
-  this->web_server_->enable_loop();
-
-  // The standard web frontend expects a config-bearing ping immediately,
-  // not only the periodic uptime pings.
-  auto config = this->web_server_->get_config_json();
-  this->queue_to_session_(this->sessions_.back(), config.c_str(), config.size(), "ping",
-                          App.get_loop_component_start_time(), 30000);
-  ESP_LOGD(TAG, "Event stream opened (%u open), config %u bytes", static_cast<unsigned>(this->sessions_.size()),
-           static_cast<unsigned>(config.size()));
-#ifdef USE_WEBSERVER_SORTING
-  for (const auto &group : this->web_server_->sorting_groups_) {
-    json::JsonBuilder builder;
-    auto root = builder.root();
-    root["name"] = json::linked(group.second.name);
-    root["sorting_weight"] = group.second.weight;
-    auto message = builder.serialize();
-    this->queue_to_session_(this->sessions_.back(), message.c_str(), message.size(), "sorting_group", 0, 0);
-  }
-#endif
-}
-void AsyncEventSource::queue_to_session_(Session &session, const char *message, size_t len, const char *event,
-                                         uint32_t id, uint32_t reconnect) {
-  if (session.socket == nullptr)
-    return;
-  std::string frame;
-  if (event != nullptr)
-    frame += std::string("event: ") + event + "\n";
-  if (id != 0) {
-    char decimal[UINT32_MAX_STR_SIZE];
-    uint32_to_str(decimal, id);
-    frame += "id: ";
-    frame += decimal;
-    frame += "\n";
-  }
-  if (reconnect != 0) {
-    char decimal[UINT32_MAX_STR_SIZE];
-    uint32_to_str(decimal, reconnect);
-    frame += "retry: ";
-    frame += decimal;
-    frame += "\n";
-  }
-  frame += "data: ";
-  frame.append(message, len);
-  frame += "\n\n";
-  char prefix[24];
-  std::snprintf(prefix, sizeof(prefix), "%zx\r\n", frame.size());
-  const size_t extra = std::strlen(prefix) + frame.size() + 2;
-  // Bounded queue: slow browsers are disconnected instead of consuming
-  // unbounded SRAM or stalling the MCU UART and main application loop.
-  if (extra > 8192 || session.pending.size() > 8192 - extra) {
-    session.socket.reset();
-    session.overflowed = true;
-    return;
-  }
-  session.pending += prefix;
-  session.pending += frame;
-  session.pending += "\r\n";
-}
-void AsyncEventSource::queue_(const char *message, size_t len, const char *event, uint32_t id, uint32_t reconnect) {
-  for (auto &session : this->sessions_)
-    this->queue_to_session_(session, message, len, event, id, reconnect);
-}
-void AsyncEventSource::try_send_nodefer(const char *message, size_t len, const char *event, uint32_t id,
-                                        uint32_t reconnect) {
-  this->queue_(message, len, event, id, reconnect);
-}
-void AsyncEventSource::deferrable_send_state(void *source, bool detail_all, message_generator_t *generator) {
-  if (this->sessions_.empty())
-    return;
-  if (detail_all) {
-    if (this->listing_session_ == nullptr || this->listing_session_->socket == nullptr)
-      return;
-  } else {
-    bool has_ready_client = false;
-    for (const auto &session : this->sessions_)
-      has_ready_client |= session.socket != nullptr && session.entities_iterator->completed();
-    if (!has_ready_client)
-      return;
-  }
-  json::JsonBuilder builder;
-  generator(this->web_server_, source, builder);
-  auto message = builder.serialize();
-  if (detail_all) {
-    this->queue_to_session_(*listing_session_, message.c_str(), message.size(), "state", 0, 0);
-  } else {
-    for (auto &session : this->sessions_) {
-      if (session.socket != nullptr && session.entities_iterator->completed())
-        this->queue_to_session_(session, message.c_str(), message.size(), "state", 0, 0);
-    }
-  }
-}
-bool AsyncEventSource::loop() {
-  if (this->sessions_.empty())
-    return false;
-  const uint32_t now = App.get_loop_component_start_time();
-  for (auto &session : this->sessions_) {
-    if (session.socket == nullptr)
-      continue;
-    if (!session.entities_iterator->completed()) {
-      this->listing_session_ = &session;
-      session.entities_iterator->try_advance(1);
-      this->listing_session_ = nullptr;
-      if (session.socket == nullptr)
-        continue;
-    }
-    if (now - session.last_progress > 20000) {
-      ESP_LOGW(TAG, "Event stream closed: no progress for 20 s (%u bytes pending)",
-               static_cast<unsigned>(session.pending.size() - session.sent));
-      session.socket.reset();
-      continue;
-    }
-    const size_t pending = session.pending.size() - session.sent;
-    if (pending == 0)
-      continue;
-    const ssize_t n =
-        session.socket->send(session.pending.data() + session.sent, std::min<size_t>(1024, pending), MSG_DONTWAIT);
-    if (n < 0) {
-      const int err = errno;
-      if (err != EAGAIN && err != EWOULDBLOCK && err != EINTR) {
-        // A closed browser tab resets the connection; only other errors are worth a warning.
-        if (err == ECONNRESET || err == EPIPE) {
-          ESP_LOGD(TAG, "Event stream closed by the browser");
-        } else {
-          ESP_LOGW(TAG, "Event stream closed: send failed, errno %d", err);
+  this->socket_ = std::move(socket);
+  this->next_stream_ = first_stream;
+  first_stream = this;
+  // The send buffer of a new connection is empty, so the head goes out whole or the connection is broken
+  const bool head_sent = web_server_base::write_stream_head<struct iovec>(
+      [this](struct iovec *iov, int count) {
+        while (count > 0) {
+          const ssize_t sent = this->socket_->writev(iov, count);
+          if (sent <= 0)
+            return false;
+          web_server_base::advance_iovecs(iov, count, static_cast<size_t>(sent));
         }
-        session.socket.reset();
-      }
-      continue;
-    }
-    if (n > 0) {
-      session.sent += static_cast<size_t>(n);
-      session.last_progress = now;
-      if (session.sent == session.pending.size()) {
-        session.pending.clear();
-        session.sent = 0;
-      }
-    }
+        return true;
+      },
+      status, content_type, headers, DefaultHeaders::Instance().headers(), body);
+  if (!head_sent) {
+    ESP_LOGW(TAG, "Stream head not sent, errno %d", errno);
+    this->close();
   }
-  for (const auto &session : this->sessions_) {
-    if (session.overflowed)
-      ESP_LOGW(TAG, "Event stream closed: send queue over 8 KiB");
-  }
-  this->sessions_.erase(std::remove_if(this->sessions_.begin(), this->sessions_.end(),
-                                       [](const Session &s) { return s.socket == nullptr; }),
-                        this->sessions_.end());
-  return !this->sessions_.empty();
 }
-#endif
+
+ssize_t AsyncStreamResponse::write(struct iovec *iov, int iovcnt) {
+  if (this->close_requested_ || this->socket_ == nullptr)
+    return -1;
+  // Nothing to send is not a stall
+  if (web_server_base::iovecs_total(iov, iovcnt) == 0)
+    return 0;
+  const ssize_t sent = this->socket_->writev(iov, iovcnt);
+  if (sent > 0) {
+    this->stall_.clear();
+    return sent;
+  }
+  if (sent < 0) {
+    const int err = errno;
+    if (err != EAGAIN && err != EWOULDBLOCK && err != EINTR) {
+      // A closed browser tab resets the connection; only other errors are worth a warning
+      if (err == ECONNRESET || err == EPIPE || err == ENOTCONN) {
+        ESP_LOGD(TAG, "Event stream closed by the browser");
+      } else {
+        ESP_LOGW(TAG, "Event stream closed: send failed, errno %d", err);
+      }
+      this->close();
+      return -1;
+    }
+  }
+  // Send buffer full, try again later; a buffer that stays full past the stall timeout is closed
+  return this->stall_or_close_(LOG_STR("without send progress")) ? -1 : 0;
+}
+
+ssize_t AsyncStreamResponse::write(const void *data, size_t len) {
+  struct iovec iov = {const_cast<void *>(data), len};
+  return this->write(&iov, 1);
+}
+
+bool AsyncStreamResponse::stall_or_close_(const LogString *reason) {
+  const uint32_t now = App.get_loop_component_start_time();
+  if (!this->stall_.start_or_expired(now, SEND_STALL_TIMEOUT_MS))
+    return false;
+  ESP_LOGW(TAG, "Closing stuck stream after %" PRIu32 " ms %s", this->stall_.elapsed(now), LOG_STR_ARG(reason));
+  this->close();
+  return true;
+}
+
+void AsyncStreamResponse::close() {
+  this->close_requested_ = true;
+  this->socket_.reset();
+}
 
 }  // namespace esphome::web_server_xr806
 #endif  // USE_XR806

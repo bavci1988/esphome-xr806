@@ -240,7 +240,7 @@ void TuyaUART::handle_low_power_frame_(uint8_t command, uint8_t version, const u
     // handle_frame_ already checked the full checksum. Keep the scanner
     // independent so bad/wrong frames cannot unlock the boot state machine.
     // buffer is the payload inside the whole frame: 6 header bytes before it, the checksum after it.
-    if (!this->lp_autobaud_.accept_frame(buffer - TuyaLength::KNOWN_AT, len + TuyaLength::KNOWN_AT + 1,
+    if (!this->lp_autobaud_.accept_frame(buffer - TuyaLength::PAYLOAD_AT, len + TuyaLength::PAYLOAD_AT + 1,
                                          App.get_loop_component_start_time())) {
       // Show what the MCU sent, so a reply the scan does not recognize can be diagnosed.
       char hex[3 * 12 + 1];

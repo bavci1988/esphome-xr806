@@ -13,17 +13,10 @@
 #include <utility>
 #include <vector>
 #include "esphome/core/helpers.h"
+#include "esphome/core/log.h"
 #include "esphome/core/string_ref.h"
 #include "esphome/components/socket/socket.h"
-
-#ifdef USE_WEBSERVER
-#include "esphome/components/json/json_util.h"
-#include "esphome/components/web_server/list_entities.h"
-#endif
-
-namespace esphome::web_server {
-class WebServer;
-}
+#include "esphome/components/web_server_base/stream_head.h"
 
 namespace esphome::web_server_xr806 {
 
@@ -33,7 +26,6 @@ enum http_method : uint8_t { HTTP_GET, HTTP_POST, HTTP_OPTIONS, HTTP_PUT, HTTP_D
 class AsyncWebServerRequest;
 class AsyncWebServer;
 class AsyncWebHandler;
-class AsyncEventSource;
 
 class AsyncWebServerResponse {
  public:
@@ -205,64 +197,69 @@ class AsyncWebServer {
   std::function<void(AsyncWebServerRequest *)> not_found_;
 };
 
-struct HttpHeader {
-  const char *name;
-  const char *value;
-};
+using web_server_base::HttpHeader;
 
 class DefaultHeaders {
  public:
   static DefaultHeaders &Instance();
   void addHeader(const char *name, const char *value) { this->headers_.push_back({name, value}); }
-  const std::vector<HttpHeader> &headers() const { return this->headers_; }
+  std::span<const HttpHeader> headers() const { return this->headers_; }
 
  protected:
-  std::vector<HttpHeader> headers_;
+  // Count defined in web_server_base where the headers are added
+  StaticVector<HttpHeader, WEB_SERVER_DEFAULT_HEADERS_COUNT> headers_;
 };
 
-#ifdef USE_WEBSERVER
-using message_generator_t = void(esphome::web_server::WebServer *, void *, json::JsonBuilder &);
-
-class AsyncEventSource : public AsyncWebHandler {
+/// A long lived response the main loop writes to without blocking, on the socket taken from the request; the same
+/// interface as web_server_idf's AsyncStreamResponse. The server runs in the main loop, so begin() sends the head and
+/// attaches the stream at once.
+class AsyncStreamResponse {
  public:
-  AsyncEventSource(StringRef path, esphome::web_server::WebServer *web_server)
-      : path_(path), web_server_(web_server), next_source_(first_source) {
-    // Event sources hold their sockets outside the server's client list; the server finds them here.
-    first_source = this;
-  }
-  AsyncEventSource(const AsyncEventSource &) = delete;
-  AsyncEventSource &operator=(const AsyncEventSource &) = delete;
-  static AsyncEventSource *first_source;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-  AsyncEventSource *next_source() const { return this->next_source_; }
-  bool canHandle(AsyncWebServerRequest *request) const override;
-  void handleRequest(AsyncWebServerRequest *request) override;
-  void try_send_nodefer(const char *message, size_t len, const char *event = nullptr, uint32_t id = 0,
-                        uint32_t reconnect = 0);
-  void deferrable_send_state(void *source, bool detail_all, message_generator_t *generator);
-  bool loop();
-  bool empty() const { return this->sessions_.empty(); }
-  void close_all();
+  AsyncStreamResponse() = default;
+  AsyncStreamResponse(const AsyncStreamResponse &) = delete;
+  AsyncStreamResponse &operator=(const AsyncStreamResponse &) = delete;
+  ~AsyncStreamResponse();
+
+  /// Takes the socket from the request and sends the head: status (for example "200 OK"), Content-Type, headers, the
+  /// default headers and body (a C string or null). Closes the oldest stream when MAX_STREAMS are open.
+  void begin(AsyncWebServerRequest *request, const char *status, const char *content_type,
+             std::span<const HttpHeader> headers, const char *body = nullptr);
+  /// Non-blocking gather write. Returns the bytes accepted, 0 when the send buffer is full and -1 when the stream is
+  /// closing. SEND_STALL_TIMEOUT_MS of refused writes closes it.
+  ssize_t write(struct iovec *iov, int iovcnt);
+  ssize_t write(const void *data, size_t len);
+  /// Closes the socket; safe to call more than once.
+  void close();
+  void loop() {}
+
+  bool is_attached() const { return this->socket_ != nullptr; }
+  bool is_connected() const { return this->socket_ != nullptr; }
+  bool is_closing() const { return this->close_requested_; }
+  /// An id for log lines only
+  int log_id() const { return static_cast<int>(reinterpret_cast<uintptr_t>(this) & 0xFFFF); }
+  bool safe_to_delete() const { return this->socket_ == nullptr; }
+
+  /// True while any stream holds its socket; standby waits for them to close
+  static bool any_open();
+  /// Closes every stream; their owners free them
+  static void close_all();
+
+  static constexpr uint32_t SEND_STALL_TIMEOUT_MS = 20000;
+  // A phone that only hid the tab keeps its old stream open; the browser asking now is the one to serve
+  static constexpr size_t MAX_STREAMS = 2;
 
  protected:
-  struct Session {
-    std::unique_ptr<socket::Socket> socket;
-    std::string pending;
-    size_t sent{0};
-    uint32_t last_progress{0};
-    std::unique_ptr<web_server::ListEntitiesIterator> entities_iterator;
-    // Set where the socket is dropped without a log line (queue_to_session_ also runs from the log callback).
-    bool overflowed{false};
-  };
-  void queue_to_session_(Session &session, const char *message, size_t len, const char *event, uint32_t id,
-                         uint32_t reconnect);
-  void queue_(const char *message, size_t len, const char *event, uint32_t id, uint32_t reconnect);
-  StringRef path_;
-  esphome::web_server::WebServer *web_server_;
-  std::vector<Session> sessions_;
-  Session *listing_session_{nullptr};
-  AsyncEventSource *next_source_;
+  // Starts the stall clock; once it has run SEND_STALL_TIMEOUT_MS, logs reason and closes. True when it did.
+  bool stall_or_close_(const LogString *reason);
+
+  // Every stream, newest first; AsyncWebServer finds them here, as they hold their sockets outside its client list
+  static AsyncStreamResponse *first_stream;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+  AsyncStreamResponse *next_stream_{nullptr};
+  std::unique_ptr<socket::Socket> socket_;
+  // Runs while sends make no progress
+  web_server_base::StallClock stall_;
+  bool close_requested_{false};
 };
-#endif
 
 }  // namespace esphome::web_server_xr806
 
