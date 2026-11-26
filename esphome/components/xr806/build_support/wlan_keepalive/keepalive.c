@@ -86,8 +86,9 @@ struct keepalive {
   uint8_t enc_hdr;
   uint8_t enc_tail;
   uint8_t vif;
-  uint8_t server;  /* the connection is configured; its segments are matched */
-  uint8_t limited; /* a stop count was given */
+  uint8_t server;        /* the connection is configured; its segments are matched */
+  uint8_t wake_reported; /* the host was told to wake since it went to sleep */
+  uint8_t limited;       /* a stop count was given */
 };
 _Static_assert(offsetof(struct keepalive, seq) == 4, "host contract");
 _Static_assert(offsetof(struct keepalive, period_timer) == 0x14, "host contract");
@@ -325,6 +326,7 @@ int keepalive_mib(const uint8_t *request) {
   }
   if (id == MIB_HOST_SLEEP) {
     ka.host_sleep = p[0];
+    ka.wake_reported = 0;
     return 1;
   }
   return 0;
@@ -364,9 +366,8 @@ static int peer_segment(const uint8_t *tcp, uint32_t data_len) {
   return acked && ka.host_sleep;
 }
 
-/* Receive hook: frame = LLC/SNAP header, then the packet. Returns 1 to drop the frame. */
-int keepalive_receive(uint32_t vif, const uint8_t *frame) {
-  (void) vif;
+/* frame = LLC/SNAP header, then the packet. Returns 1 to drop the frame. */
+static int receive(const uint8_t *frame) {
   const uint8_t *ip = frame + 8;
   if (get_be16(frame + 6) != 0x0800 || (ip[0] >> 4) != 4)
     return 0;
@@ -392,4 +393,20 @@ int keepalive_receive(uint32_t vif, const uint8_t *frame) {
     return 0;
   }
   return 1;
+}
+
+/*
+ * Receive hook. A frame handed to the sleeping host leaves the WLAN core waiting for the host: it cannot go into deep
+ * sleep, and while the host sleeps its clock and timers stand still in that state. Should the frame itself fail to
+ * wake the host, nothing would until the host's own timer ("the core overslept"). So the first IPv4 frame passed on
+ * while the host sleeps is also announced with the wake message, which the vendor firmware uses for its own wake-ups.
+ */
+int keepalive_receive(uint32_t vif, const uint8_t *frame) {
+  (void) vif;
+  int drop = receive(frame);
+  if (!drop && ka.host_sleep && !ka.wake_reported && get_be16(frame + 6) == 0x0800) {
+    ka.wake_reported = 1;
+    report(STATE_WAKE_PACKET);
+  }
+  return drop;
 }
