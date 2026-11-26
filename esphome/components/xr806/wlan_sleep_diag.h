@@ -345,30 +345,39 @@ static constexpr uint32_t RC_CALIBRATION_DCXO_COUNT = RC_CALIBRATION_BASE + 0x08
 static constexpr uint32_t RC_CALIBRATION_MONITOR = RC_CALIBRATION_BASE + 0x0C;
 static constexpr uint32_t MONITOR_ENABLE = 1U << 4;
 
-// Experiment: calibrate the 32 kHz clock more often. The SDK sets a base interval of 640 slow clock cycles with
-// phase 3 at 24 times that, about every 480 ms once settled; here 320 cycles and 10 times, about every 100 ms.
-// Stop, configure and start as HAL_RcoscCali_Config/Start do.
+// Earlier experiments changed the 32 kHz clock setup, and these power control registers keep their values across a
+// restart (the SDK sets them only after power-up). Before the first standby they are set back to the SDK setup:
+// calibration started when the CPU and the WLAN core both sleep, base interval 640 slow clock cycles, phase 3 at
+// 24 times that, and the WLAN core's clock from the calibration unit. Stop, configure and start as the HAL does.
+static constexpr uint32_t POWER_CONFIG = POWER_CONTROL_BASE + 0x074;       // bits 6-7: calibration start
+static constexpr uint32_t CLOCK_32K = POWER_CONTROL_BASE + 0x23C;          // bit 3: WLAN clock from calibration
 static constexpr uint32_t CALIBRATION_CTRL0 = POWER_CONTROL_BASE + 0x260;  // bit 29 enable, bit 16 timer, 0-12 time
-static constexpr uint32_t CALIBRATION_CTRL1 = POWER_CONTROL_BASE + 0x264;  // bits 8-10 phase 3, 4-6 phase 2, 0 mode
+static constexpr uint32_t CALIBRATION_CTRL1 = POWER_CONTROL_BASE + 0x264;  // bits 8-10 phase 3
 static constexpr uint32_t CALIBRATION_ENABLE = (1U << 29) | (1U << 16);
-static constexpr uint32_t CALIBRATION_TIME_MASK = 0x1FFFU;
-static constexpr uint32_t CALIBRATION_PHASE3_MASK = 7U << 8;
-static constexpr uint32_t CALIBRATION_TIME = 320;
-static constexpr uint32_t CALIBRATION_PHASE3_10 = 0U << 8;
 
-XR806_DIAG_FLASH inline void calibrate_more_often() {
+XR806_DIAG_FLASH inline void restore_clock_setup() {
   static const char *const TAG = "xr806.wlan_diag";
+  volatile uint32_t &config = cpu_register(POWER_CONFIG);
+  volatile uint32_t &clock = cpu_register(CLOCK_32K);
   volatile uint32_t &ctrl0 = cpu_register(CALIBRATION_CTRL0);
   volatile uint32_t &ctrl1 = cpu_register(CALIBRATION_CTRL1);
-  const uint32_t before0 = ctrl0, before1 = ctrl1;
-  ctrl0 = ctrl0 & ~CALIBRATION_ENABLE;
-  ctrl1 = (ctrl1 & ~CALIBRATION_PHASE3_MASK) | CALIBRATION_PHASE3_10;
-  ctrl0 = (ctrl0 & ~CALIBRATION_TIME_MASK) | CALIBRATION_TIME;
-  ctrl0 = ctrl0 | CALIBRATION_ENABLE;
-  delayMicroseconds(200);
-  ESP_LOGW(TAG, "Experiment: 32 kHz calibration more often: %08" PRIX32 " %08" PRIX32 " -> %08" PRIX32 " %08" PRIX32,
-           before0, before1, static_cast<uint32_t>(ctrl0), static_cast<uint32_t>(ctrl1));
+  const uint32_t before[4] = {config, clock, ctrl0, ctrl1};
+  config = (config & ~(3U << 6)) | (2U << 6);
+  clock = clock | (1U << 3);
+  if ((ctrl0 & 0x1FFFU) != 640 || (ctrl1 & (7U << 8)) != (3U << 8)) {
+    ctrl0 = ctrl0 & ~CALIBRATION_ENABLE;
+    ctrl1 = (ctrl1 & ~(7U << 8)) | (3U << 8);
+    ctrl0 = (ctrl0 & ~0x1FFFU) | 640;
+    ctrl0 = ctrl0 | CALIBRATION_ENABLE;
+    delayMicroseconds(200);
+  }
+  ESP_LOGW(TAG,
+           "32 kHz clock setup (074 23C 260 264): %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " -> %08" PRIX32
+           " %08" PRIX32 " %08" PRIX32 " %08" PRIX32,
+           before[0], before[1], before[2], before[3], static_cast<uint32_t>(config), static_cast<uint32_t>(clock),
+           static_cast<uint32_t>(ctrl0), static_cast<uint32_t>(ctrl1));
 }
+
 static constexpr uint32_t MONITOR_CLEAR = (1U << 5) | (1U << 2);
 
 XR806_DIAG_FLASH inline void print_clock_monitor(const char *label, uint32_t monitor) {
@@ -390,7 +399,7 @@ XR806_DIAG_FLASH inline void before_standby() {
   volatile uint32_t &monitor = cpu_register(RC_CALIBRATION_MONITOR);
   if (c.count == 1) {
     c.monitor_first = monitor;
-    calibrate_more_often();
+    restore_clock_setup();
     delay(20);  // let the line reach the UART before standby
   }
   c.monitor_awake = monitor;
