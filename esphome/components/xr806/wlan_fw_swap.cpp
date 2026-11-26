@@ -50,12 +50,15 @@ uint32_t __wrap_image_rw(uint32_t id, image_seg_t seg, uint32_t offset, void *bu
     return result;
   if (offset == 0) {
     // The WLAN core's 32 kHz clock must come from the calibration unit: on the raw RC clock the core does not wake
-    // by its own timer in standby. The power control registers can keep a raw RC setting across a restart, and
-    // the driver reports the clock to the core right after this firmware read.
+    // by its own timer in standby. The power control registers keep their values across a restart (earlier
+    // experiments left them changed), and the driver reports the clock to the core right after this firmware read.
     volatile uint32_t &clock_32k = *reinterpret_cast<volatile uint32_t *>(0x4004023C);
     volatile uint32_t &rc_measurement = *reinterpret_cast<volatile uint32_t *>(0x40040010);
+    volatile uint32_t &power_config = *reinterpret_cast<volatile uint32_t *>(0x40040074);
     clock_32k = clock_32k | (1U << 3);
     rc_measurement = rc_measurement & ~1U;
+    // Bits 6-7: the calibration starts when the CPU and the WLAN core both sleep (SDK setting).
+    power_config = (power_config & ~(3U << 6)) | (2U << 6);
   }
   if (!serve_patched)
     return result;
