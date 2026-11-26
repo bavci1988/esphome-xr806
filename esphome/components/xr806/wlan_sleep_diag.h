@@ -344,8 +344,6 @@ static constexpr uint32_t RC_CALIBRATION_BASE = 0x40046000;
 static constexpr uint32_t RC_CALIBRATION_DCXO_COUNT = RC_CALIBRATION_BASE + 0x08;
 static constexpr uint32_t RC_CALIBRATION_MONITOR = RC_CALIBRATION_BASE + 0x0C;
 static constexpr uint32_t MONITOR_ENABLE = 1U << 4;
-static constexpr uint32_t CALIBRATION_START_MASK = 3U << 6;       // power control config bits 6-7
-static constexpr uint32_t CALIBRATION_START_CPU_SLEEP = 0U << 6;  // SDK default: 2, CPU and WLAN core asleep
 static constexpr uint32_t MONITOR_CLEAR = (1U << 5) | (1U << 2);
 
 XR806_DIAG_FLASH inline void print_clock_monitor(const char *label, uint32_t monitor) {
@@ -365,14 +363,8 @@ XR806_DIAG_FLASH inline void before_standby() {
   take(c.before);
   read_power_line(c.power_before);
   volatile uint32_t &monitor = cpu_register(RC_CALIBRATION_MONITOR);
-  if (c.count == 1) {
+  if (c.count == 1)
     c.monitor_first = monitor;
-    // Experiment: the SDK starts the 32 kHz calibration whenever the CPU and the WLAN core both sleep, which
-    // happens at every WLAN sleep during standby. Start it only when the CPU sleeps, apart from the WLAN core's
-    // own sleep transitions, to see whether the hangs follow.
-    volatile uint32_t &config = cpu_register(POWER_CONTROL_BASE + 0x074);
-    config = (config & ~CALIBRATION_START_MASK) | CALIBRATION_START_CPU_SLEEP;
-  }
   c.monitor_awake = monitor;
   monitor = MONITOR_ENABLE | MONITOR_CLEAR;
   monitor = MONITOR_ENABLE;

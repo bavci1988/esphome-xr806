@@ -79,6 +79,21 @@ static constexpr uint32_t PATCH_CHECK_ADDRESS = 0x0900A374;
 static constexpr uint32_t PATCH_CHECK_VALUE = 0x46C046C0;
 
 static bool patched_active = false;
+
+#ifdef USE_XR806_WLAN_SLEEP_DIAG
+// Experiment: the WLAN core's 32 kHz clock normally comes from the RC oscillator calibration unit, which seems to
+// take part in the core's hangs in standby. On the raw RC clock the driver tells the core so at its start
+// (xradio_attach reads CLK_32K_CTRL and the RC frequency measurement), and the core calibrates the clock itself.
+// After RAW_RC_ATTEMPTS starts in a row without RAW_RC_CONFIRM_MS of service the experiment is left off.
+static constexpr uint32_t POWER_RC_MEASUREMENT = 0x40040010;  // bit 0: measure the RC frequency, bits 8+: Hz / 10
+static constexpr uint32_t POWER_CLOCK_32K = 0x4004023C;       // bit 3: the WLAN core's clock from the calibration unit
+static constexpr uint32_t WLAN_CLOCK_FROM_CALIBRATION = 1U << 3;
+static constexpr uint8_t RAW_RC_ATTEMPTS = 2;
+static constexpr uint32_t RAW_RC_CONFIRM_MS = 10 * 60 * 1000;
+static constexpr uint32_t RAW_RC_CONFIRM_ID = 0;
+
+static volatile uint32_t &power_register(uint32_t address) { return *reinterpret_cast<volatile uint32_t *>(address); }
+#endif
 static XR806WlanFirmwareSwap *instance = nullptr;
 
 static bool patched_code_running() {
@@ -111,6 +126,19 @@ bool XR806WlanFirmwareSwap::request_recovery() {
 
 void XR806WlanFirmwareSwap::setup() {
   instance = this;
+#ifdef USE_XR806_WLAN_SLEEP_DIAG
+  this->raw_rc_pref_ = global_preferences->make_preference<uint8_t>(fnv1_hash("xr806_raw_rc") ^ App.get_config_hash());
+  uint8_t raw_rc_attempts = 0;
+  this->raw_rc_pref_.load(&raw_rc_attempts);
+  this->raw_rc_pending_ = raw_rc_attempts < RAW_RC_ATTEMPTS;
+  if (this->raw_rc_pending_) {
+    ++raw_rc_attempts;
+    this->raw_rc_pref_.save(&raw_rc_attempts);
+  } else {
+    ESP_LOGW(TAG, "Raw RC clock for the WLAN core failed %u starts in a row; calibrated clock until the next update",
+             raw_rc_attempts);
+  }
+#endif
 #ifdef USE_XR806_WLAN_FW_LOAD_AT_BOOT
   // Counts starts on the patched firmware; a confirmed connection resets it. Keyed by the build, so an update
   // tries the patched firmware again.
@@ -150,10 +178,40 @@ void XR806WlanFirmwareSwap::dump_config() {
 #endif
 }
 
+#ifdef USE_XR806_WLAN_SLEEP_DIAG
+void XR806WlanFirmwareSwap::start_raw_rc_clock_(wifi::WiFiComponent *wifi) {
+  ESP_LOGW(TAG, "Experiment: restarting the WLAN core on the raw RC clock");
+  this->raw_rc_pending_ = false;
+  this->raw_rc_switching_ = true;
+  patched_active = false;
+  this->recovering_ = true;  // no connection afterwards restarts the device
+  this->restart_patched_ = true;
+  wifi->disable();
+  this->phase_ = Phase::RESTART;
+  this->since_ms_ = millis();
+}
+
+void XR806WlanFirmwareSwap::switch_to_raw_rc_clock_() {
+  volatile uint32_t &measurement = power_register(POWER_RC_MEASUREMENT);
+  measurement = measurement | 1U;
+  delay(100);  // a few measurement periods
+  power_register(POWER_CLOCK_32K) = power_register(POWER_CLOCK_32K) & ~WLAN_CLOCK_FROM_CALIBRATION;
+  ESP_LOGW(TAG,
+           "WLAN core clock: raw RC, measured %" PRIu32 " Hz (measurement %08" PRIX32 ", 32k clock control %08" PRIX32
+           ")",
+           10 * ((measurement >> 8) & 0xFFFFFU), measurement, power_register(POWER_CLOCK_32K));
+}
+#endif
+
 void XR806WlanFirmwareSwap::restart_wlan_(bool patched) {
   served_bytes = 0;
   serve_patched = patched;
   net_sys_onoff(0);
+#ifdef USE_XR806_WLAN_SLEEP_DIAG
+  // Between stop and start: the driver reports the clock to the core when it starts it.
+  if (this->raw_rc_switching_)
+    switch_to_raw_rc_clock_();
+#endif
   net_sys_onoff(1);
   ESP_LOGI(TAG, "WLAN core restarted with the %s firmware (%" PRIu32 " patched bytes served)",
            patched ? LOG_STR_LITERAL("patched") : LOG_STR_LITERAL("stock"), served_bytes);
@@ -196,6 +254,18 @@ void XR806WlanFirmwareSwap::loop() {
         if (this->recovering_) {
           this->recovering_ = false;
           ESP_LOGI(TAG, "Station connected again after the WLAN core restart");
+#ifdef USE_XR806_WLAN_SLEEP_DIAG
+          if (this->raw_rc_switching_) {
+            this->raw_rc_switching_ = false;
+            this->set_timeout(RAW_RC_CONFIRM_ID, RAW_RC_CONFIRM_MS, [this]() {
+              uint8_t attempts = 0;
+              this->raw_rc_pref_.save(&attempts);
+              global_preferences->sync();
+              ESP_LOGI(TAG, "Raw RC clock for the WLAN core confirmed after %" PRIu32 " minutes",
+                       RAW_RC_CONFIRM_MS / 60000);
+            });
+          }
+#endif
           if (!this->restart_patched_) {
             this->phase_ = Phase::STOCK;
             return;
@@ -208,6 +278,12 @@ void XR806WlanFirmwareSwap::loop() {
           uint8_t attempts = 0;
           this->attempts_pref_.save(&attempts);
           global_preferences->sync();
+#endif
+#ifdef USE_XR806_WLAN_SLEEP_DIAG
+          if (this->raw_rc_pending_) {
+            this->start_raw_rc_clock_(wifi);
+            return;
+          }
 #endif
           this->phase_ = Phase::ACTIVE;
           return;
