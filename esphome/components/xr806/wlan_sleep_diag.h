@@ -325,6 +325,9 @@ struct Cycle {
   Snapshot before;
   uint32_t power_before[POWER_LINE_WORDS]{};
   uint32_t monitor_first{0};
+  uint32_t monitor_awake{0};            // as found before standby: what the time awake left
+  uint32_t monitor_printed_awake{~0U};  // last printed values, so that unchanged ones are not repeated
+  uint32_t monitor_printed_standby{~0U};
   uint32_t printed_before[POWER_LINE_WORDS]{};
   uint32_t printed_after[POWER_LINE_WORDS]{};
 };
@@ -342,7 +345,6 @@ static constexpr uint32_t RC_CALIBRATION_DCXO_COUNT = RC_CALIBRATION_BASE + 0x08
 static constexpr uint32_t RC_CALIBRATION_MONITOR = RC_CALIBRATION_BASE + 0x0C;
 static constexpr uint32_t MONITOR_ENABLE = 1U << 4;
 static constexpr uint32_t MONITOR_CLEAR = (1U << 5) | (1U << 2);
-static constexpr uint32_t MONITOR_FLAGS = (1U << 6) | (1U << 7);  // long level found, glitch found
 
 XR806_DIAG_FLASH inline void print_clock_monitor(const char *label, uint32_t monitor) {
   static const char *const TAG = "xr806.wlan_diag";
@@ -363,6 +365,7 @@ XR806_DIAG_FLASH inline void before_standby() {
   volatile uint32_t &monitor = cpu_register(RC_CALIBRATION_MONITOR);
   if (c.count == 1)
     c.monitor_first = monitor;
+  c.monitor_awake = monitor;
   monitor = MONITOR_ENABLE | MONITOR_CLEAR;
   monitor = MONITOR_ENABLE;
   c.start_ms = millis();
@@ -413,15 +416,21 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
   print_power_line("after ", power_after, c.printed_after);
   if (c.count == 1)
     print_clock_monitor("at boot", c.monitor_first);
-  if ((monitor & MONITOR_FLAGS) != 0 || failed || c.count == 1)
+  // Printed on change, and always after a hang; "while awake" is what the time before the standby left.
+  if (c.count > 1 && c.monitor_awake != c.monitor_printed_awake) {
+    c.monitor_printed_awake = c.monitor_awake;
+    print_clock_monitor("while awake", c.monitor_awake);
+  }
+  if (monitor != c.monitor_printed_standby || failed) {
+    c.monitor_printed_standby = monitor;
     print_clock_monitor("during standby", monitor);
+  }
   if (c.before.ok && after.ok) {
     // The core's clock must advance as far as the CPU's; less means the core slept past its own timers.
     const uint32_t wlan_ms = ((after.counter + after.offset) - (c.before.counter + c.before.offset)) / 1000;
     if (wlan_ms + 2000 < slept) {
       ESP_LOGE(TAG, "WLAN clock advanced only %" PRIu32 " of %" PRIu32 " ms: the core overslept", wlan_ms, slept);
-      if ((monitor & MONITOR_FLAGS) == 0)
-        print_clock_monitor("during standby", monitor);
+      print_clock_monitor("during this standby", monitor);
       // The core runs again, so its memory can be read: what it queued for the CPU and where it stood.
       capture(hung);
       print_capture(hung);
