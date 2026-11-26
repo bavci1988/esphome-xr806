@@ -18,6 +18,9 @@
  *   the ROM writes such a delay straight into the hardware timer, while its own timer processing never programs
  *   less than 4 us. The handler below restarts its paused timers with "expiry - now", which is 0 or negative when
  *   the timer became due in between.
+ * - the idle hook (sleep_idle, for the function table instead of the ROM's 0x19223) notes the state before every
+ *   wait for an interrupt, and tells the power controller to stay awake while a reason to stay awake exists. See
+ *   sleep_idle for the "overslept" failure this is for.
  *
  * In the hangs recorded so far the wake compare was about 300 ms ahead and neither it nor the host's wake request
  * restarted the core, so none of these checks is expected to end the hangs; the record is there to find the cause.
@@ -97,6 +100,13 @@ struct sleep_record {
   uint32_t remaining;    /* of the paused beacon timer */
   uint16_t short_sleeps; /* entries where the compare had to be moved ahead */
   uint16_t lead_wraps;   /* entries with a lead time longer than the sleep */
+  /* the state before the last wait for an interrupt in the idle loop */
+  uint32_t idle_count;
+  uint32_t idle_awake;
+  uint32_t idle_timer_us;
+  uint32_t idle_next_us;    /* time to the next timer */
+  uint32_t idle_stay_awake; /* as found, before sleep_idle set it */
+  uint32_t idle_power_control;
 };
 
 volatile struct sleep_record sleep_record = {.magic = SLEEP_RECORD_MAGIC};
@@ -106,6 +116,36 @@ void sleep_timer_start(void *node, int32_t us) {
   if (us < 4)
     us = 4;
   ROM_FN(PATCH_TIMER_START, void (*)(void *, int32_t))(node, us);
+}
+
+/*
+ * For the firmware's function table instead of the ROM's idle hook (0x19223), which only makes sure that waiting for
+ * an interrupt may put the domain to sleep.
+ *
+ * "The core overslept": the core answers, but its clock moved only a fraction of the standby (18 ms in 180 s in one
+ * dump) and its timers did not fire. In every dump of it the core was not in deep sleep but in this idle wait, a
+ * reason to stay awake was set (0x40000: the 802.11 power save state machine is not in doze, set by ROM 0x73EC and
+ * 0x10EDA, cleared by 0x9AA and 0x10FE6; often also "timer pending"), the next timer was 1 to 20 ms away, less than
+ * the 24 ms the deep sleep needs, and a keepalive frame had been sent 2 to 4 ms before, as the core woke for a
+ * beacon. So its microsecond clock does not run in this wait while the host sleeps; with the host awake it does (it
+ * continued when the host woke). What makes the hardware keep the clock is not in the code: the only control the
+ * firmware has is STAY_AWAKE, which the vendor code sets when the host asks for the core and when the sleep handler
+ * gives up an attempt, but not after a wake by the compare. It is set here whenever a reason to stay awake exists;
+ * the record shows afterwards what it was.
+ */
+void sleep_idle(void) {
+  uint32_t awake = AWAKE;
+  sleep_record.idle_count++;
+  sleep_record.idle_awake = awake;
+  sleep_record.idle_timer_us = TIMER_COUNTER;
+  sleep_record.idle_next_us = rom_next_timer_us();
+  sleep_record.idle_stay_awake = STAY_AWAKE;
+  sleep_record.idle_power_control = POWER_CONTROL;
+#ifndef SLEEP_IDLE_OBSERVE_ONLY
+  if (awake != 0)
+    STAY_AWAKE = 1;
+#endif
+  ROM_FN(0x00019223, void (*)(void))();
 }
 
 /* For the reset code instead of the ROM's warm start. */
