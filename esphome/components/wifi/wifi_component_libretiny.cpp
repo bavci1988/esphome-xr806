@@ -870,7 +870,17 @@ void WiFiComponent::on_powerdown() {
 }
 #endif
 
-#ifdef USE_BK72XX
+#ifdef USE_LIBRETINY_VARIANT_BK7236
+void WiFiComponent::on_powerdown() {
+  // Leave the AP so it no longer holds the association when we come back.
+  // ARMINO reports WL_CONNECTED once it has an IP; disconnect() sends the deauth while the link is up.
+  if (WiFi.status() != WL_CONNECTED)
+    return;
+  ESP_LOGD(TAG, "Disconnecting before powerdown");
+  WiFi.disconnect();
+  delay(100);  // NOLINT: once per reboot or deep sleep, lets the deauth go out
+}
+#elif defined(USE_BK72XX)
 void WiFiComponent::on_powerdown() {
   // Leave the AP so it no longer holds the association when we come back.
   // Beken reports WL_CONNECTED only once it has an IP; joining or associated is WL_SCAN_COMPLETED
