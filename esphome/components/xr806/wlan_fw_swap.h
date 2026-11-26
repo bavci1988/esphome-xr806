@@ -40,10 +40,6 @@ class XR806WlanFirmwareSwap final : public Component {
  protected:
   void restart_wlan_(bool patched);
   void fall_back_(wifi::WiFiComponent *wifi);
-#ifdef USE_XR806_WLAN_SLEEP_DIAG
-  void start_raw_rc_clock_(wifi::WiFiComponent *wifi);
-  static void switch_to_raw_rc_clock_();
-#endif
 
   enum class Phase : uint8_t { WAIT, RESTART, VERIFY, FALLBACK, ACTIVE, STOCK };
   Phase phase_{Phase::WAIT};
@@ -51,11 +47,6 @@ class XR806WlanFirmwareSwap final : public Component {
   uint32_t recovered_ms_{0};
   bool recovering_{false};  // a restart after a hang that has not been confirmed by a connection yet
   bool restart_patched_{true};
-#ifdef USE_XR806_WLAN_SLEEP_DIAG
-  bool raw_rc_pending_{false};    // switch the WLAN core to the raw RC clock once the station has connected
-  bool raw_rc_switching_{false};  // the next WLAN core restart switches the clock
-  ESPPreferenceObject raw_rc_pref_;
-#endif
 #ifdef USE_XR806_WLAN_FW_LOAD_AT_BOOT
   ESPPreferenceObject attempts_pref_;
 #endif
