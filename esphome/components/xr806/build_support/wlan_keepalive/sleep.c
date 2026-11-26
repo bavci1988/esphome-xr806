@@ -89,9 +89,8 @@ struct sleep_record {
   uint32_t slept_us;       /* the same after lead time and limit */
   uint32_t lead_us;
   uint32_t ticks;
-  uint32_t counter;  /* low-frequency counter at entry */
-  uint32_t compare;  /* wake compare written */
-  uint32_t timer_us; /* microsecond counter at entry */
+  uint32_t counter; /* low-frequency counter at entry */
+  uint32_t compare; /* wake compare written */
   uint32_t lf_period;
   uint32_t lf_calibration;
   uint32_t irq_status; /* bit 1: a wake request was pending at the entry */
@@ -109,7 +108,18 @@ struct sleep_record {
   uint32_t idle_power_control;
 };
 
-volatile struct sleep_record sleep_record = {.magic = SLEEP_RECORD_MAGIC};
+volatile struct sleep_record sleep_record;
+
+/* Called once when the firmware starts, instead of the vendor keepalive's initialisation (0x0900076C in 02.132):
+   the data of both modules is not part of the firmware image. */
+void keepalive_init(void);
+void module_init(void) {
+  keepalive_init();
+  volatile uint32_t *word = (volatile uint32_t *) &sleep_record;
+  for (uint32_t i = 0; i < sizeof(sleep_record) / 4; ++i)
+    word[i] = 0;
+  sleep_record.magic = SLEEP_RECORD_MAGIC;
+}
 
 /* For the firmware's function table instead of its timer start. */
 void sleep_timer_start(void *node, int32_t us) {
@@ -181,7 +191,6 @@ static void sleep_enter(uint32_t us) {
   sleep_record.slept_us = us;
   sleep_record.lead_us = lead;
   sleep_record.ticks = ticks;
-  sleep_record.timer_us = TIMER_COUNTER;
   sleep_record.lf_period = period;
   sleep_record.lf_calibration = LF_CALIBRATION;
   sleep_record.irq_status = IRQ_STATUS;

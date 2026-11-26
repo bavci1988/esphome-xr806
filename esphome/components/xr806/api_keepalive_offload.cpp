@@ -27,15 +27,13 @@ extern "C" {
 
 namespace {
 
-// The patched firmware takes the frames from six areas of 128 bytes: the payloads of the three keepalive entries,
-// then those of the three wake pattern entries. These stay disabled, so the firmware never reads them otherwise; the
-// host writes them through the WLAN RAM window (WLAN 0x0900BE04 + e * 0x84).
-constexpr size_t ENTRY_COUNT = IPC_P2P_SERVER_MAX;
-constexpr size_t ENTRY_PAYLOAD = IPC_P2P_KPALIVE_PAYLOAD_LEN_MAX;
-constexpr size_t AREA_COUNT = 2 * ENTRY_COUNT;
-constexpr uint32_t WAKE_PAYLOAD_ADDRESS = 0x0900BE04;
-constexpr uintptr_t WAKE_PAYLOAD_APP_ADDRESS = 0x6800C000 + (WAKE_PAYLOAD_ADDRESS - 0x09000000);
-constexpr size_t WAKE_ENTRY_SIZE = 0x84;
+// The keepalive module of the WLAN firmware (build_support/wlan_keepalive/keepalive.c) sends the frames from one
+// block in its data, back to back. The host writes them through the WLAN RAM window and reads the module's state
+// there; the addresses are fixed by build_support/wlan_fw_module.py.
+constexpr uint32_t KEEPALIVE_ADDRESS = 0x0900BB8C;
+constexpr uint32_t FRAMES_ADDRESS = KEEPALIVE_ADDRESS + 0x3C;
+constexpr uintptr_t FRAMES_APP_ADDRESS = 0x6800C000 + (FRAMES_ADDRESS - 0x09000000);
+constexpr size_t FRAME_BYTES = 704;
 
 // The build links with --wrap=lwip_write --wrap=lwip_writev when the experiment is enabled. While a capture is open
 // on the main loop, what the API writes is kept here instead of going out, so the API's own Noise code encrypts the
@@ -45,7 +43,7 @@ struct FrameCapture {
   int fd{-1};
   uint16_t len{0};
   bool overflow{false};
-  uint8_t data[AREA_COUNT * ENTRY_PAYLOAD];
+  uint8_t data[FRAME_BYTES];
 };
 FrameCapture frame_capture;
 // millis() of the last write that went out through lwIP, on any socket.
@@ -101,9 +99,9 @@ static constexpr uint16_t IP_ID_INIT = 1;
 static constexpr uint8_t TX_TIMEOUT_S = 5;
 static constexpr uint8_t TX_RETRIES = 3;
 static constexpr uint16_t PROTOCOL_TCP = 0x01;
-// Run-time state of server 0 in the patched firmware (WLAN core addresses): sequence, acknowledgement, IP ID, and
-// a word with the retry count (byte 0) and the frame-in-flight flag (byte 1).
-static constexpr uint32_t STATE_ADDRESS = 0x0900BC04;
+// Run-time state of the keepalive module (WLAN core addresses): sequence, acknowledgement, IP ID, and a word with
+// the retry count (byte 0) and the frame-in-flight flag (byte 1).
+static constexpr uint32_t STATE_ADDRESS = KEEPALIVE_ADDRESS + 4;
 static constexpr uint32_t STATE_WORDS = 4;
 static constexpr uint32_t ACK_WAIT_MS = 500;
 // Home Assistant pings when it received nothing for 20 s. The first firmware frame goes out one period after
@@ -121,8 +119,8 @@ static constexpr uint32_t PEER_ANSWER_WAIT_MS = 1000;
 // (head at 0xFFF01C6C: first node, ..., +0x14 processing flag), the period and retransmit timers of server 0
 // ({next, prev, expiry, callback, argument}) and the WLAN core's microsecond clock.
 static constexpr uint32_t TIMER_LIST_HEAD = 0xFFF01C6C;
-static constexpr uint32_t PERIOD_TIMER = 0x0900BBF0;
-static constexpr uint32_t RETRANSMIT_TIMER = 0x0900BC14;
+static constexpr uint32_t PERIOD_TIMER = KEEPALIVE_ADDRESS + 0x14;
+static constexpr uint32_t RETRANSMIT_TIMER = KEEPALIVE_ADDRESS + 0x28;
 // Timer time as the ROM computes it: hardware counter plus an offset kept in RAM.
 static constexpr uint32_t WLAN_CLOCK = 0x0AC00004;
 static constexpr uint32_t WLAN_CLOCK_OFFSET = 0xFFF0560C;
@@ -217,8 +215,7 @@ bool XR806APIKeepaliveOffload::capture_frames_(api::APIConnection *client, uint3
       break;
     len = written;
     ++count;
-    // Every area holds a whole number of frames.
-    if (count == (ENTRY_PAYLOAD / len) * AREA_COUNT || count >= max_frames)
+    if (count == FRAME_BYTES / len || count >= max_frames)
       break;
   }
   frame_capture.task = nullptr;
@@ -264,48 +261,33 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
       return false;
   }
 
-  // Server 0 sends from all six areas; keepalive entries 1 and 2 only hold frames and stay disabled.
+  // The frames go into the module's data before the keepalive is switched on. The window takes 32-bit accesses.
+  const size_t frame_words = (static_cast<size_t>(this->frame_count_) * this->frame_len_ + 3) / 4;
+  auto *frames = reinterpret_cast<volatile uint32_t *>(FRAMES_APP_ADDRESS);
+  uint32_t last = 0;
+  for (size_t w = 0; w < frame_words; ++w) {
+    memcpy(&last, frame_capture.data + w * 4, std::min<size_t>(4, sizeof(frame_capture.data) - w * 4));
+    frames[w] = last;
+  }
+  // Read the last word back through the firmware, which also confirms the window mapping.
+  uint32_t check = 0;
+  if (wlan_read_words(FRAMES_ADDRESS + (frame_words - 1) * 4, &check, 1) != 0 || check != last) {
+    ESP_LOGW(TAG, "Not armed: the frames read back %08" PRIX32, check);
+    return false;
+  }
+
   auto &kpalive = offload_cmd.kpalive;
   memset(&kpalive, 0, sizeof(kpalive));
   kpalive.KeepAlivePeriod_s = this->period_s_;
   kpalive.TxTimeOut_s = TX_TIMEOUT_S;
   kpalive.TxRetryLimit = TX_RETRIES;
-  // The patched firmware counts this byte down for every frame it builds; with the frame that reaches zero it sets
-  // the period to 255 s, so no further frame is due before Home Assistant's ping wakes the host.
+  // The module counts this byte down for every frame it builds and sends nothing more after it reached zero, so
+  // that Home Assistant's own ping wakes the host.
   kpalive.reserved1 = this->wake_frames_;
-  const size_t per_entry = ENTRY_PAYLOAD / this->frame_len_;
-  for (size_t e = 0; e < ENTRY_COUNT; ++e) {
-    auto &slot = kpalive.P2PKeepAliveParamCfgs[e];
-    slot.Enable = e == SERVER;
-    slot.PayloadLen = this->frame_len_;
-    const size_t first = e * per_entry;
-    if (first < this->frame_count_) {
-      const size_t frames = std::min(per_entry, this->frame_count_ - first);
-      memcpy(slot.Payload, frame_capture.data + first * this->frame_len_, frames * this->frame_len_);
-    }
-  }
-  // After the wake pattern MIB, which clears disabled entries. The window takes 32-bit accesses. Only areas that
-  // hold frames are written: the host touches the WLAN core's RAM only when the list needs them.
-  for (size_t e = 0; e < ENTRY_COUNT; ++e) {
-    uint32_t words[ENTRY_PAYLOAD / 4]{};
-    const size_t first = (ENTRY_COUNT + e) * per_entry;
-    if (first >= this->frame_count_)
-      break;
-    if (first < this->frame_count_) {
-      const size_t frames = std::min(per_entry, this->frame_count_ - first);
-      memcpy(words, frame_capture.data + first * this->frame_len_, frames * this->frame_len_);
-    }
-    auto *area = reinterpret_cast<volatile uint32_t *>(WAKE_PAYLOAD_APP_ADDRESS + e * WAKE_ENTRY_SIZE);
-    for (size_t w = 0; w < ENTRY_PAYLOAD / 4; ++w)
-      area[w] = words[w];
-    // Read the last word back through the firmware, which also confirms the window mapping.
-    uint32_t check = 0;
-    if (wlan_read_words(WAKE_PAYLOAD_ADDRESS + e * WAKE_ENTRY_SIZE + ENTRY_PAYLOAD - 4, &check, 1) != 0 ||
-        check != words[ENTRY_PAYLOAD / 4 - 1]) {
-      ESP_LOGW(TAG, "Not armed: frame area %u reads back %08" PRIX32, static_cast<unsigned>(ENTRY_COUNT + e), check);
-      return false;
-    }
-  }
+  auto &slot = kpalive.P2PKeepAliveParamCfgs[SERVER];
+  slot.Enable = 1;
+  slot.PayloadLen = this->frame_len_;
+  slot.Payload[0] = this->frame_count_;
   if (request(WLAN_EXT_CMD_SET_P2P_KPALIVE_CFG, reinterpret_cast<uint32_t>(&kpalive)) != 0)
     return false;
   if (this->host_sleep_ && request(WLAN_EXT_CMD_SET_P2P_HOST_SLEEP, 1) != 0)
@@ -363,9 +345,9 @@ void XR806APIKeepaliveOffload::close_(const char *reason) {
 static XR806APIKeepaliveOffload *armed_instance = nullptr;
 
 bool XR806APIKeepaliveOffload::planned_wake() {
-  // The firmware counted reserved1 of the keepalive table (0x0900BC73, top byte of this word) down to zero: it sent
+  // The module counted the stop count (top byte of this word) down to zero: it sent
   // its last frame, and what woke the host is Home Assistant's ping after that silence.
-  static constexpr uint32_t WAKE_COUNTDOWN_WORD = 0x0900BC70;
+  static constexpr uint32_t WAKE_COUNTDOWN_WORD = KEEPALIVE_ADDRESS;
   uint32_t word = 0;
   if (this->client_ == nullptr || wlan_unusable() || wlan_read_words(WAKE_COUNTDOWN_WORD, &word, 1) != 0)
     return false;

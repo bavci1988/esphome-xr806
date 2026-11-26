@@ -680,21 +680,22 @@ def run_compile(args: object, config: ConfigType) -> bool:
     variables["XR806_LIBRARIES_MK"] = str(libraries_mk)
 
     if CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH in CORE.config.get(DOMAIN, {}):
-        # The keepalive frame list needs the patched WLAN firmware. It goes into the application; the flash image
-        # keeps the stock one, and XR806WlanFirmwareSwap serves the patched one at boot or a minute later.
-        from .build_support import wlan_fw_patch
+        # The keepalive frame list needs the WLAN firmware with the keepalive and sleep modules. It goes into the
+        # application; the flash image keeps the stock one, and XR806WlanFirmwareSwap serves the changed one at boot
+        # or a minute later.
+        from .build_support import wlan_fw_module
 
         try:
-            patched = wlan_fw_patch.write_patched(
+            patched = wlan_fw_module.write_firmware(
                 sdk_root / "bin/xradio_v3/wlan_fw.bin",
                 obj / "wlan_fw_keepalive.bin",
                 paths.toolchain_bin,
             )
-        except (OSError, wlan_fw_patch.WlanFirmwarePatchError) as err:
-            raise EsphomeError(f"XR806 WLAN firmware patch failed: {err}") from err
+        except (OSError, wlan_fw_module.WlanFirmwareModuleError) as err:
+            raise EsphomeError(f"XR806 WLAN firmware build failed: {err}") from err
         variables["XR806_WLAN_FW_PATCHED"] = str(patched)
         print(
-            "[XR806] Patched WLAN firmware built; the stock one stays in flash",
+            "[XR806] WLAN firmware with the keepalive and sleep modules built; the stock one stays in flash",
             flush=True,
         )
 

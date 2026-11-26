@@ -95,7 +95,7 @@ _Static_assert(offsetof(struct keepalive, period_timer) == 0x14, "host contract"
 _Static_assert(offsetof(struct keepalive, retransmit_timer) == 0x28, "host contract");
 _Static_assert(offsetof(struct keepalive, frames) == 0x3C, "host contract");
 
-struct keepalive ka = {0};
+struct keepalive ka;
 
 static uint16_t get_be16(const uint8_t *p) { return (uint16_t) ((p[0] << 8) | p[1]); }
 static uint32_t get_be32(const uint8_t *p) { return ((uint32_t) get_be16(p) << 16) | get_be16(p + 2); }
@@ -120,6 +120,9 @@ static void zero(void *dst, uint32_t n) {
   while (n--)
     *d++ = 0;
 }
+/* The module's data is not part of the firmware image: called once when the firmware starts. */
+void keepalive_init(void) { zero(&ka, sizeof(ka)); }
+
 static int same(const uint8_t *a, const uint8_t *b, uint32_t n) {
   while (n--)
     if (*a++ != *b++)

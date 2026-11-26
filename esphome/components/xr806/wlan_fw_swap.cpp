@@ -87,10 +87,10 @@ static constexpr uint32_t RECOVERY_DELAY_MS = 3000;
 // A second hang this soon after a restart of the core: the device restarts instead.
 static constexpr uint32_t RECOVERY_REPEAT_MS = 10 * 60 * 1000;
 
-// The first patched instruction pair (two Thumb NOPs where the stock firmware calls the keepalive send), read back
-// from the running WLAN core to confirm the patched firmware was loaded.
-static constexpr uint32_t PATCH_CHECK_ADDRESS = 0x0900A374;
-static constexpr uint32_t PATCH_CHECK_VALUE = 0x46C046C0;
+// The jump to the modules' initialisation, which the build puts where the vendor keepalive's initialisation was
+// ("ldr r3, [pc]; bx r3"), read back from the running WLAN core to confirm the changed firmware was loaded.
+static constexpr uint32_t PATCH_CHECK_ADDRESS = 0x0900076C;
+static constexpr uint32_t PATCH_CHECK_VALUE = 0x47184B00;
 
 static bool patched_active = false;
 static XR806WlanFirmwareSwap *instance = nullptr;

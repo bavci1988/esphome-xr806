@@ -179,8 +179,9 @@ XR806_DIAG_FLASH inline void print_power_line(const char *label, const uint32_t 
 }
 
 // Parts of the WLAN core's memory that show where a hung core stands: scheduler words and timer list head,
-// clock, message ring for the CPU (+0xC read, +0x10 write index), receive counters, keepalive state, and all
-// stacks, which hold the return addresses and any exception frame.
+// clock, message ring for the CPU (+0xC read, +0x10 write index), receive counters, the keepalive module's state and
+// timers, the sleep module's record of the last entry into deep sleep and of the last idle wait
+// (build_support/wlan_keepalive/sleep.c, struct sleep_record), and all stacks.
 struct Region {
   const char *label;
   uint32_t start;
@@ -188,9 +189,10 @@ struct Region {
 };
 static constexpr Region REGIONS[] = {
     {"sched", 0xFFF01C00, 40}, {"clock", 0xFFF05600, 16},     {"hostq", 0xFFF02AA0, 16},
-    {"rxcnt", 0xFFF02280, 32}, {"keepalive", 0x0900BB80, 72}, {"stack", 0xFFF0B000, 1024},
+    {"rxcnt", 0xFFF02280, 32}, {"keepalive", 0x0900BB8C, 20}, {"sleeprec", 0x0900BEA8, 23},
+    {"stack", 0xFFF0B000, 1024},
 };
-static constexpr uint32_t MEMORY_WORDS = 40 + 16 + 16 + 32 + 72 + 1024;
+static constexpr uint32_t MEMORY_WORDS = 40 + 16 + 16 + 32 + 20 + 23 + 1024;
 // Registers of the WLAN domain's own power control (its sleep-on-WFI register is 0x0AA800A0) and timer, read
 // one by one: only those the WLAN firmware itself reads. 0x0AA800C4 and up are hardware spinlocks, where a read
 // takes the lock, so a plain dump of the block leaves the core spinning. The CPU reaches them only through the
