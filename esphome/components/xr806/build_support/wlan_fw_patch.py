@@ -20,6 +20,10 @@ server 0 sends a different, pre-encrypted frame each time Home Assistant acknowl
    segments without data are still handled by the firmware. A data segment that also acknowledges the frame in
    flight is only used as that acknowledgement and dropped: passed on, it stalled the WLAN core. The peer sends
    the data again and that copy wakes the host.
+   The stock firmware took any segment with ACK set for the acknowledgement of the frame in flight, so a duplicate
+   ACK or a crossing ping counted a frame that was lost on the air, and that frame was never sent again. A frame
+   now only counts when the acknowledgement number is its sequence plus its length. A RST or FIN from the peer is
+   passed to the host, so that it learns at once that Home Assistant closed the connection.
 4. The frame chooser also ends the keepalive after W frames, W being the byte at 0x0900BC73 (reserved1 of the
    keepalive configuration; 0 = off), which it counts down for every frame built, retries included: with frame W it
    sets the keepalive period (0x0900BC70) to 255 s. Keepalive entry 0 stays enabled, because the receive filter only
@@ -27,7 +31,8 @@ server 0 sends a different, pre-encrypted frame each time Home Assistant acknowl
    Assistant then pings after its own idle time and that data wakes the host (change 3).
 5. While the host sleeps the receive filter drops every IPv4 packet that is not from the keepalive peer, so the web
    server and OTA could not wake the host. A TCP SYN (no other flag, not a fragment) to the web server or OTA port
-   is now passed to the host (0x0900A216, code next to the frame chooser). Nothing else is let through.
+   or the native API port is now passed to the host (0x0900A216), so that Home Assistant can also connect again
+   after it closed the connection. Nothing else is let through.
 
 Only the firmware with the known SHA-256 is patched; see docs/WLAN_FIRMWARE_NOTES.md in the xr806-sdk repository.
 Nothing patched is stored: the stock file comes from the SDK and the patch is applied in the build directory.
@@ -42,13 +47,18 @@ import subprocess
 
 STOCK_SHA256 = "0d08b6c6d0c9bcf3af7b3ebdab55cb623f28feb8392343585255be17c98e59c8"
 
-# Frame chooser, Thumb (ARMv5TE), assembled from wlan_fw_keepalive.S at build time and linked at CAVE_ADDRESS.
-# It overwrites the UDP keepalive from 0x0900A3C6 up to its literal pool at 0x0900A4A8.
+# Thumb (ARMv5TE), assembled from wlan_fw_keepalive.S at build time. Both areas are in the UDP keepalive
+# (0x0900A3C6..0x0900A5B8), which is only used for servers with the UDP flag; ESPHome uses TCP only. Its first
+# part ends at the literal pool of the MIB handler (0x0900A4A0..0x0900A4C8), which stays.
 CAVE_SOURCE = Path(__file__).with_name("wlan_fw_keepalive.S")
 CAVE_ADDRESS = 0x0900A3C8
-# wlan_fw_keepalive.S starts with two branches: the frame chooser at CAVE_ADDRESS, the receive filter decision at +2.
+CAVE_MAX_SIZE = 0x0900A4A0 - CAVE_ADDRESS
+CAVE2_ADDRESS = 0x0900A4C8
+CAVE2_MAX_SIZE = 0x0900A5B8 - CAVE2_ADDRESS
+# wlan_fw_keepalive.S starts with three branches: the frame chooser at CAVE_ADDRESS, the receive filter decision at
+# +2 and the handling of a segment from the peer at +4.
 CAVE_FILTER_ENTRY = CAVE_ADDRESS + 2
-CAVE_MAX_SIZE = 0x0900A4A8 - CAVE_ADDRESS
+CAVE_PEER_ENTRY = CAVE_ADDRESS + 4
 IMMEDIATE_SEND_ADDRESS = 0x0900A374
 IMMEDIATE_SEND_STOCK = bytes.fromhex("00f0a8f9")  # bl 0x0900A6C8
 PAYLOAD_SOURCE_ADDRESS = 0x09009E0C
@@ -66,13 +76,6 @@ PEER_DATA_END = (
     0x0900A15E  # movs r0,#1; str r0,[sp,#0xc]: the frame is used up, it is dropped
 )
 PEER_DATA_TO_HOST = 0x0900A220  # return [sp,#0x18], 0 here: the frame goes to the host
-ACK_HANDLER_ADDRESS = 0x0900A720
-IN_FLIGHT_ADDRESS = (
-    0x0900BC11  # server 0: 1 while a keepalive frame waits for its acknowledgement
-)
-CAVE_LITERAL = (
-    0x0900BC73  # a literal of the frame chooser, reused to reach IN_FLIGHT_ADDRESS
-)
 FILTER_DROP_ADDRESS = 0x0900A216
 # ldr r0,[sp,#0x14]; cmp r0,#0; bne 0x0900A220; movs r0,#1 (then str r0,[sp,#0x18])
 FILTER_DROP_STOCK = bytes.fromhex("0598002801d10120")
@@ -99,47 +102,20 @@ def _thumb(*halfwords: int) -> bytes:
     return b"".join(struct.pack("<H", h) for h in halfwords)
 
 
-def peer_data_code(cave: bytes) -> bytes:
+def peer_data_code() -> bytes:
     """The replacement for the acknowledgement handling at PEER_DATA_ADDRESS.
 
-    A segment from the peer can carry data and also acknowledge the keepalive frame in flight. Passing such a
-    segment to the sleeping host stalled the WLAN core, so only its acknowledgement is used and the segment is
-    dropped; the peer sends the data again, and that copy goes to the host because nothing is in flight then. The
-    firmware's own acknowledgement number no longer counts data from the peer, so the copy is not taken for old.
+    The cave decides (see peer_segment in wlan_fw_keepalive.S); r0 = 0 means the firmware used the segment up.
     """
-    literal = cave.find(struct.pack("<I", CAVE_LITERAL))
-    while literal >= 0 and (CAVE_ADDRESS + literal) % 4:
-        literal = cave.find(struct.pack("<I", CAVE_LITERAL), literal + 1)
-    base = (PEER_DATA_ADDRESS + 4) & ~3
-    distance = CAVE_ADDRESS + literal - base
-    if literal < 0 or not 0 <= distance <= 1020:
-        raise WlanFirmwarePatchError("frame chooser literal not reachable")
-    bl_address = PEER_DATA_ADDRESS + 12
-    beq_address = PEER_DATA_ADDRESS + 20
-    bne_address = PEER_DATA_ADDRESS + 26
-    code = (
-        _thumb(
-            0x4A00 | (distance // 4),  # ldr r2,=CAVE_LITERAL
-            0x3A00 | (CAVE_LITERAL - IN_FLIGHT_ADDRESS),  # subs r2,#...
-            0x7812,  # ldrb r2,[r2]
-            0x9200,  # str r2,[sp]: in flight before the handler clears it
-            0x0001,  # movs r1,r0: the new acknowledgement number is the sequence number, without the data
-            0x0020,  # movs r0,r4
-        )
-        + thumb_bl(bl_address, ACK_HANDLER_ADDRESS)
-        + _thumb(
-            0x9902,  # ldr r1,[sp,#8]: data length
-            0x2900,  # cmp r1,#0
-            0xD000 | ((PEER_DATA_END - beq_address - 4) // 2),  # beq: no data, done
-            0x9800,  # ldr r0,[sp]
-            0x2801,  # cmp r0,#1
-            0xD100
-            | (
-                (PEER_DATA_TO_HOST - bne_address - 4) // 2
-            ),  # bne: nothing was in flight, to the host
-            0x46C0,  # nop; falls into PEER_DATA_END: drop, the peer sends the data again
-        )
+    bl_address = PEER_DATA_ADDRESS
+    beq_address = PEER_DATA_ADDRESS + 6
+    b_address = PEER_DATA_ADDRESS + 8
+    code = thumb_bl(bl_address, CAVE_PEER_ENTRY) + _thumb(
+        0x2800,  # cmp r0,#0
+        0xD000 | ((PEER_DATA_END - beq_address - 4) // 2),  # beq: used up, dropped
+        0xE000 | ((PEER_DATA_TO_HOST - b_address - 4) // 2),  # b: to the host
     )
+    code += THUMB_NOP * ((len(PEER_DATA_STOCK) - len(code)) // 2)
     if len(code) != len(PEER_DATA_STOCK):
         raise WlanFirmwarePatchError("peer data code has the wrong size")
     return code
@@ -182,12 +158,13 @@ def _fix_checksum(image: bytearray) -> None:
     struct.pack_into("<I", image, len(image) - 4, (-total) & 0xFFFFFFFF)
 
 
-def assemble_cave(toolchain_bin: Path, work_dir: Path) -> bytes:
-    """Assemble wlan_fw_keepalive.S with the ARM toolchain and return its code linked at CAVE_ADDRESS."""
+def assemble_cave(toolchain_bin: Path, work_dir: Path) -> tuple[bytes, bytes]:
+    """Assemble wlan_fw_keepalive.S with the ARM toolchain; returns the code at CAVE_ADDRESS and CAVE2_ADDRESS."""
     work_dir.mkdir(parents=True, exist_ok=True)
     obj = work_dir / "wlan_fw_keepalive.o"
     elf = work_dir / "wlan_fw_keepalive.elf"
     binary = work_dir / "wlan_fw_keepalive.bin"
+    binary2 = work_dir / "wlan_fw_keepalive2.bin"
     prefix = str(toolchain_bin / "arm-none-eabi-")
     steps = (
         [
@@ -201,13 +178,15 @@ def assemble_cave(toolchain_bin: Path, work_dir: Path) -> bytes:
         [
             prefix + "ld",
             f"-Ttext=0x{CAVE_ADDRESS:08X}",
+            f"--section-start=.cave2=0x{CAVE2_ADDRESS:08X}",
             "-e",
             "cave",
             str(obj),
             "-o",
             str(elf),
         ],
-        [prefix + "objcopy", "-O", "binary", str(elf), str(binary)],
+        [prefix + "objcopy", "-O", "binary", "-j", ".text", str(elf), str(binary)],
+        [prefix + "objcopy", "-O", "binary", "-j", ".cave2", str(elf), str(binary2)],
     )
     for step in steps:
         result = subprocess.run(step, capture_output=True, text=True, check=False)
@@ -216,14 +195,19 @@ def assemble_cave(toolchain_bin: Path, work_dir: Path) -> bytes:
                 f"{Path(step[0]).name} failed: {result.stderr.strip()}"
             )
     code = binary.read_bytes()
+    code2 = binary2.read_bytes()
     if not code or len(code) > CAVE_MAX_SIZE:
         raise WlanFirmwarePatchError(
             f"frame chooser is {len(code)} bytes, at most {CAVE_MAX_SIZE} fit"
         )
-    return code
+    if not code2 or len(code2) > CAVE2_MAX_SIZE:
+        raise WlanFirmwarePatchError(
+            f"receive filter code is {len(code2)} bytes, at most {CAVE2_MAX_SIZE} fit"
+        )
+    return code, code2
 
 
-def patch(stock: bytes, cave: bytes, verify_hash: bool = True) -> bytes:
+def patch(stock: bytes, cave: tuple[bytes, bytes], verify_hash: bool = True) -> bytes:
     """The patched firmware for the stock image, with the assembled frame chooser."""
     if verify_hash and hashlib.sha256(stock).hexdigest() != STOCK_SHA256:
         raise WlanFirmwarePatchError(
@@ -243,8 +227,9 @@ def patch(stock: bytes, cave: bytes, verify_hash: bool = True) -> bytes:
             FILTER_DROP_STOCK,
             thumb_bl(FILTER_DROP_ADDRESS, CAVE_FILTER_ENTRY) + THUMB_NOP * 2,
         ),
-        (CAVE_ADDRESS, None, cave),
-        (PEER_DATA_ADDRESS, PEER_DATA_STOCK, peer_data_code(cave)),
+        (CAVE_ADDRESS, None, cave[0]),
+        (CAVE2_ADDRESS, None, cave[1]),
+        (PEER_DATA_ADDRESS, PEER_DATA_STOCK, peer_data_code()),
     )
     for address, expected, new in changes:
         offset = _file_offset(records, address, len(new))

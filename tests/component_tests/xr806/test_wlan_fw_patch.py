@@ -11,15 +11,24 @@ from esphome.components.xr806.build_support import wlan_fw_patch as patch_mod
 
 SECTION = 0x09009C00
 SECTION_SIZE = 0x1000
-# Stands in for the frame chooser; ends with the literal the peer data code reaches.
-CAVE = bytes(range(0x20, 0x20 + 88)) + struct.pack("<I", patch_mod.CAVE_LITERAL)
+# Stands in for the two code areas of wlan_fw_keepalive.S.
+CAVE = (bytes(range(0x20, 0x20 + 92)), bytes(range(0x80, 0x80 + 60)))
 # wlan_fw_keepalive.S as assembled with GNU as and checked in Unicorn against the firmware's data layout.
-CAVE_CHECKED = bytes.fromhex(
-    "24e0ffe7059800281cd1707a06281bd130780007000f052816d3b079800613d1f079002810d1687b8006800e"
-    "02280bd1a8780002e97808432049884202d02049884201d1069870470120704770b51199ca88139b002b2ed1"
-    "002a2cd0194c2468194d2d68641b194d2e78013e04d32e7002d1013e033d2e7000258026964202d3b61aad18"
-    "fae70026ac4206d3641b0136052ef9d90526ac1a05e02300934201d39b1afbe7e41a032e01d3033e08498423"
-    "7343c9180919083170bd000050000000a00c000004bc000998bb000973bc0009fcbd0009"
+CAVE_CHECKED = (
+    bytes.fromhex(
+        "01e07de0aae070b51199ca88139b002b2ed1002a2cd0174c2468174d2d68641b164d2e78013e04d3"
+        "2e7002d1013e033d2e7000258026964202d3b61aad18fae70026ac4206d3641b0136052ef9d90526"
+        "ac1a05e02300934201d39b1afbe7e41a032e01d3033e064984237343c9180919083170bd04bc0009"
+        "98bb000973bc0009fcbd0009"
+    ),
+    bytes.fromhex(
+        "0598002824d1707a062825d130780007000f052820d3b07980061dd1f07900281ad1687b8006800e"
+        "032c02d20521084210d1022810d1a8780002e97808432249884205d02149884202d02149884203d1"
+        "069870470020704701207047f0b5717a06292ed10600242363431a4fff1800227b7b012b1ad18423"
+        "6343174ad218d2883b68d2182b7a697a1b020b43a97a1b020b43e97a1b020b43934206d120003100"
+        "0e4b00f010f8012200e00022687b0521084204d10798002803d0002a01d10120f0bd0020f0bd1847"
+        "50000000a00c0000a517000004bc000970bc000921a70009"
+    ),
 )
 
 
@@ -69,18 +78,13 @@ def test_patch_changes_the_code_and_keeps_the_checksum() -> None:
         _at(patched, patch_mod.PAYLOAD_SOURCE_ADDRESS, 6)
         == bytes.fromhex("00f0dcfa") + patch_mod.THUMB_NOP
     )
-    assert _at(patched, patch_mod.CAVE_ADDRESS, len(CAVE)) == CAVE
-    # ldr r2,=0x0900BC73; subs r2,#0x62; ldrb r2,[r2]; str r2,[sp]; movs r1,r0; movs r0,r4; bl 0x0900A720;
-    # ldr r1,[sp,#8]; cmp r1,#0; beq 0x0900A15E; ldr r0,[sp]; cmp r0,#1; bne 0x0900A220; nop
-    peer_data = _at(
-        patched, patch_mod.PEER_DATA_ADDRESS, len(patch_mod.PEER_DATA_STOCK)
+    assert _at(patched, patch_mod.CAVE_ADDRESS, len(CAVE[0])) == CAVE[0]
+    assert _at(patched, patch_mod.CAVE2_ADDRESS, len(CAVE[1])) == CAVE[1]
+    # bl 0x0900A3CC; cmp r0,#0; beq 0x0900A15E; b 0x0900A220; then nops up to 0x0900A15E
+    assert (
+        _at(patched, patch_mod.PEER_DATA_ADDRESS, len(patch_mod.PEER_DATA_STOCK))
+        == bytes.fromhex("00f044f900280ad06ae0") + patch_mod.THUMB_NOP * 10
     )
-    assert peer_data[2:] == bytes.fromhex(
-        "623a127800920100200000f0e8fa0299002903d00098012861d1c046"
-    )
-    literal = ((patch_mod.PEER_DATA_ADDRESS + 4) & ~3) + 4 * peer_data[0]
-    assert peer_data[1] == 0x4A
-    assert _at(patched, literal, 4) == struct.pack("<I", patch_mod.CAVE_LITERAL)
 
 
 def test_patch_refuses_other_code() -> None:
