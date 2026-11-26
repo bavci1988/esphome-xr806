@@ -9,6 +9,7 @@ from esphome.components import ota
 from esphome.components.const import CONF_ENABLED
 import esphome.config_validation as cv
 from esphome.const import (
+    CONF_BOARD,
     CONF_ID,
     CONF_KEEPALIVE,
     CONF_PLATFORM,
@@ -41,6 +42,13 @@ CONF_REQUIRE_EXTERNAL_SYNC = "require_external_sync"
 CONF_WAKE_AFTER = "wake_after"
 CONF_WAKE_PIN = "wake_pin"
 CONF_WAKE_EDGE = "wake_edge"
+CONF_POWER_SUPPLY = "power_supply"
+
+# How the board makes the chip's core voltage: the internal LDO, or the internal DC-DC converter
+# (an inductor at VDD_LX). The firmware and the bootloader must match it, or the SDK stops at boot.
+POWER_SUPPLIES = ("ldo", "dcdc")
+# Modules whose power design is fixed
+LDO_BOARDS = ("wxu",)
 # safe_mode counts from its own setup(), a little after boot.
 BOOT_HOLD_MARGIN_MS = 2000
 
@@ -179,6 +187,9 @@ def _ignored_option(key: str, reason: str) -> Callable[[object], object]:
 
 COMPONENT_SCHEMA = {
     cv.GenerateID(CONF_TUYA_HOST_ID): cv.declare_id(XR806TuyaLowPowerHost),
+    cv.Optional(CONF_POWER_SUPPLY, default="ldo"): cv.one_of(
+        *POWER_SUPPLIES, lower=True
+    ),
     cv.Optional(CONF_WLAN, default={}): XR806_WLAN_SCHEMA,
     cv.Optional(CONF_STANDBY): cv.All(*_renamed_ms_keys(), STANDBY_SCHEMA),
     # Options of the native XR806 port, so its configurations keep validating
@@ -222,6 +233,11 @@ def _final_validate_logger_uart() -> None:
 
 def _final_validate_options(config: ConfigType) -> ConfigType:
     _final_validate_logger_uart()
+    if config[CONF_POWER_SUPPLY] != "ldo" and config[CONF_BOARD] in LDO_BOARDS:
+        raise cv.Invalid(
+            f"The {config[CONF_BOARD]} module makes its core voltage with the internal LDO",
+            path=[CONF_POWER_SUPPLY],
+        )
     wlan = config[CONF_WLAN]
     standby = config.get(CONF_STANDBY)
     if wlan[CONF_NETWORK_SUSPEND] and standby is None:
@@ -425,6 +441,10 @@ async def _standby_to_code(config: ConfigType) -> None:
 
 
 async def component_extra_to_code(config: ConfigType) -> None:
+    if config[CONF_POWER_SUPPLY] == "dcdc":
+        # Selects the SDK configuration and the bootloader for the DC-DC converter
+        cg.add_platformio_option("board_build.xr806_power", "dcdc")
+
     if CONF_STANDBY in config:
         await _standby_to_code(config)
 
