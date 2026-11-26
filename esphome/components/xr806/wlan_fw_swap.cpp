@@ -95,9 +95,31 @@ static constexpr uint32_t PATCH_CHECK_VALUE = 0x47184B00;
 static bool patched_active = false;
 static XR806WlanFirmwareSwap *instance = nullptr;
 
+// The sleep module's record starts with this word once module_init ran (build_support/wlan_keepalive/sleep.c).
+static constexpr uint32_t MODULE_RECORD_ADDRESS = 0x0900BEA8;
+static constexpr uint32_t MODULE_RECORD_MAGIC = 0x31504C53;
+
 static bool patched_code_running() {
   uint32_t word = 0;
-  return wlan_read_words(PATCH_CHECK_ADDRESS, &word, 1) == 0 && word == PATCH_CHECK_VALUE;
+  uint32_t magic = 0;
+  const int err = wlan_read_words(PATCH_CHECK_ADDRESS, &word, 1);
+  const int magic_err = wlan_read_words(MODULE_RECORD_ADDRESS, &magic, 1);
+  if (err == 0 && word == PATCH_CHECK_VALUE && magic_err == 0 && magic == MODULE_RECORD_MAGIC)
+    return true;
+  // What the core holds where the build changed the firmware: the jump and its target, the two keepalive hooks, the
+  // sleep handler, the idle hook and the start of module_init.
+  static constexpr uint32_t PLACES[] = {0x0900076C, 0x09000770, 0xFFF0072C, 0xFFF00730,
+                                        0x09001388, 0xFFF00438, 0x0900B46C};
+  uint32_t found[sizeof(PLACES) / sizeof(PLACES[0])]{};
+  int place_err = 0;
+  for (size_t i = 0; i < sizeof(PLACES) / sizeof(PLACES[0]); ++i)
+    place_err |= wlan_read_words(PLACES[i], &found[i], 1);
+  ESP_LOGW(TAG,
+           "Firmware check: read %d word %08" PRIX32 ", record read %d magic %08" PRIX32 "; places (read %d) %08" PRIX32
+           " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32,
+           err, word, magic_err, magic, place_err, found[0], found[1], found[2], found[3], found[4], found[5],
+           found[6]);
+  return false;
 }
 
 bool wlan_fw_patched_active() { return patched_active; }
