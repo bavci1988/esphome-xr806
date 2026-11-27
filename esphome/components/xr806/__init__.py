@@ -226,16 +226,17 @@ def _update_core_data(config: ConfigType) -> ConfigType:
                 path=[CONF_HA_WIFI_FW_KEEPALIVE],
             )
         # The firmware sends a frame every ping_interval until HA_PING_WAIT_S before wake_after, and its frame list
-        # is limited. A longer sleep would silently end when the list is used up.
+        # is limited. With Home Assistant connected, a longer sleep ends when the list is used up.
         interval_s = keepalive[CONF_PING_INTERVAL].total_seconds
-        wake_after_ms = config[CONF_STANDBY][CONF_WAKE_AFTER].total_milliseconds
         longest_s = HA_PING_WAIT_S + interval_s * HA_KEEPALIVE_MAX_FRAMES
-        if wake_after_ms > longest_s * 1000:
-            raise cv.Invalid(
-                f"xr806.standby.wake_after needs more than {HA_KEEPALIVE_MAX_FRAMES} "
-                f"keepalive frames at a ping_interval of {interval_s} s; the longest "
-                f"sleep is {longest_s} s",
-                path=[CONF_STANDBY, CONF_WAKE_AFTER],
+        if config[CONF_STANDBY][CONF_WAKE_AFTER].total_milliseconds > longest_s * 1000:
+            _LOGGER.warning(
+                "xr806.standby.wake_after needs more than %d keepalive frames at a "
+                "ping_interval of %d s; while Home Assistant is connected the device "
+                "wakes after about %d s",
+                HA_KEEPALIVE_MAX_FRAMES,
+                interval_s,
+                longest_s,
             )
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = DOMAIN
     CORE.data[KEY_CORE][KEY_TARGET_FRAMEWORK] = Framework.XRADIO

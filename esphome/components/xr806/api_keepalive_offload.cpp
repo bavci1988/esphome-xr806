@@ -35,7 +35,7 @@ constexpr uint32_t FRAMES_ADDRESS = KEEPALIVE_ADDRESS + 0x3C;
 constexpr uintptr_t FRAMES_APP_ADDRESS = 0x6800C000 + (FRAMES_ADDRESS - 0x09000000);
 constexpr size_t FRAME_BYTES = 704;
 
-// The build links with --wrap=lwip_write --wrap=lwip_writev when the experiment is enabled. While a capture is open
+// The build links with --wrap=lwip_write --wrap=lwip_writev when the keepalive is enabled. While a capture is open
 // on the main loop, what the API writes is kept here instead of going out, so the API's own Noise code encrypts the
 // frames and the API component needs no change.
 struct FrameCapture {
@@ -116,8 +116,8 @@ static constexpr uint32_t SETTLE_MS = 2000;
 static constexpr uint32_t WLAN_AWAKE_WORD = 0xFFF01C10;
 static constexpr uint32_t WLAN_AWAKE_POWER_SAVE = 1U << 18;
 static constexpr uint32_t DOZE_POLL_MS = 50;
-static constexpr uint32_t DOZE_WAIT_MS = 500;
-// How long a "may sleep" answer holds, so that the quiet time before standby does not ask the core again.
+static constexpr uint8_t DOZE_WAIT_POLLS = 10;  // half a second
+// A "may sleep" answer, or a wait, belongs to an earlier standby attempt when nothing asked for this long.
 static constexpr uint32_t DOZE_VALID_MS = 2000;
 // lwIP holds the small ping back (Nagle) until the frames sent before it are acknowledged.
 static constexpr uint32_t PEER_ANSWER_WAIT_MS = 1000;
@@ -381,25 +381,33 @@ bool XR806APIKeepaliveOffload::ready_for_standby() {
 }
 
 bool XR806APIKeepaliveOffload::wlan_dozing_(uint32_t now) {
-  if (now - this->doze_ok_ms_ < DOZE_VALID_MS)
+  // An answer holds for as long as it keeps being asked for, so one standby attempt waits once, whatever the
+  // coordinator's quiet time is. disarm() ends it.
+  if (now - this->doze_ok_ms_ < DOZE_VALID_MS) {
+    this->doze_ok_ms_ = now;
     return true;
-  if (now - this->doze_poll_ms_ < DOZE_POLL_MS)
+  }
+  const uint32_t since_poll = now - this->doze_poll_ms_;
+  if (since_poll >= DOZE_VALID_MS) {
+    this->doze_polls_ = 0;  // a wait that was given up belongs to an earlier attempt
+  } else if (since_poll < DOZE_POLL_MS) {
     return false;
+  }
   this->doze_poll_ms_ = now;
   uint32_t awake = 0;
-  // A failed read must not hold standby back.
-  if (!wlan_driver_failed() && wlan_read_words(WLAN_AWAKE_WORD, &awake, 1) == 0 &&
-      (awake & WLAN_AWAKE_POWER_SAVE) != 0) {
-    if (this->doze_wait_ms_ == 0)
-      this->doze_wait_ms_ = now | 1;  // 0 means "not waiting"
-    if (now - this->doze_wait_ms_ < DOZE_WAIT_MS)
+  // A core that cannot be asked must not hold standby back.
+  if (!wlan_unusable() && wlan_read_words(WLAN_AWAKE_WORD, &awake, 1) == 0 && (awake & WLAN_AWAKE_POWER_SAVE) != 0) {
+    if (this->doze_polls_ < DOZE_WAIT_POLLS) {
+      ++this->doze_polls_;
       return false;
-    ESP_LOGD(TAG, "WLAN core still awake after %" PRIu32 " ms (%08" PRIX32 "); standby goes ahead", DOZE_WAIT_MS,
-             awake);
-  } else if (this->doze_wait_ms_ != 0) {
-    ESP_LOGD(TAG, "Standby waited %" PRIu32 " ms for the WLAN core's power save", now - this->doze_wait_ms_);
+    }
+    ESP_LOGD(TAG, "WLAN core still awake after %" PRIu32 " ms (%08" PRIX32 "); standby goes ahead",
+             DOZE_WAIT_POLLS * DOZE_POLL_MS, awake);
+  } else if (this->doze_polls_ != 0) {
+    ESP_LOGD(TAG, "Standby waited about %" PRIu32 " ms for the WLAN core's power save",
+             this->doze_polls_ * DOZE_POLL_MS);
   }
-  this->doze_wait_ms_ = 0;
+  this->doze_polls_ = 0;
   this->doze_ok_ms_ = now;
   return true;
 }
@@ -460,6 +468,8 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
 }
 
 void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
+  // The next standby attempt asks the WLAN core again.
+  this->doze_ok_ms_ = millis() - DOZE_VALID_MS;
   armed_instance = nullptr;
   if (this->client_ == nullptr)
     return;

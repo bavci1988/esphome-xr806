@@ -69,7 +69,7 @@ void XR806APIStandby::standby_preflight(bool requested) {
 }
 
 bool XR806APIStandby::prepare_for_standby() {
-  // With the keepalive experiment the connection is handed to the WLAN firmware in standby_committing(),
+  // With ha_wifi_fw_keepalive the connection is handed to the WLAN firmware in standby_committing(),
   // once nothing can refuse standby any more.
   return this->may_quiesce() && this->clients_idle_();
 }

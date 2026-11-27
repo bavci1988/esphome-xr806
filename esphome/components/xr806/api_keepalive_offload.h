@@ -62,13 +62,13 @@ class XR806APIKeepaliveOffload {
   uint32_t burst_ms_{0};
   uint32_t doze_ok_ms_{0};
   uint32_t doze_poll_ms_{0};
-  uint32_t doze_wait_ms_{0};
   uint32_t snd_nxt_{0};
   uint32_t rcv_nxt_{0};
   uint16_t frame_len_{0};
   uint8_t frame_count_{0};
   uint8_t wake_frames_{0};
   uint8_t period_s_{0};
+  uint8_t doze_polls_{0};
   bool host_sleep_{false};
 };
 

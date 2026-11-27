@@ -651,6 +651,39 @@ def test_ha_wifi_fw_keepalive_load_at_boot(
     assert any(d.name == "USE_XR806_WLAN_FW_LOAD_AT_BOOT" for d in CORE.defines)
 
 
+def test_ha_wifi_fw_keepalive_default_interval(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+) -> None:
+    config = component_config_path("ha_wifi_fw_keepalive.yaml").read_text()
+    path = tmp_path / "ha_wifi_fw_keepalive.yaml"
+    path.write_text(config.replace("    ping_interval: 8s\n", ""))
+
+    assert "set_keepalive_offload(12, true)" in generate_main(path)
+
+
+@pytest.mark.parametrize(
+    ("wake_after", "warns"),
+    [("272s", False), ("273s", True)],
+)
+def test_ha_wifi_fw_keepalive_warns_about_long_sleep(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    wake_after: str,
+    warns: bool,
+) -> None:
+    config = component_config_path("ha_wifi_fw_keepalive.yaml").read_text()
+    path = tmp_path / "ha_wifi_fw_keepalive.yaml"
+    path.write_text(config.replace("wake_after: 60s", f"wake_after: {wake_after}"))
+
+    generate_main(path)
+
+    assert ("wakes after about 272 s" in caplog.text) == warns
+
+
 @pytest.mark.parametrize(
     "enabled", ["    enabled: false\n", ""], ids=["disabled", "default"]
 )
@@ -693,11 +726,6 @@ def test_ha_wifi_fw_keepalive_disabled(
             "    ping_interval: 8s\n",
             "    ping_interval: 300s\n",
             "ping_interval",
-        ),
-        (
-            "    wake_after: 60s\n",
-            "    wake_after: 273s\n",
-            "the longest sleep is 272 s",
         ),
     ],
 )
