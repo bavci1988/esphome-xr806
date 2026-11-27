@@ -44,6 +44,9 @@ std::vector<uint8_t> encode(const Frame &f) {
 
 std::vector<uint8_t> bytes(const std::string &s) { return {s.begin(), s.end()}; }
 
+// Each frame as its command followed by its payload
+using Frames = std::vector<std::vector<uint8_t>>;
+
 class MockUART : public uart::UARTComponent {
  public:
   std::vector<uint8_t> rx;
@@ -64,7 +67,8 @@ class MockUART : public uart::UARTComponent {
     *data = this->rx.front();
     return true;
   }
-  uart::UARTFlushResult flush() override { return uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS; }
+  uart::UARTFlushResult flush() override { return this->flush_result; }
+  uart::UARTFlushResult flush_result{uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS};
   void check_logger_conflict() override {}
 #if defined(USE_ESP8266) || defined(USE_ESP32) || defined(USE_LIBRETINY)
   void load_settings(bool dump_config) override {}
@@ -115,17 +119,124 @@ class TuyaLowPowerFrames : public ::testing::Test {
   }
 
   // Product info of a version-0 or version-3 MCU, after the module asked for it
-  void handshake_(uint8_t version) {
+  void handshake_(uint8_t version, const std::string &product = R"({"p":"abcdefgh","v":"1.0.0"})") {
     auto sent = this->uart_.sent();
     ASSERT_EQ(sent.size(), 1u);
     EXPECT_EQ(sent[0].command, 0x01);
-    this->receive_(100, {version, 0x01, bytes(R"({"p":"abcdefgh","v":"1.0.0"})")});
+    this->receive_(100, {version, 0x01, bytes(product)});
     this->step_(110);
+  }
+
+  // A version-3 MCU: working mode, then the full status that its CMD08 asks for
+  void sync_version_three_(const std::string &product) {
+    this->handshake_(3, product);
+    this->receive_(200, {0x03, 0x02, {}});
+    this->receive_(300, {0x03, 0x07, {0x01, 0x01, 0x00, 0x01, 0x00}});
+    this->step_(800);
+    ASSERT_EQ(this->ready_count_, 1);
+    this->uart_.sent();
+  }
+
+  // The frames sent since the last call
+  Frames sent_() {
+    Frames frames;
+    for (const auto &f : this->uart_.sent()) {
+      frames.push_back({f.command});
+      frames.back().insert(frames.back().end(), f.payload.begin(), f.payload.end());
+    }
+    return frames;
+  }
+
+  // Loop passes until the module has sent count frames, for example once a wake pulse is over
+  Frames wait_for_frames_(uint32_t now, size_t count = 1) {
+    Frames sent;
+    for (int i = 0; i < 20 && sent.size() < count; i++) {
+      this->step_(now);
+      for (auto &frame : this->sent_())
+        sent.push_back(std::move(frame));
+    }
+    return sent;
+  }
+
+  // Runs the network status interval (every second, in real time) until the module sends something. The host
+  // scheduler takes its time from the clock and sets the loop time to now.
+  Frames network_interval_(uint32_t now) {
+    for (int i = 0; i < 150; i++) {
+      App.scheduler.call(now);
+      this->step_(now);
+      auto sent = this->sent_();
+      if (!sent.empty())
+        return sent;
+    }
+    return {};
   }
 
   MockUART uart_;
   TuyaUART tuya_;
   int ready_count_{0};
+};
+
+// The MCU's wake line wk=20 is the host's wake input 5
+const std::string V0_SLEEP_PRODUCT = R"({"p":"abcdefgh","v":"1.3.1","wk":20,"mwk":28,"sm":1})";
+const std::string V3_SLEEP_PRODUCT = R"({"p":"abcdefgh","v":"1.0.9","sm":2,"wk":20,"mwk":16})";
+
+class FakeHost final : public TuyaLowPowerHost {
+ public:
+  void set_mcu_synchronized(bool synchronized) override { this->synchronized = synchronized; }
+  bool ota_busy() const override { return this->ota; }
+  bool standby_supported() const override { return true; }
+  int standby_wake_pin() const override { return 5; }
+  bool standby_requires_external_sync() const override { return true; }
+  bool standby_may_quiesce() const override { return true; }
+  bool standby_services_quiesced() const override { return this->quiesced; }
+  void request_preflight(bool requested) override { this->preflight = requested; }
+  bool preflight_requested() const override { return this->preflight; }
+  void request_standby(bool requested) override { this->standby = requested; }
+  bool standby_requested() const override { return this->standby; }
+  bool network_quiescing() const override { return false; }
+  bool standby_keeps_network() const override { return this->keeps_network; }
+  int configure_wake_lines(int wake_gpio, int /*mcu_wake_gpio*/, bool /*mcu_wake_active_high*/,
+                           bool create_mcu_wake_output) override {
+    this->output_created = create_mcu_wake_output;
+    return wake_gpio == 20 ? 5 : -1;
+  }
+  // Like a host that learns the wake line from the product info only
+  GPIOPin *mcu_wake_output() override { return this->output_created ? this->wake_output : nullptr; }
+
+  GPIOPin *wake_output{nullptr};
+  bool output_created{false};
+
+  bool synchronized{false};
+  bool ota{false};
+  bool quiesced{true};
+  bool preflight{false};
+  bool standby{false};
+  bool keeps_network{false};
+};
+
+// Records the level of the wake line to the MCU
+class FakePin final : public GPIOPin {
+ public:
+  void setup() override {}
+  void pin_mode(gpio::Flags flags) override {}
+  gpio::Flags get_flags() const override { return gpio::FLAG_OUTPUT; }
+  bool digital_read() override { return this->level; }
+  void digital_write(bool value) override {
+    this->level = value;
+    this->pulses += value ? 1 : 0;
+  }
+  bool level{false};
+  int pulses{0};
+};
+
+class TuyaLowPowerSleep : public TuyaLowPowerFrames {
+ protected:
+  void SetUp() override {
+    this->tuya_.set_low_power_host(&this->host_);
+    TuyaLowPowerFrames::SetUp();
+  }
+
+  FakeHost host_;
 };
 
 }  // namespace
@@ -287,6 +398,223 @@ TEST_F(TuyaLowPowerFrames, VersionThreeStatusInSeveralFramesIsCompleteWhenQuiet)
   EXPECT_EQ(this->ready_count_, 0);
   this->step_(830);
   EXPECT_EQ(this->ready_count_, 1);
+}
+
+// The version-0 tests below stop before the full status: it needs CMD02 0x04, which this build without an API
+// client never sends, so the module stays unsynchronized and every grant is refused.
+TEST_F(TuyaLowPowerFrames, SleepRequestsWithoutHostAreBusy) {
+  this->handshake_(0, V0_SLEEP_PRODUCT);
+  this->sent_();
+  this->receive_(6000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x01}}));
+  // No later grant either
+  this->step_(20000);
+  EXPECT_TRUE(this->sent_().empty());
+}
+
+TEST_F(TuyaLowPowerFrames, VersionThreeSleepRequestsWithoutHostAreBusy) {
+  this->sync_version_three_(V3_SLEEP_PRODUCT);
+  this->step_(20000);
+  EXPECT_TRUE(this->sent_().empty());  // No sleep offer
+  this->receive_(20100, {0x03, 0x91, {0x02}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x02}}));
+}
+
+TEST_F(TuyaLowPowerFrames, VersionZeroCrossedNetworkStateIsSentAgain) {
+  this->handshake_(0);
+  EXPECT_EQ(this->sent_(), (Frames{{0x02, 0x03}}));
+  // The MCU asks to sleep instead of answering CMD02 and sleeps: no ACK timeout, no product query
+  this->receive_(200, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x01}}));
+  this->step_(2500);
+  EXPECT_TRUE(this->sent_().empty());
+  EXPECT_EQ(this->network_interval_(2600), (Frames{{0x02, 0x03}}));
+}
+
+TEST_F(TuyaLowPowerSleep, VersionZeroWakesTheMcuForEachCommand) {
+  FakePin pin;
+  this->host_.wake_output = &pin;
+  this->handshake_(0, V0_SLEEP_PRODUCT);
+  // The wake line comes with the product info. The MCU may sleep right after its answer, so CMD02 needs a pulse
+  EXPECT_TRUE(pin.level);
+  EXPECT_TRUE(this->sent_().empty());
+  EXPECT_EQ(this->wait_for_frames_(120), (Frames{{0x02, 0x03}}));
+  EXPECT_FALSE(pin.level);
+  EXPECT_EQ(pin.pulses, 1);
+  // The MCU answered that pulse; a restart heartbeat right after it queues CMD02 again, which needs a new pulse
+  this->receive_(200, {0x00, 0x02, {}});
+  this->receive_(300, {0x00, 0x00, {0x00}});
+  EXPECT_TRUE(pin.level);
+  EXPECT_TRUE(this->sent_().empty());
+  EXPECT_EQ(this->wait_for_frames_(310), (Frames{{0x02, 0x03}}));
+  EXPECT_EQ(pin.pulses, 2);
+}
+
+TEST_F(TuyaLowPowerSleep, VersionThreeOfferRequestAndWake) {
+  this->sync_version_three_(V3_SLEEP_PRODUCT);
+  // The module offers sleep after 5 s without a byte
+  this->step_(5299);
+  EXPECT_TRUE(this->sent_().empty());
+  this->step_(5300);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x00}}));
+  this->receive_(5400, {0x03, 0x91, {0x00, 0x01}});
+  EXPECT_TRUE(this->sent_().empty());
+  EXPECT_TRUE(this->host_.standby);
+  EXPECT_TRUE(this->tuya_.low_power_prepare_for_standby());  // The answer is the whole handshake
+  // Every wake ends the consent with 91 01 01
+  this->tuya_.low_power_standby_resumed(true, false);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x01, 0x01}}));
+  this->host_.standby = false;
+
+  // The MCU's own request: busy within the wake guard, granted after it
+  this->receive_(5500, {0x03, 0x91, {0x02}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x02}}));
+  this->receive_(10500, {0x03, 0x91, {0x02}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x00}}));
+  EXPECT_TRUE(this->host_.standby);
+  // A report ends the consent, and the MCU is told
+  this->receive_(10600, {0x03, 0x07, {0x01, 0x01, 0x00, 0x01, 0x01}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x01, 0x01}}));
+  EXPECT_FALSE(this->host_.standby);
+
+  // A declined offer, then one without an answer
+  this->step_(15600);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x00}}));
+  this->receive_(15700, {0x03, 0x91, {0x00, 0x00}});
+  EXPECT_FALSE(this->host_.standby);
+  this->step_(20700);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x00}}));
+  this->step_(21700);
+  this->step_(26699);
+  EXPECT_TRUE(this->sent_().empty());
+  this->step_(26700);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x00}}));
+
+  // During an update the MCU's request is busy with the update flag
+  this->host_.ota = true;
+  this->receive_(26800, {0x03, 0x91, {0x02}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x04}}));
+}
+
+TEST_F(TuyaLowPowerSleep, VersionThreeWakeNoticeFollowsAWakePulse) {
+  FakePin pin;
+  this->host_.wake_output = &pin;
+  this->sync_version_three_(V3_SLEEP_PRODUCT);
+  this->step_(5300);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x00}}));
+  this->receive_(5400, {0x03, 0x91, {0x00, 0x01}});
+  const int pulses = pin.pulses;
+  // The sleeping MCU listens only after a pulse on its wake line
+  this->tuya_.low_power_standby_resumed(true, true);
+  EXPECT_TRUE(pin.level);
+  EXPECT_TRUE(this->sent_().empty());
+  EXPECT_EQ(this->wait_for_frames_(5410), (Frames{{0x91, 0x01, 0x01}}));
+  EXPECT_FALSE(pin.level);
+  EXPECT_EQ(pin.pulses, pulses + 1);
+}
+
+TEST_F(TuyaLowPowerSleep, VersionThreeCommandFollowsTheWakeNotice) {
+  FakePin pin;
+  this->host_.wake_output = &pin;
+  this->sync_version_three_(V3_SLEEP_PRODUCT);
+  this->step_(5300);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x00}}));
+  this->receive_(5400, {0x03, 0x91, {0x00, 0x01}});
+  const int pulses = pin.pulses;
+  // The MCU answered just now, but sleeps: the write waits for the pulse and the wake notice
+  this->tuya_.set_boolean_datapoint_value(1, true);
+  this->step_(5410);
+  EXPECT_TRUE(pin.level);
+  EXPECT_TRUE(this->sent_().empty());
+  EXPECT_FALSE(this->host_.standby);
+  EXPECT_EQ(this->wait_for_frames_(5420, 2), (Frames{{0x91, 0x01, 0x01}, {0x06, 0x01, 0x01, 0x00, 0x01, 0x01}}));
+  EXPECT_EQ(pin.pulses, pulses + 1);
+}
+
+TEST_F(TuyaLowPowerSleep, VersionThreeUnexpectedWakeReadsTheStateAgain) {
+  this->sync_version_three_(V3_SLEEP_PRODUCT);
+  this->step_(5300);
+  this->receive_(5400, {0x03, 0x91, {0x00, 0x01}});
+  this->sent_();
+  // A version-3 MCU has no boot heartbeat: it is told and its state is read again
+  this->tuya_.low_power_standby_resumed(false, false);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x01, 0x01}}));
+  this->host_.standby = false;
+  this->step_(5500);
+  EXPECT_EQ(this->sent_(), (Frames{{0x08}}));
+  // A report alone does not end the recovery; the complete status does
+  this->receive_(5600, {0x03, 0x07, {0x01, 0x01, 0x00, 0x01, 0x00}});
+  this->receive_(5700, {0x03, 0x91, {0x02}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x02}}));
+  this->step_(6200);
+  this->receive_(10500, {0x03, 0x91, {0x02}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x00}}));
+}
+
+TEST_F(TuyaLowPowerSleep, VersionThreeConsentWhileBlockedWakesTheMcu) {
+  this->sync_version_three_(V3_SLEEP_PRODUCT);
+  this->step_(5300);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x00}}));
+  // An update started after the offer: the MCU already sleeps, so it is told that the module stays awake
+  this->host_.ota = true;
+  this->receive_(5400, {0x03, 0x91, {0x00, 0x01}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x01, 0x01}}));
+  EXPECT_FALSE(this->host_.standby);
+}
+
+TEST_F(TuyaLowPowerSleep, VersionZeroUnsynchronizedMcuIsNotGranted) {
+  this->handshake_(0, V0_SLEEP_PRODUCT);
+  this->sent_();
+  this->receive_(6000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x01}}));
+  EXPECT_FALSE(this->host_.standby);
+  EXPECT_FALSE(this->tuya_.low_power_prepare_for_standby());
+}
+
+TEST_F(TuyaLowPowerSleep, FlushFailureBlocksSleep) {
+  this->sync_version_three_(V3_SLEEP_PRODUCT);
+  this->uart_.flush_result = uart::UARTFlushResult::UART_FLUSH_RESULT_TIMEOUT;
+  this->receive_(6000, {0x03, 0x91, {0x02}});
+  // The grant may not have left the UART: no standby, and the MCU's state is read again
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x00}, {0x08}}));
+  EXPECT_FALSE(this->host_.standby);
+  this->uart_.flush_result = uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
+  this->receive_(6100, {0x03, 0x91, {0x02}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x02}}));
+  // The complete status ends the recovery
+  this->receive_(6200, {0x03, 0x07, {0x01, 0x01, 0x00, 0x01, 0x00}});
+  this->step_(6700);
+  this->receive_(7000, {0x03, 0x91, {0x02}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x00}}));
+  EXPECT_TRUE(this->host_.standby);
+}
+
+TEST_F(TuyaLowPowerSleep, AssumedFlushCountsAsSent) {
+  this->sync_version_three_(V3_SLEEP_PRODUCT);
+  this->uart_.flush_result = uart::UARTFlushResult::UART_FLUSH_RESULT_ASSUMED_SUCCESS;
+  this->receive_(6000, {0x03, 0x91, {0x02}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x00}}));
+  EXPECT_TRUE(this->host_.standby);
+}
+
+TEST_F(TuyaLowPowerSleep, KeptConsentSleepsAgainAfterATimerWake) {
+  this->host_.keeps_network = true;
+  this->sync_version_three_(V3_SLEEP_PRODUCT);
+  this->step_(5300);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x00}}));
+  this->receive_(5400, {0x03, 0x91, {0x00, 0x01}});
+  EXPECT_TRUE(this->tuya_.low_power_prepare_for_standby());
+  // The platform clears its own request; with the network kept up a timer wake asks for the next standby at once
+  this->host_.standby = false;
+  this->tuya_.low_power_standby_resumed(true, false, true);
+  EXPECT_TRUE(this->sent_().empty());
+  EXPECT_TRUE(this->host_.standby);
+  EXPECT_TRUE(this->tuya_.low_power_prepare_for_standby());
+  // The MCU's own wake ends the consent
+  this->host_.standby = false;
+  this->tuya_.low_power_standby_resumed(true, true, false);
+  EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x01, 0x01}}));
+  EXPECT_FALSE(this->host_.standby);
 }
 
 }  // namespace esphome::tuya::testing

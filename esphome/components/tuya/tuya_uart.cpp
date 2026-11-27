@@ -135,17 +135,13 @@ void warn_too_long(size_t len) {
 
 bool TuyaUART::handle_frame_(const uint8_t *frame, size_t len) {
 #ifdef USE_TUYA_LOW_POWER
-  // Each frame, also one that fails the checksum, stops a pending sleep handshake, as its first byte did before
+  // Each frame, also one with a bad checksum, ends a pending sleep grant, as its first byte would
   this->on_low_power_rx_byte_();
 #endif
   // Last byte: sum of all bytes before it, header included, modulo 256
   const uint8_t rx_checksum = frame[len - 1];
   const uint8_t calc_checksum = sum_bytes(frame, len - 1);
   if (rx_checksum != calc_checksum) {
-#ifdef USE_TUYA_LOW_POWER
-    if (this->lp_standby_.requested())
-      this->cancel_low_power_standby_();
-#endif
     ESP_LOGW(TAG, "Tuya Received invalid message checksum %02X!=%02X", rx_checksum, calc_checksum);
     return false;
   }
@@ -536,9 +532,6 @@ void TuyaUART::process_command_queue_() {
 }
 
 void TuyaUART::send_command_(TuyaCommand command) {
-#ifdef USE_TUYA_LOW_POWER
-  this->preempt_low_power_sleep_();
-#endif
   command_queue_.push_back(std::move(command));
   process_command_queue_();
 }

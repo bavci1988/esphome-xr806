@@ -91,6 +91,8 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
 #ifdef USE_TUYA_LOW_POWER
   void set_auto_baud(bool auto_baud) { this->auto_baud_ = auto_baud; }
   void set_mcu_wake_pin(GPIOPin *pin) { this->mcu_wake_pin_ = pin; }
+  /// Connects the platform's power management; call before setup(). The calls below follow the contract in
+  /// tuya_low_power_host.h and run on the main loop thread.
   void set_low_power_host(TuyaLowPowerHost *host) { this->lp_host_ = host; }
   bool request_low_power_refresh();
   /// Diagnostics: sends only the start of an MCU firmware update (CMD0A, or CMD0D for version-0 frames) for an
@@ -102,11 +104,14 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   bool low_power_update_mcu(const uint8_t *image, size_t size);
   /// Firmware version from the MCU's product info ("v"), empty until it was reported.
   const char *low_power_mcu_version() const { return this->lp_product_.version.data(); }
-  // Called by the platform's power management bridge (not by CMD38 alone).
-  bool notify_low_power_transition(bool sleeping);
-  /// Standby steps, called by the platform's power management bridge.
+  /// True when the module may enter standby now. Returns false once on purpose right after it sent CMD12/01. After
+  /// every false return, call low_power_standby_cancelled() and try again later.
   bool low_power_prepare_for_standby();
+  /// The standby attempt was not made; tells the MCU that the module stays awake when it was told otherwise.
   void low_power_standby_cancelled();
+  /// After a standby: expected_source is true when one of the configured wake sources woke the module, wake_gpio
+  /// when the MCU's wake line did, wake_timer when the wake timer did. The platform clears its own standby request
+  /// itself.
   void low_power_standby_resumed(bool expected_source, bool wake_gpio, bool wake_timer = false);
 #endif  // USE_TUYA_LOW_POWER
   /// Called once after boot, when the MCU takes commands: after the initialization of the standard protocol,
@@ -141,9 +146,6 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   bool check_low_power_uart_rx_errors_();
   uint32_t low_power_uart_rx_error_count_() const;
   void dump_low_power_config_();
-  // A byte or frame arrived: stops a pending sleep handshake
-  void on_low_power_rx_byte_();
-  void preempt_low_power_sleep_();
   void handle_low_power_frame_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len);
   void send_low_power_raw_command_(const TuyaCommand &command);
   bool begin_low_power_command_(const TuyaCommand &command);
@@ -158,7 +160,6 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   }
   void send_low_power_time_(uint8_t command);
   void send_low_power_network_();
-  void update_low_power_sleep_lock_();
   void poll_low_power_autobaud_();
   void send_low_power_product_query_(bool direct_probe);
   void send_product_query_now_(bool direct_probe);
@@ -170,21 +171,35 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   void process_low_power_queue_();
   void poll_low_power_product_recovery_();
   void invalidate_low_power_mode_epoch_();
-  bool low_power_ready_for_sleep_(bool in_cmd38_handler = false) const;
-  const LogString *low_power_sleep_blocker_(bool in_cmd38_handler = false) const;
-  void fail_low_power_transport_();
-  void cancel_low_power_standby_();
+  // The sleep handshake, in tuya_low_power_sleep.cpp
+  void setup_low_power_sleep_();
+  void poll_low_power_sleep_();
+  // A byte or frame arrived: stops a pending sleep handshake
+  void on_low_power_rx_byte_();
+  void on_low_power_frame_(uint8_t command, const uint8_t *data, size_t len);
+  void stop_low_power_sleep_();
+  void preempt_low_power_sleep_();
+  bool low_power_network_held_() const;
+  void configure_low_power_wake_lines_();
+  void handle_low_power_sleep_request_(const uint8_t *data, size_t len);
+  void handle_low_power_v3_sleep_(const uint8_t *data, size_t len);
+  void poll_low_power_v3_sleep_();
+  const LogString *low_power_sleep_blocker_(bool in_frame_handler = false) const;
+  const LogString *low_power_link_blocker_(bool in_frame_handler = false) const;
+  void log_low_power_sleep_blocker_(const LogString *blocker);
+  const LogString *low_power_standby_blocker_() const;
+  void update_low_power_sleep_lock_();
+  bool flush_low_power_();
+  void fail_low_power_transport_(const LogString *reason);
+  uint8_t grant_low_power_sleep_(bool in_frame_handler);
+  void send_low_power_consent_(uint8_t command, uint8_t subcommand);
   void poll_low_power_sleep_preflight_();
-  /// Grants a sleep request, or starts preparing for it; otherwise returns the busy flags of the CMD38 answer.
-  uint8_t grant_low_power_sleep_();
-  void poll_low_power_deferred_sleep_();
   void cancel_low_power_preflight_(bool notify_mcu);
+  void poll_low_power_deferred_sleep_();
+  void cancel_low_power_standby_();
   void send_low_power_awake_notification_();
   void send_low_power_awake_frame_();
-  void configure_low_power_wake_lines_();
-  bool low_power_v3_sleep_supported_() const;
-  void poll_low_power_v3_sleep_();
-  void handle_low_power_v3_sleep_(const uint8_t *data, size_t len);
+  void wake_low_power_mcu_();
 #endif  // USE_TUYA_LOW_POWER
   void send_raw_command_(TuyaCommand command);
   void process_command_queue_();
@@ -230,15 +245,6 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   bool lp_v3_report_pending_{false};
   // The MCU sent a report nobody asked for: it pushes changes, so the status poll is not needed.
   bool lp_v3_pushes_{false};
-  // sm=2: the module offers sleep with 0x91 after a quiet period, as the original T3-U firmware does.
-  bool lp_v3_offer_pending_{false};
-  // Diagnostics: logged only when they change, so a waiting module does not fill the log.
-  // Why version-3 sleep offers are held back, nullptr while they run; logged on change
-  const LogString *lp_v3_sleep_blocked_{nullptr};
-  uint8_t lp_v3_last_answer_{0xFF};
-  uint32_t lp_v3_offer_deadline_ms_{0};
-  uint32_t lp_v3_idle_since_ms_{0};
-  bool lp_wake_lines_configured_{false};
   enum class UpdateProbe : uint8_t { UPDATE_PROBE_IDLE, UPDATE_PROBE_PENDING, UPDATE_PROBE_SENT };
   UpdateProbe lp_update_probe_{UpdateProbe::UPDATE_PROBE_IDLE};
   uint32_t lp_update_probe_size_{0};
@@ -250,7 +256,6 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   static constexpr uint8_t LOW_POWER_UPDATE_ERASE_CMD = 0x0C;
   static constexpr uint32_t LOW_POWER_UPDATE_ERASE_MS = 1000;
   void poll_low_power_update_probe_();
-  void wake_low_power_mcu_();
   enum class McuUpdate : uint8_t {
     MCU_UPDATE_IDLE,
     MCU_UPDATE_START_PENDING,
@@ -273,32 +278,37 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   uint8_t lp_mcu_update_retries_{0};
   uint8_t lp_mcu_update_percent_{0};
   uint32_t lp_mcu_update_sent_ms_{0};
-  bool lp_mcu_wake_from_host_{false};  // The wake output belongs to the host, not to the configuration
-  int lp_wake_input_{-1};              // wk mapped to this module's GPIO numbering
   uint32_t lp_mode_requery_after_ms_{0};
-  uint32_t lp_wake_guard_until_{0};
   uint32_t lp_mcu_wake_pulse_until_{0};
   uint32_t lp_mcu_woken_ms_{0};      // End of the last wake pulse
   uint32_t lp_mcu_heard_ms_{0};      // Last valid frame from the MCU
-  bool lp_mcu_wake_fresh_{false};    // The last wake pulse is not answered yet
   uint32_t lp_product_probe_ms_{0};  // Last product query of a recovery
   enum class ProductProbe : uint8_t { PRODUCT_PROBE_NONE, PRODUCT_PROBE_QUEUED, PRODUCT_PROBE_DIRECT };
   // A product query waiting for the wake pulse to end.
   ProductProbe lp_probe_pending_{ProductProbe::PRODUCT_PROBE_NONE};
   bool lp_mcu_wake_pulse_active_{false};
-  bool lp_awake_notification_pending_{false};
-  uint32_t lp_last_resync_ms_{0};
-  TuyaLowPowerStandbyState lp_standby_{};
-  TuyaLowPowerWireTransactions lp_wire_{};
-  bool lp_cmd38_pending_{false};
-  // A version-0 MCU asked for sleep and was told busy; it does not ask again until its next activity.
-  bool lp_cmd38_deferred_{false};
-  // A version-0 MCU asked for sleep and sleeps now: the next command needs a wake pulse.
-  bool lp_mcu_asleep_{false};
-  uint32_t lp_cmd38_deadline_ms_{0};
-  uint32_t lp_cmd38_cooldown_until_{0};
-  uint32_t lp_cmd38_retry_at_{0};
   uint8_t lp_network_status_{0xFF};
+  int8_t lp_wake_input_{-1};  // wk in the host's pin numbering
+  TuyaLowPowerWireTransactions lp_wire_{};
+  // Why sleep was last refused, nullptr when allowed; logged when it changes
+  const LogString *lp_sleep_blocked_{nullptr};
+  uint32_t lp_wake_guard_ms_{0};  // A wake or a new network state; no sleep for LP_WAKE_GUARD_MS after it
+  uint32_t lp_cmd38_preflight_ms_{0};
+  uint32_t lp_cmd38_cooldown_ms_{0};  // Last busy answer for a cancelled preflight
+  uint32_t lp_cmd38_retry_ms_{0};     // Last deferred grant that had to stop the network services
+  uint32_t lp_v3_offer_ms_{0};
+  uint32_t lp_v3_idle_since_ms_{0};  // Last byte in either direction
+  TuyaLowPowerStandbyState lp_standby_{};
+  // Network services are being stopped before a sleep request is answered
+  bool lp_cmd38_pending_ : 1 {false};
+  // A version-0 MCU asked for sleep and was told busy; it does not ask again until its next activity
+  bool lp_cmd38_deferred_ : 1 {false};
+  bool lp_mcu_wake_fresh_ : 1 {false};  // The last wake pulse is not answered yet
+  bool lp_awake_notification_pending_ : 1 {false};
+  bool lp_v3_offer_pending_ : 1 {false};
+  bool lp_wake_lines_configured_ : 1 {false};
+  // The wake output belongs to the host, not to the configuration
+  bool lp_mcu_wake_from_host_ : 1 {false};
 #endif  // USE_TUYA_LOW_POWER
   CallbackManager<void()> mcu_ready_callback_{};
   bool mcu_ready_{false};

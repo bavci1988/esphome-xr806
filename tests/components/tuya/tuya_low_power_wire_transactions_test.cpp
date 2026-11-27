@@ -84,4 +84,18 @@ TEST(TuyaLowPowerWireTransactions, VersionThreeAnswers) {
   EXPECT_TRUE(t.faulted());
 }
 
+TEST(TuyaLowPowerWireTransactions, AbandonNetwork) {
+  TuyaLowPowerWireTransactions t;
+  EXPECT_FALSE(t.abandon_network());  // Nothing waits
+  ASSERT_TRUE(t.begin(0x09, 0));
+  EXPECT_FALSE(t.abandon_network());  // A write is no network state: its answer stays awaited
+  EXPECT_TRUE(t.complete(0x09, 0));
+  // A version-0 MCU that fell asleep before its CMD02 answer: the command is sent again, without a fault
+  ASSERT_TRUE(t.begin(0x02, 100));
+  EXPECT_TRUE(t.abandon_network());
+  EXPECT_TRUE(t.idle());
+  EXPECT_FALSE(t.complete(0x02, 0));  // A late answer completes nothing
+  EXPECT_TRUE(t.begin(0x02, 200));
+}
+
 }  // namespace esphome::tuya::testing
