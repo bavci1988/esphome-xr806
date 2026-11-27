@@ -165,6 +165,7 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   void poll_low_power_product_probe_();
   void begin_mcu_wake_pulse_();
   bool mcu_wake_pulse_running_();
+  void finish_low_power_sync_();
   void poll_low_power_v3_status_();
   void process_low_power_queue_();
   void poll_low_power_product_recovery_();

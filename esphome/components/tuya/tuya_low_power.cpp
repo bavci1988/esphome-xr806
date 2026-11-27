@@ -173,14 +173,34 @@ void TuyaUART::loop_low_power_() {
   this->poll_low_power_product_recovery_();
   if (this->lp_session_.expire(App.get_loop_component_start_time())) {
     ESP_LOGW(LP_TAG, "Low-power status/write report timeout; requesting state resynchronization");
+    this->status_set_warning(LOG_STR("MCU status timeout"));
     this->lp_network_status_ = 0xFF;
   }
+  // The state counts as known only once the command that asked for it (CMD02) has its ACK too
+  if (this->lp_session_.synchronized() && !this->lp_wire_.active())
+    this->finish_low_power_sync_();
   this->update_low_power_sleep_lock_();
   this->process_low_power_queue_();
   this->poll_low_power_v3_status_();
   this->poll_low_power_v3_sleep_();
   this->poll_low_power_update_probe_();
   this->poll_low_power_mcu_update_();
+}
+
+void TuyaUART::finish_low_power_sync_() {
+  // The baud-rate warning and the unanswered product query keep their warning until their own cause is gone
+  if (!this->init_failed_ && !this->lp_product_retry_.active())
+    this->status_clear_warning();
+  // The MCU takes commands once its full status is in.
+  this->notify_mcu_ready_();
+  if (this->init_state_ == TuyaInitState::INIT_DONE)
+    return;
+  this->init_state_ = TuyaInitState::INIT_DONE;
+  if (!this->lp_initialized_callback_called_) {
+    this->lp_initialized_callback_called_ = true;
+    this->mark_initialized_();
+  }
+  ESP_LOGI(LP_TAG, "MCU status synchronized for current product epoch (protocol version %u)", this->lp_v3_ ? 3u : 0u);
 }
 
 void TuyaUART::poll_low_power_v3_status_() {
@@ -265,9 +285,18 @@ void TuyaUART::handle_low_power_frame_(uint8_t command, uint8_t version, const u
     ESP_LOGW(LP_TAG, "Discarding overdue MCU ACK CMD 0x%02X; recovery required", command);
     return;
   }
-  if (this->lp_wire_.complete(command, len))
+  // A malformed report confirms no write or status query
+  if (command == 0x07 && !valid_datapoints(buffer, len)) {
+    ESP_LOGW(LP_TAG, "Rejecting malformed MCU CMD07 report");
+    return;
+  }
+  const bool answered = this->lp_wire_.complete(command, len);
+  if (answered)
     this->expected_response_.reset();
   this->lp_mcu_wake_fresh_ = false;  // The MCU answered; a version-0 MCU may now fall asleep again.
+  // A CMD02 nobody asked for must not advance the version-3 working-mode handshake
+  if (command == 0x02 && !answered && this->lp_v3_)
+    return;
   this->handle_low_power_command_(command, version, buffer, len);
   // A frame shows that the MCU is awake right now: during a recovery, ask for the product info at once instead
   // of waiting for a retry that may reach it asleep.
@@ -1217,7 +1246,8 @@ void TuyaUART::send_low_power_direct_(uint8_t command, const uint8_t *data, size
 }
 
 void TuyaUART::send_low_power_network_() {
-  if (!this->lp_session_.has_product())
+  // Not during a write or status series, nor in quarantine: the 1 s interval and the next product info resend it
+  if (!this->lp_session_.has_product() || this->lp_session_.busy() || this->lp_wire_.faulted())
     return;
   // An intentional, pending Wi-Fi teardown for standby is not a new logical
   // Tuya network epoch: defer CMD02 until abort/resume, when the station
@@ -1426,10 +1456,6 @@ void TuyaUART::handle_low_power_command_(uint8_t command, uint8_t version, const
     case 0x07: {  // Status report of a version-3 MCU (standard Tuya framing).
       if (!this->lp_v3_)
         return;
-      if (!valid_datapoints(data, len)) {
-        ESP_LOGW(LP_TAG, "Rejecting malformed MCU CMD07 report");
-        return;
-      }
       this->lp_session_.observe_report(App.get_loop_component_start_time());
       if (!this->lp_v3_pushes_ && this->lp_session_.synchronized() &&
           App.get_loop_component_start_time() - this->lp_v3_last_poll_ms_ > 3000) {
@@ -1442,18 +1468,14 @@ void TuyaUART::handle_low_power_command_(uint8_t command, uint8_t version, const
         offset += 4 + size;
       }
       this->handle_datapoints_(data, len);
-      // A version-3 MCU sends no boot heartbeat; a complete report proves the link works again.
-      this->lp_standby_.recovered();
-      if (!this->lp_session_.synchronized()) {
-        this->lp_session_.mark_synchronized();
-        this->init_state_ = TuyaInitState::INIT_DONE;
-        if (!this->lp_initialized_callback_called_) {
-          this->lp_initialized_callback_called_ = true;
-          this->mark_initialized_();
-        }
-        ESP_LOGI(LP_TAG, "MCU status synchronized (version-3 MCU)");
+      // A report before the working-mode handshake or during quarantine only updates the datapoints.
+      if (this->lp_v3_mode_acked_ && !this->lp_wire_.faulted()) {
+        // A version-3 MCU sends no boot heartbeat; a complete report proves the link works again.
+        this->lp_standby_.recovered();
+        if (!this->lp_session_.synchronized())
+          this->lp_session_.mark_synchronized();
+        this->finish_low_power_sync_();
       }
-      this->notify_mcu_ready_();
       this->update_low_power_sleep_lock_();
       return;
     }
@@ -1485,17 +1507,7 @@ void TuyaUART::handle_low_power_command_(uint8_t command, uint8_t version, const
         offset += 4 + size;
       }
       this->handle_datapoints_(data, len);
-      if (this->init_state_ != TuyaInitState::INIT_DONE && this->lp_session_.synchronized()) {
-        this->init_state_ = TuyaInitState::INIT_DONE;
-        if (!this->lp_initialized_callback_called_) {
-          this->lp_initialized_callback_called_ = true;
-          this->mark_initialized_();
-        }
-        ESP_LOGI(LP_TAG, "MCU status synchronized for current product epoch");
-      }
-      // The HC32 takes commands once its full status is in.
-      if (this->lp_session_.synchronized())
-        this->notify_mcu_ready_();
+      // The synchronization completes in loop_low_power_(), once the CMD02 ACK is in as well.
       this->update_low_power_sleep_lock_();
       return;
     }
@@ -1538,6 +1550,8 @@ void TuyaUART::handle_low_power_command_(uint8_t command, uint8_t version, const
         if (this->lp_wire_.abandon_network()) {
           ESP_LOGD(LP_TAG, "MCU went to sleep before answering CMD02; sending it again");
           this->expected_response_.reset();
+          // The status series that CMD02 started ends here, so the network state is not held back until it times out
+          this->lp_session_.reset_status();
           this->lp_network_status_ = 0xFF;
         }
       }
