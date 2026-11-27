@@ -7,6 +7,7 @@
 #include "esphome/components/libretiny/gpio_arduino.h"
 #include "esphome/components/tuya/tuya_low_power_host.h"
 #include "esphome/components/tuya/tuya_uart.h"
+#include "esphome/components/uart/uart_component_libretiny.h"
 #include "esphome/core/component.h"
 #include "esphome/core/preferences.h"
 
@@ -19,10 +20,13 @@ namespace esphome::bk7236_tuya_standby {
 /// standby; the Tuya hub then tells the MCU that the module is awake.
 class BK7236TuyaStandby final : public Component, public tuya::TuyaLowPowerHost {
  public:
-  BK7236TuyaStandby(tuya::TuyaUART *tuya, uint32_t boot_hold_ms) : tuya_(tuya), boot_hold_ms_(boot_hold_ms) {
+  BK7236TuyaStandby(tuya::TuyaUART *tuya, uart::LibreTinyUARTComponent *uart, uint32_t boot_hold_ms)
+      : tuya_(tuya), uart_(uart), boot_hold_ms_(boot_hold_ms) {
     // Before the hub's setup(), which already asks for the host
     tuya->set_low_power_host(this);
   }
+
+  void set_default_mcu_wake(int8_t pin) { this->default_mcu_wake_ = pin; }
 
   void setup() override;
   void loop() override;
@@ -40,7 +44,7 @@ class BK7236TuyaStandby final : public Component, public tuya::TuyaLowPowerHost 
   bool standby_services_quiesced() const override { return true; }
   void request_preflight(bool requested) override { this->preflight_requested_ = requested; }
   bool preflight_requested() const override { return this->preflight_requested_; }
-  void request_standby(bool requested) override { this->standby_requested_ = requested; }
+  void request_standby(bool requested) override;
   bool standby_requested() const override { return this->standby_requested_; }
   bool network_quiescing() const override { return false; }
   bool standby_keeps_network() const override { return true; }
@@ -54,7 +58,9 @@ class BK7236TuyaStandby final : public Component, public tuya::TuyaLowPowerHost 
     uint8_t active_high{0};
   };
 
-  static void wake_isr(BK7236TuyaStandby *arg) { arg->wake_requested_ = true; }
+  static void wake_isr(BK7236TuyaStandby *arg);
+  /// The MCU's TX line carries noise while the MCU sleeps; the receiver is off from the MCU's consent until a wake.
+  void set_mcu_rx_(bool enable);
   /// The product info names pins of the module the MCU firmware was written for: T3-U pins as they are,
   /// WXU (XR806) pins mapped to the T3-U pads in the same place. -1 when the pin is unknown.
   static int map_wake_line(int gpio);
@@ -63,6 +69,7 @@ class BK7236TuyaStandby final : public Component, public tuya::TuyaLowPowerHost 
   void leave_();
 
   tuya::TuyaUART *tuya_;
+  uart::LibreTinyUARTComponent *uart_;
   uint32_t boot_hold_ms_;
   uint32_t next_attempt_ms_{0};
   libretiny::ArduinoInternalGPIOPin wake_in_;
@@ -70,11 +77,13 @@ class BK7236TuyaStandby final : public Component, public tuya::TuyaLowPowerHost 
   ESPPreferenceObject wake_pref_;
   WakeLinesPref saved_{};
   int8_t wake_input_{-1};
+  int8_t default_mcu_wake_{-1};
   volatile bool wake_requested_{false};
   bool mcu_wake_created_{false};
   bool preflight_requested_{false};
   bool standby_requested_{false};
   bool sleeping_{false};
+  volatile bool rx_suspended_{false};
   bool wake_held_logged_{false};
 };
 

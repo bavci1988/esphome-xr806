@@ -12,6 +12,9 @@
 #include <Update.h>
 #endif
 
+// ARMINO UART driver (driver/uart.h); in IRAM, so it may be called from the wake interrupt
+extern "C" int bk_uart_set_enable_rx(int id, bool enable);
+
 namespace esphome::bk7236_tuya_standby {
 
 ESPHOME_LOG_TAG(TAG, "bk7236_tuya_standby");
@@ -30,6 +33,10 @@ void BK7236TuyaStandby::setup() {
   if (this->wake_pref_.load(&saved) && saved.mcu_wake >= 0) {
     this->set_mcu_wake_(saved.mcu_wake, saved.active_high != 0);
     this->saved_ = saved;
+  } else if (this->default_mcu_wake_ >= 0) {
+    // Nothing learned yet (first start): the usual Tuya wake line of this module, active low.
+    // The product info confirms or replaces it.
+    this->set_mcu_wake_(this->default_mcu_wake_, false);
   }
 }
 
@@ -40,12 +47,12 @@ void BK7236TuyaStandby::loop() {
       this->wake_requested_ = false;
       this->standby_requested_ = false;
       this->leave_();
-      ESP_LOGD(TAG, "MCU woke the module");
+      ESP_LOGD(TAG, "MCU woke the module, MCU UART receiver on");
       this->tuya_->low_power_standby_resumed(true, true, false);
     } else if (!this->standby_requested_) {
       // The hub ended the standby itself (a command for the MCU, an update, ...)
       this->leave_();
-      ESP_LOGD(TAG, "Standby ended by the Tuya hub");
+      ESP_LOGD(TAG, "Standby ended by the Tuya hub, MCU UART receiver on");
     }
     return;
   }
@@ -71,15 +78,37 @@ void BK7236TuyaStandby::loop() {
   this->enter_();
 }
 
+void BK7236TuyaStandby::wake_isr(BK7236TuyaStandby *arg) {
+  arg->wake_requested_ = true;
+  // The MCU sends right after its wake pulse, before the main loop runs
+  arg->set_mcu_rx_(true);
+}
+
+void BK7236TuyaStandby::set_mcu_rx_(bool enable) {
+  if (this->rx_suspended_ == !enable)
+    return;
+  bk_uart_set_enable_rx(this->uart_->get_hw_serial_number(), enable);
+  this->rx_suspended_ = !enable;
+}
+
+void BK7236TuyaStandby::request_standby(bool requested) {
+  this->standby_requested_ = requested;
+  // The hub ends the standby to send to the MCU; its answer must not find the receiver off
+  if (!requested)
+    this->set_mcu_rx_(true);
+}
+
 void BK7236TuyaStandby::enter_() {
   this->wake_requested_ = false;
+  this->set_mcu_rx_(false);
   lt_light_sleep_allow(true);
   this->sleeping_ = true;
-  ESP_LOGD(TAG, "Standby: the CPU may sleep, Wi-Fi stays connected");
+  ESP_LOGD(TAG, "Standby: the CPU may sleep, Wi-Fi stays connected, MCU UART receiver off");
 }
 
 void BK7236TuyaStandby::leave_() {
   lt_light_sleep_allow(false);
+  this->set_mcu_rx_(true);
   this->sleeping_ = false;
 }
 
@@ -147,7 +176,8 @@ void BK7236TuyaStandby::dump_config() {
                 "  Boot hold: %" PRIu32 " s\n"
                 "  Wake input: %d\n"
                 "  MCU wake output: %d",
-                this->boot_hold_ms_ / 1000, this->wake_input_, this->mcu_wake_created_ ? this->mcu_wake_.get_pin() : -1);
+                this->boot_hold_ms_ / 1000, this->wake_input_,
+                this->mcu_wake_created_ ? this->mcu_wake_.get_pin() : -1);
 }
 
 }  // namespace esphome::bk7236_tuya_standby

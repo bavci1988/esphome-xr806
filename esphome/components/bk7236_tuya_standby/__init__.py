@@ -9,7 +9,15 @@ from esphome.components import tuya
 from esphome.components.libretiny import get_libretiny_family
 from esphome.components.libretiny.const import FAMILY_BK7236
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_OPTIONS, CONF_POWER_SAVE_MODE, CONF_PROTOCOL
+from esphome.const import (
+    CONF_BOARD,
+    CONF_ID,
+    CONF_OPTIONS,
+    CONF_POWER_SAVE_MODE,
+    CONF_PROTOCOL,
+    CONF_UART_ID,
+)
+from esphome.core import CORE
 import esphome.final_validate as fv
 from esphome.types import ConfigType
 
@@ -18,6 +26,8 @@ DEPENDENCIES = ["bk72xx", "tuya", "wifi"]
 DOMAIN = "bk7236_tuya_standby"
 
 CONF_BOOT_HOLD = "boot_hold"
+# The MCU wake line (module output) on boards whose Tuya pinout is known, used until the MCU names its own
+DEFAULT_MCU_WAKE = {"t3-u": 16}
 CONF_TUYA_ID = "tuya_id"
 
 bk7236_tuya_standby_ns = cg.esphome_ns.namespace("bk7236_tuya_standby")
@@ -59,5 +69,9 @@ FINAL_VALIDATE_SCHEMA = _final_validate
 
 async def to_code(config: ConfigType) -> None:
     hub = await cg.get_variable(config[CONF_TUYA_ID])
-    var = cg.new_Pvariable(config[CONF_ID], hub, config[CONF_BOOT_HOLD])
+    # The MCU's UART: its receiver is switched off while the MCU sleeps
+    bus = await cg.get_variable(CORE.config["tuya"][CONF_UART_ID])
+    var = cg.new_Pvariable(config[CONF_ID], hub, bus, config[CONF_BOOT_HOLD])
     await cg.register_component(var, config)
+    if (pin := DEFAULT_MCU_WAKE.get(CORE.config["bk72xx"][CONF_BOARD])) is not None:
+        cg.add(var.set_default_mcu_wake(pin))
