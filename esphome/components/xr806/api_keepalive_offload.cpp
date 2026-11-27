@@ -161,7 +161,6 @@ static void print_timer_diagnostics() {
 // The firmware commands take large structures; keep them off the main loop stack.
 static union {
   wlan_ext_p2p_svr_set_t svr;
-  wlan_ext_p2p_wkp_param_set_t wkp;
   wlan_ext_p2p_kpalive_param_set_t kpalive;
 } offload_cmd;
 
@@ -252,15 +251,6 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
   if (request(WLAN_EXT_CMD_SET_P2P_SVR, reinterpret_cast<uint32_t>(&svr)) != 0)
     return false;
 
-  if (this->wake_on_peer_) {
-    auto &wkp = offload_cmd.wkp;
-    memset(&wkp, 0, sizeof(wkp));
-    wkp.Enable = 1;
-    memcpy(wkp.P2PIpv4FilterCfgs[0].Ipv4Filter, tcp.remote_ip, sizeof(wkp.P2PIpv4FilterCfgs[0].Ipv4Filter));
-    if (request(WLAN_EXT_CMD_SET_P2P_WKP_CFG, reinterpret_cast<uint32_t>(&wkp)) != 0)
-      return false;
-  }
-
   // The frames go into the module's data before the keepalive is switched on. The window takes 32-bit accesses.
   const size_t frame_words = (static_cast<size_t>(this->frame_count_) * this->frame_len_ + 3) / 4;
   auto *frames = reinterpret_cast<volatile uint32_t *>(FRAMES_APP_ADDRESS);
@@ -302,10 +292,6 @@ bool XR806APIKeepaliveOffload::configure_firmware_() {
 void XR806APIKeepaliveOffload::stop_firmware_() {
   memset(&offload_cmd.kpalive, 0, sizeof(offload_cmd.kpalive));
   request(WLAN_EXT_CMD_SET_P2P_KPALIVE_CFG, reinterpret_cast<uint32_t>(&offload_cmd.kpalive));
-  if (this->wake_on_peer_) {
-    memset(&offload_cmd.wkp, 0, sizeof(offload_cmd.wkp));
-    request(WLAN_EXT_CMD_SET_P2P_WKP_CFG, reinterpret_cast<uint32_t>(&offload_cmd.wkp));
-  }
 }
 
 void XR806APIKeepaliveOffload::send_unsent_(uint32_t from) {

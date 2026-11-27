@@ -29,10 +29,9 @@ bool keepalive_offload_planned_wake();
 
 class XR806APIKeepaliveOffload {
  public:
-  void configure(uint8_t period_s, bool host_sleep, bool wake_on_peer) {
+  void configure(uint8_t period_s, bool host_sleep) {
     this->period_s_ = period_s;
     this->host_sleep_ = host_sleep;
-    this->wake_on_peer_ = wake_on_peer;
   }
   bool enabled() const { return this->period_s_ != 0; }
   /// Right before the chip sleeps. wake_after_ms is the coordinator's wake timer; it is shortened when the frame
@@ -66,7 +65,6 @@ class XR806APIKeepaliveOffload {
   uint8_t wake_frames_{0};
   uint8_t period_s_{0};
   bool host_sleep_{false};
-  bool wake_on_peer_{false};
 };
 
 }  // namespace esphome::xr806

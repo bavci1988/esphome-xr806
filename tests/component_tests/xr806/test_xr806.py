@@ -627,7 +627,7 @@ def test_wifi_fw_standby_patch(
     generated = generate_main(component_config_path("wifi_fw_standby_patch.yaml"))
 
     assert "-DUSE_XR806_API_KEEPALIVE_OFFLOAD" in CORE.build_flags
-    assert "set_keepalive_offload(8, true, false)" in generated
+    assert "set_keepalive_offload(8, true)" in generated
     assert "XR806WlanFirmwareSwap" in generated
     assert not any(d.name == "USE_XR806_WLAN_FW_LOAD_AT_BOOT" for d in CORE.defines)
 

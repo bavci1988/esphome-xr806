@@ -60,7 +60,6 @@ CONF_WAKE_EDGE = "wake_edge"
 CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH = "experimental_wifi_fw_standby_patch"
 CONF_KEEPALIVE_PERIOD = "keepalive_period"
 CONF_HOST_SLEEP = "host_sleep"
-CONF_WAKE_ON_PEER = "wake_on_peer"
 CONF_LOAD_AT_BOOT = "load_at_boot"
 CONF_DIAGNOSE_WLAN_ROM_DUMP = "diagnose_wlan_rom_dump"
 CONF_DIAGNOSE_WLAN_SLEEP = "diagnose_wlan_sleep"
@@ -128,7 +127,6 @@ EXPERIMENTAL_WIFI_FW_STANDBY_PATCH_SCHEMA = cv.Schema(
             cv.Range(min=cv.TimePeriod(seconds=1), max=cv.TimePeriod(seconds=12)),
         ),
         cv.Optional(CONF_HOST_SLEEP, default=True): cv.boolean,
-        cv.Optional(CONF_WAKE_ON_PEER, default=False): cv.boolean,
         # False: boot with the stock WLAN firmware and load the patched one a minute later, so a broken patch
         # still leaves time for an OTA update. True: load it at boot; after three starts without a confirmed
         # connection the stock firmware is used until the next update.
@@ -473,7 +471,6 @@ async def to_code(config: ConfigType) -> None:
                     api_standby.set_keepalive_offload(
                         patch[CONF_KEEPALIVE_PERIOD].total_seconds,
                         patch[CONF_HOST_SLEEP],
-                        patch[CONF_WAKE_ON_PEER],
                     )
                 )
         if "mqtt" in CORE.config:

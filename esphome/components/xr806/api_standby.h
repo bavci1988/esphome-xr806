@@ -38,9 +38,7 @@ class XR806APIStandby final : public Component, public XR806StandbyParticipant {
   void standby_resumed(const XR806StandbyResume &event) override;
 #ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
   /// Experiment: while the CPU sleeps, the patched WLAN firmware sends pre-encrypted PingResponse frames.
-  void set_keepalive_offload(uint8_t period_s, bool host_sleep, bool wake_on_peer) {
-    this->offload_.configure(period_s, host_sleep, wake_on_peer);
-  }
+  void set_keepalive_offload(uint8_t period_s, bool host_sleep) { this->offload_.configure(period_s, host_sleep); }
 #endif
 
  protected:
