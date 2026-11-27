@@ -242,7 +242,12 @@ size_t LibreTinyUARTComponent::available() { return this->serial_->available(); 
 UARTFlushResult LibreTinyUARTComponent::flush() {
   ESP_LOGVV(TAG, "    Flushing");
   this->serial_->flush();
+#ifdef USE_LIBRETINY_VARIANT_BK7236
+  // flush() waits until the TX FIFO and the last character have left the port (bk_uart_wait_tx_over)
+  return UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
+#else
   return UARTFlushResult::UART_FLUSH_RESULT_ASSUMED_SUCCESS;
+#endif
 }
 
 void LibreTinyUARTComponent::check_logger_conflict() {
