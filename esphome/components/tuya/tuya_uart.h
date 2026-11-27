@@ -171,6 +171,8 @@ class TuyaUART final : public Tuya, public uart::UARTDevice {
   void poll_low_power_product_recovery_();
   void invalidate_low_power_mode_epoch_();
   bool low_power_ready_for_sleep_(bool in_cmd38_handler = false) const;
+  const LogString *low_power_sleep_blocker_(bool in_cmd38_handler = false) const;
+  void fail_low_power_transport_();
   void cancel_low_power_standby_();
   void poll_low_power_sleep_preflight_();
   /// Grants a sleep request, or starts preparing for it; otherwise returns the busy flags of the CMD38 answer.

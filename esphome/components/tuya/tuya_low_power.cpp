@@ -196,7 +196,18 @@ void TuyaUART::loop_low_power_() {
   this->poll_low_power_mcu_update_();
 }
 
+// A frame may not have left the UART: the MCU's sleep state is unknown until its full status is read again,
+// which also ends the standby recovery (finish_low_power_sync_).
+void TuyaUART::fail_low_power_transport_() {
+  this->lp_standby_.transport_fault();
+  this->lp_session_.command_timeout();
+  this->lp_network_status_ = 0xFF;      // Version 0: CMD02 0x04 asks for the full status again
+  this->lp_v3_report_pending_ = false;  // A report from before the fault does not end the recovery
+}
+
 void TuyaUART::finish_low_power_sync_() {
+  // A fresh full status ends a standby recovery; every fault that starts one also clears the synchronization
+  this->lp_standby_.recovered();
   // The baud-rate warning and the unanswered product query keep their warning until their own cause is gone
   if (!this->init_failed_ && !this->lp_product_retry_.active())
     this->status_clear_warning();
@@ -587,18 +598,38 @@ void TuyaUART::poll_low_power_product_recovery_() {
 }
 
 bool TuyaUART::low_power_ready_for_sleep_(bool in_cmd38_handler) const {
-  // Called from the CMD38 handler, the frame being handled is not a frame still coming in.
-  const bool guard_elapsed =
-      static_cast<int32_t>(App.get_loop_component_start_time() - this->lp_wake_guard_until_) >= 0;
-  const bool baud_locked = !this->auto_baud_ || this->lp_autobaud_.locked();
+  return this->low_power_sleep_blocker_(in_cmd38_handler) == nullptr;
+}
+
+// The first condition that keeps the MCU link from sleep, nullptr when none does.
+const LogString *TuyaUART::low_power_sleep_blocker_(bool in_cmd38_handler) const {
+  if (!this->lp_session_.ready())
+    return LOG_STR("MCU state not synchronized");
+  if (!this->lp_wire_.idle())
+    return LOG_STR("command waiting for its answer");
   // The DP101/DP102 sleep window exists only on the HC32 firmware (version 0 frames).
-  return this->lp_session_.ready() && this->lp_wire_.idle() &&
-         (this->lp_v3_ || this->lp_sleep_window_.standby_mode_stable()) && !this->lp_product_retry_.active() &&
-         guard_elapsed && baud_locked && this->parent_->is_connected() &&
-         this->lp_uart_rx_errors_.unchanged(this->low_power_uart_rx_error_count_()) &&
-         !this->lp_standby_.recovery_required() && this->command_queue_.empty() && !this->lp_mcu_wake_pulse_active_ &&
-         !this->lp_awake_notification_pending_ && !this->expected_response_.has_value() &&
-         this->lp_mcu_update_ == McuUpdate::MCU_UPDATE_IDLE && (in_cmd38_handler || !this->reader_.receiving());
+  if (!this->lp_v3_ && !this->lp_sleep_window_.standby_mode_stable())
+    return LOG_STR("sleep window changing");
+  if (this->lp_product_retry_.active())
+    return LOG_STR("product query retry");
+  if (static_cast<int32_t>(App.get_loop_component_start_time() - this->lp_wake_guard_until_) < 0)
+    return LOG_STR("wake guard");
+  if (this->auto_baud_ && !this->lp_autobaud_.locked())
+    return LOG_STR("baud rate not found");
+  if (!this->parent_->is_connected() || !this->lp_uart_rx_errors_.unchanged(this->low_power_uart_rx_error_count_()))
+    return LOG_STR("UART error");
+  if (this->lp_standby_.recovery_required())
+    return LOG_STR("standby recovery");
+  if (!this->command_queue_.empty() || this->expected_response_.has_value())
+    return LOG_STR("commands queued");
+  if (this->lp_mcu_wake_pulse_active_ || this->lp_awake_notification_pending_)
+    return LOG_STR("waking the MCU");
+  if (this->lp_mcu_update_ != McuUpdate::MCU_UPDATE_IDLE)
+    return LOG_STR("MCU update");
+  // Called from the CMD38 handler, the frame being handled is not a frame still coming in.
+  if (!in_cmd38_handler && this->reader_.receiving())
+    return LOG_STR("frame coming in");
+  return nullptr;
 }
 
 void TuyaUART::update_low_power_sleep_lock_() {
@@ -837,7 +868,7 @@ void TuyaUART::send_low_power_awake_notification_() {
 void TuyaUART::send_low_power_awake_frame_() {
   // This is a Tuya MCU command, not a platform wake operation.
   if (!this->parent_->is_connected()) {
-    this->lp_standby_.transport_fault();
+    this->fail_low_power_transport_();
   } else {
     if (this->lp_v3_) {
       this->send_low_power_direct_(LP_V3_SLEEP_CMD, {LP_V3_SLEEP_WAKE, 0x01});
@@ -850,7 +881,7 @@ void TuyaUART::send_low_power_awake_frame_() {
       this->send_low_power_direct_(0x12, {0x00});
     }
     if (this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS)
-      this->lp_standby_.transport_fault();
+      this->fail_low_power_transport_();
   }
   this->lp_wake_guard_until_ = App.get_loop_component_start_time() + 5000;
   this->update_low_power_sleep_lock_();
@@ -897,7 +928,7 @@ void TuyaUART::poll_low_power_v3_sleep_() {
     return;
   auto *host = this->lp_host_;
   const LogString *blocked = nullptr;
-  bool link_busy = false;  // The usual short pause after a wake: not worth a DEBUG line.
+  const LogString *link_busy = nullptr;  // The usual short pause after a wake: not worth a DEBUG line.
   if (host == nullptr || !host->standby_supported()) {
     blocked = LOG_STR("no standby controller");
   } else if (this->lp_wake_input_ < 0 || host->standby_wake_pin() != this->lp_wake_input_) {
@@ -908,13 +939,13 @@ void TuyaUART::poll_low_power_v3_sleep_() {
     blocked = LOG_STR("services busy");
   } else if (host->ota_busy()) {
     blocked = LOG_STR("update running");
-  } else if (!this->low_power_ready_for_sleep_() || this->available() != 0) {
-    link_busy = true;
+  } else {
+    link_busy = this->low_power_sleep_blocker_();
+    if (link_busy == nullptr && this->available() != 0)
+      link_busy = LOG_STR("bytes waiting");
   }
-  if (link_busy) {
-    ESP_LOGV(LP_TAG, "No sleep offer: MCU link not idle (ready %d, wire %d, queue %u, guard %d)",
-             this->lp_session_.ready(), this->lp_wire_.idle(), static_cast<unsigned>(this->command_queue_.size()),
-             static_cast<int32_t>(now - this->lp_wake_guard_until_) >= 0);
+  if (link_busy != nullptr) {
+    ESP_LOGV(LP_TAG, "No sleep offer: MCU link not idle (%s)", LOG_STR_ARG(link_busy));
     return;
   }
   if (blocked != this->lp_v3_sleep_blocked_) {
@@ -981,7 +1012,7 @@ void TuyaUART::handle_low_power_v3_sleep_(const uint8_t *data, size_t len) {
       if (flags != 0)
         return;
       if (this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
-        this->lp_standby_.transport_fault();
+        this->fail_low_power_transport_();
         this->update_low_power_sleep_lock_();
         return;
       }
@@ -1033,7 +1064,7 @@ void TuyaUART::poll_low_power_sleep_preflight_() {
   if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
     host->request_standby(true);
   } else {
-    this->lp_standby_.transport_fault();
+    this->fail_low_power_transport_();
     this->update_low_power_sleep_lock_();
   }
   host->request_preflight(false);
@@ -1064,7 +1095,7 @@ uint8_t TuyaUART::grant_low_power_sleep_() {
       if (this->flush() == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
         host->request_standby(true);
       } else {
-        this->lp_standby_.transport_fault();
+        this->fail_low_power_transport_();
       }
       this->update_low_power_sleep_lock_();
       return 0;
@@ -1104,7 +1135,7 @@ bool TuyaUART::notify_low_power_transition(bool sleeping) {
       return false;
     this->send_low_power_direct_(0x12, {0x01});
     if (this->flush() != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS) {
-      this->lp_standby_.transport_fault();
+      this->fail_low_power_transport_();
       this->update_low_power_sleep_lock_();
       return false;
     }
@@ -1167,6 +1198,8 @@ void TuyaUART::low_power_standby_resumed(bool expected_source, bool wake_gpio, b
     this->send_low_power_awake_notification_();
   } else if (action == TuyaLowPowerStandbyState::ResumeAction::REQUIRE_RESYNC) {
     this->lp_session_.command_timeout();
+    this->lp_network_status_ = 0xFF;  // Version 0 gets its full status only through CMD02 0x04
+    this->lp_v3_report_pending_ = false;
     ESP_LOGE(LP_TAG, "Unexpected/timer-only MCU resume: withholding CMD12/00 and further standby");
     // A version-3 MCU sends no boot heartbeat: wake it and read its state to recover.
     if (this->lp_v3_)
