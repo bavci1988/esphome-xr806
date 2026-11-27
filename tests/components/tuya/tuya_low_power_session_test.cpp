@@ -200,11 +200,20 @@ TEST(TuyaLowPowerSession, FullStatusAndWrites) {
   const std::string typed_p = R"({"p":42,"v":"1.3.1","wk":20,"mwk":28,"sm":1})";
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(missing_p.data()), missing_p.size()));
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(missing_v.data()), missing_v.size()));
+  EXPECT_EQ(info.pid[0], '\0');  // A p read before the missing v is not kept
   EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(bad_sm.data()), bad_sm.size()));
   EXPECT_EQ(info.sleep_mode, -1);  // Unknown sleep mode: no standby.
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(typed_p.data()), typed_p.size()));
   EXPECT_FALSE(info.parse(nullptr, 0));
-  EXPECT_FALSE(info.parsed);
+  EXPECT_EQ(info.pid[0], '\0');
+  // A string value that equals a key name is not that key
+  const std::string value_like_key = R"({"p":"v","v":"1.0.0"})";
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(value_like_key.data()), value_like_key.size()));
+  EXPECT_STREQ(info.version.data(), "1.0.0");
+  // An oversized wake pulse is clamped to 200 ms, not ignored
+  const std::string long_pulse = R"({"p":"abc","v":"1","mwkpt":3000})";
+  EXPECT_TRUE(info.parse(reinterpret_cast<const uint8_t *>(long_pulse.data()), long_pulse.size()));
+  EXPECT_EQ(info.mcu_wake_pulse_ms, 200u);
   // A product field holds at most 48 characters.
   const std::string max_p = R"({"p":")" + std::string(48, 'a') + R"(","v":"1"})";
   const std::string long_p = R"({"p":")" + std::string(49, 'a') + R"(","v":"1"})";
@@ -212,6 +221,19 @@ TEST(TuyaLowPowerSession, FullStatusAndWrites) {
   EXPECT_EQ(std::strlen(info.pid.data()), 48u);
   EXPECT_FALSE(info.parse(reinterpret_cast<const uint8_t *>(long_p.data()), long_p.size()));
   EXPECT_STREQ(info.pid.data(), "");
+}
+
+TEST(TuyaLowPowerSession, ReportsTheMcuStartsHoldWritesUntilQuiet) {
+  esphome::tuya::TuyaLowPowerSession s;
+  s.product_received();
+  s.mark_synchronized();
+  s.observe_report(100);
+  EXPECT_TRUE(s.quiet(600));
+  // The user turns the wheel: the MCU reports on its own while the module is synchronized.
+  s.observe_report(5000);
+  EXPECT_TRUE(s.ready());
+  EXPECT_FALSE(s.quiet(5000 + esphome::tuya::TuyaLowPowerSession::QUIET_MS - 1));
+  EXPECT_TRUE(s.quiet(5000 + esphome::tuya::TuyaLowPowerSession::QUIET_MS));
 }
 
 TEST(TuyaLowPowerSession, Version3McuSynchronizesOnFirstReport) {

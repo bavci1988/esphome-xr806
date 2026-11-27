@@ -35,7 +35,7 @@ TEST(TuyaLowPowerAutoBaud, LocksOnlyOnProductInfo) {
   scan.probe_sent(0);
   auto report = make_frame(0x05, "x");
   EXPECT_FALSE(scan.accept_frame(report.data(), report.size(), 50));
-  auto product = make_frame(0x01, "{\"p\":\"x\"}");
+  auto product = make_frame(0x01, R"({"p":"x"})");
   product.back() ^= 0xFF;  // Bad checksum.
   EXPECT_FALSE(scan.accept_frame(product.data(), product.size(), 60));
   product.back() ^= 0xFF;
@@ -54,21 +54,80 @@ TEST(TuyaLowPowerAutoBaud, OtherValidFrameKeepsRateAndProbesAgain) {
   scan.probe_sent(500);
   ASSERT_EQ(scan.baud(), 115200u);
 
-  // The MCU wakes up and reports on its own, late in the probe window.
+  // The MCU wakes up and reports on its own: wait for a pause, then probe again at the same rate.
   scan.probe_again(800);
-  ASSERT_TRUE(scan.probe_due(800));
+  EXPECT_FALSE(scan.probe_due(899));
+  ASSERT_TRUE(scan.probe_due(900));
   EXPECT_EQ(scan.baud(), 115200u);
-  scan.probe_sent(800);
+  scan.probe_sent(900);
 
-  // More reports of the same burst: no probe per frame, and no rate change at the old deadline.
-  scan.probe_again(820);
-  EXPECT_FALSE(scan.probe_due(821));
-  EXPECT_FALSE(scan.probe_due(1301));
+  auto product = make_frame(0x01, R"({"p":"x"})");
+  EXPECT_TRUE(scan.accept_frame(product.data(), product.size(), 950));
   EXPECT_EQ(scan.baud(), 115200u);
+}
 
-  auto product = make_frame(0x01, "{\"p\":\"x\"}");
-  EXPECT_TRUE(scan.accept_frame(product.data(), product.size(), 900));
+TEST(TuyaLowPowerAutoBaud, BurstRightAfterProbeKeepsRate) {
+  TuyaLowPowerAutoBaud scan;
+  scan.start(9600);
+  ASSERT_TRUE(scan.probe_due(0));
+  scan.probe_sent(0);
+  // The MCU ignores the probe and reports from 30 to 200 ms.
+  for (uint32_t t = 30; t <= 200; t += 20) {
+    scan.probe_again(t);
+    EXPECT_FALSE(scan.probe_due(t));
+  }
+  // After the burst the probe goes out again at 9600, never switching to 115200.
+  ASSERT_TRUE(scan.probe_due(290));
+  EXPECT_EQ(scan.baud(), 9600u);
+  scan.probe_sent(290);
+  EXPECT_FALSE(scan.probe_due(789));
+  ASSERT_TRUE(scan.probe_due(790));  // A silent MCU after that: the search goes on.
   EXPECT_EQ(scan.baud(), 115200u);
+}
+
+TEST(TuyaLowPowerAutoBaud, SteadyTrafficStillProbes) {
+  TuyaLowPowerAutoBaud scan;
+  scan.start(9600);
+  ASSERT_TRUE(scan.probe_due(0));
+  scan.probe_sent(0);
+  uint32_t t = 10;
+  for (; t < TuyaLowPowerAutoBaud::PROBE_TIMEOUT_MS; t += 50) {
+    scan.probe_again(t);
+    EXPECT_FALSE(scan.probe_due(t));
+  }
+  scan.probe_again(t);
+  ASSERT_TRUE(scan.probe_due(t));
+  EXPECT_EQ(scan.baud(), 9600u);
+}
+
+TEST(TuyaLowPowerAutoBaud, ProductInfoAfterReportInSameRead) {
+  TuyaLowPowerAutoBaud scan;
+  scan.start(9600);
+  ASSERT_TRUE(scan.probe_due(0));
+  scan.probe_sent(0);
+  scan.probe_again(120);
+  auto product = make_frame(0x01, "{}");
+  EXPECT_TRUE(scan.accept_frame(product.data(), product.size(), 120));
+  EXPECT_TRUE(scan.locked());
+}
+
+TEST(TuyaLowPowerAutoBaud, AwakeMcuRestoresFastPace) {
+  TuyaLowPowerAutoBaud scan;
+  scan.start(9600);
+  uint32_t now = 0;
+  for (uint32_t i = 0; i <= TuyaLowPowerAutoBaud::FAST_PROBE_ATTEMPTS; ++i) {
+    ASSERT_TRUE(scan.probe_due(now));
+    scan.probe_sent(now);
+    now += TuyaLowPowerAutoBaud::SLOW_PROBE_TIMEOUT_MS;
+  }
+  const uint32_t attempts = scan.attempts();
+  scan.probe_again(now);
+  // The warning count goes on, only the pace is reset.
+  EXPECT_EQ(scan.attempts(), attempts);
+  ASSERT_TRUE(scan.probe_due(now + TuyaLowPowerAutoBaud::MIN_PROBE_GAP_MS));
+  scan.probe_sent(now + TuyaLowPowerAutoBaud::MIN_PROBE_GAP_MS);
+  // Back to the fast pace.
+  EXPECT_TRUE(scan.probe_due(now + TuyaLowPowerAutoBaud::MIN_PROBE_GAP_MS + TuyaLowPowerAutoBaud::PROBE_TIMEOUT_MS));
 }
 
 TEST(TuyaLowPowerAutoBaud, SilentMcuIsProbedLessOften) {

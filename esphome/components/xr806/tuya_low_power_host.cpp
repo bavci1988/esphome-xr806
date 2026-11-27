@@ -1,6 +1,8 @@
-#include "tuya_low_power_host.h"
+#include "esphome/core/defines.h"
 
-#ifdef USE_TUYA_LOW_POWER
+#if defined(USE_XR806) && defined(USE_TUYA_LOW_POWER)
+
+#include "tuya_low_power_host.h"
 
 #include "esphome/core/log.h"
 
@@ -40,4 +42,4 @@ int XR806TuyaLowPowerHost::configure_wake_lines(int wake_gpio, int mcu_wake_gpio
 
 }  // namespace esphome::xr806
 
-#endif  // USE_TUYA_LOW_POWER
+#endif  // USE_XR806 && USE_TUYA_LOW_POWER

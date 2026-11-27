@@ -33,7 +33,6 @@ CONF_MCU_WAKE_PIN = "mcu_wake_pin"
 
 tuya_ns = cg.esphome_ns.namespace("tuya")
 TuyaDatapointType = tuya_ns.enum("TuyaDatapointType", is_class=True)
-TuyaProtocol = tuya_ns.enum("TuyaProtocol", is_class=True)
 Tuya = tuya_ns.class_("Tuya", cg.Component)
 TuyaUART = tuya_ns.class_("TuyaUART", Tuya, uart.UARTDevice)
 TuyaRefreshAction = tuya_ns.class_("TuyaRefreshAction", automation.Action)
@@ -104,6 +103,14 @@ def _validate_time_options(config: ConfigType) -> ConfigType:
     if config[CONF_AUTO_BAUD] and config[CONF_PROTOCOL] != PROTOCOL_LOW_POWER:
         raise cv.Invalid(
             "auto_baud is only supported with protocol: low_power",
+            path=[CONF_AUTO_BAUD],
+        )
+    # Switching the baud rate needs UARTComponent::load_settings()
+    if config[CONF_AUTO_BAUD] and not (
+        CORE.is_esp8266 or CORE.is_esp32 or CORE.is_xr806
+    ):
+        raise cv.Invalid(
+            "auto_baud is only supported on ESP8266, ESP32 and XR806",
             path=[CONF_AUTO_BAUD],
         )
     return config
@@ -178,7 +185,6 @@ async def to_code(config: ConfigType | AutoLoad) -> None:
     if config[CONF_PROTOCOL] == PROTOCOL_LOW_POWER:
         # Standard Tuya builds must not carry the low-power driver code or state.
         cg.add_define("USE_TUYA_LOW_POWER")
-        cg.add(var.set_protocol(TuyaProtocol.TUYA_PROTOCOL_LOW_POWER))
         cg.add(var.set_auto_baud(config[CONF_AUTO_BAUD]))
         await cg.add_pin(var.set_mcu_wake_pin, config.get(CONF_MCU_WAKE_PIN))
     if (time_id := config.get(CONF_TIME_ID)) is not None:

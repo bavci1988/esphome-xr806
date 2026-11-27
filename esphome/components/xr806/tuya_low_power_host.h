@@ -2,7 +2,7 @@
 
 #include "esphome/core/defines.h"
 
-#ifdef USE_TUYA_LOW_POWER
+#if defined(USE_XR806) && defined(USE_TUYA_LOW_POWER)
 
 #include "esphome/components/tuya/tuya_uart.h"
 #include "esphome/components/libretiny/gpio_arduino.h"
@@ -34,11 +34,16 @@ class XR806TuyaLowPowerHost final : public Component,
   XR806TuyaLowPowerHost(tuya::TuyaUART *tuya, uart::LibreTinyUARTComponent *uart) : tuya_(tuya), uart_(uart) {
     // Before Tuya::setup() runs, which already uses the host.
     tuya->set_low_power_host(this);
+#ifdef USE_XR806_STANDBY_CONTROLLER
+    // With a host, the MCU decides when the module may sleep: no standby until it is in sync.
+    lowpower_policy().require_external_mcu(true);
+#endif
   }
 
   void setup() override {
     // The MCU may still sleep after a module restart and answer CMD01 only after a pulse on its wake
-    // line, but that line is named in the product info. Use the one learned before (Tuya sets up later).
+    // line, but that line is named in the product info. Use the one learned before: this runs at
+    // setup_priority::DATA, before TuyaUART::setup() (LATE) reads mcu_wake_output().
     this->wake_pref_ = global_preferences->make_preference<WakeLinesPref>(fnv1_hash("tuya_mcu_wake_lines"));
     WakeLinesPref saved{};
     if (this->wake_pref_.load(&saved) && saved.mcu_wake >= 0) {
@@ -55,11 +60,6 @@ class XR806TuyaLowPowerHost final : public Component,
 #endif
   }
 
-  void require_external_mcu() override {
-#ifdef USE_XR806_STANDBY_CONTROLLER
-    lowpower_policy().require_external_mcu(true);
-#endif
-  }
   void set_mcu_synchronized(bool synchronized) override {
 #ifdef USE_XR806_STANDBY_CONTROLLER
     lowpower_policy().set_mcu_synchronized(synchronized);
@@ -182,4 +182,4 @@ class XR806TuyaLowPowerHost final : public Component,
 
 }  // namespace esphome::xr806
 
-#endif  // USE_TUYA_LOW_POWER
+#endif  // USE_XR806 && USE_TUYA_LOW_POWER

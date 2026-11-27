@@ -16,6 +16,8 @@ class TuyaLowPowerSession {
   };
   static constexpr std::array<uint8_t, 8> REFRESH_DPS = {1, 3, 4, 2, 17, 16, 19, 20};
   static constexpr uint32_t REPORT_TIMEOUT_MS = 12000;
+  // A report series the MCU starts on its own has no end marker: it is over after this long without a report.
+  static constexpr uint32_t QUIET_MS = 500;
 
   enum class WriteResult : uint8_t { NONE, CONFIRMED, TIMED_OUT };
 
@@ -27,6 +29,10 @@ class TuyaLowPowerSession {
   bool awaiting_ack() const { return write_pending_ && !write_acked_; }
   bool refresh_pending() const { return write_pending_ && write_refresh_; }
   WriteResult last_write_result() const { return last_result_; }
+  /// No report within QUIET_MS: a report series the MCU started on its own is over.
+  bool quiet(uint32_t now) const { return now - last_report_ms_ >= QUIET_MS; }
+  /// A datapoint report (CMD05 or CMD07) arrived.
+  void observe_report(uint32_t now) { last_report_ms_ = now; }
 
   // MCU or network epoch changed: all previous state is now suspect.
   void reset_status() {
@@ -173,6 +179,7 @@ class TuyaLowPowerSession {
   bool fault_{false};
   uint32_t status_mask_{0};
   uint32_t status_started_ms_{0};
+  uint32_t last_report_ms_{0};
   bool full_status_active_{false};
   uint32_t write_started_ms_{0};
   bool write_pending_{false};
