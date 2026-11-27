@@ -287,6 +287,15 @@ XR806_DIAG_FLASH inline void capture(Capture &c) {
   OS_ThreadResumeScheduler();
 }
 
+// One format for every memory line: the strings of this file are linked into RAM with the standby controller.
+XR806_DIAG_FLASH inline void print_words(const char *label, uint32_t address, const uint32_t *w) {
+  static const char *const TAG = "xr806.wlan_diag";
+  ESP_LOGE(TAG,
+           "%s %08" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
+           " %08" PRIX32 " %08" PRIX32,
+           label, address, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+}
+
 XR806_DIAG_FLASH inline void print_capture(Capture &c) {
   static const char *const TAG = "xr806.wlan_diag";
   ESP_LOGE(TAG,
@@ -310,10 +319,7 @@ XR806_DIAG_FLASH inline void print_capture(Capture &c) {
       for (uint32_t i = 0; i < region.words; i += 8, w += 8) {
         if ((w[0] | w[1] | w[2] | w[3] | w[4] | w[5] | w[6] | w[7]) == 0)
           continue;
-        ESP_LOGE(TAG,
-                 "%s %08" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
-                 " %08" PRIX32 " %08" PRIX32,
-                 region.label, region.start + 4 * i, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+        print_words(region.label, region.start + 4 * i, w);
         delay(3);
       }
     }
@@ -493,10 +499,7 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
         uint32_t w[8];
         if (wlan_read_words(SLEEP_RECORD + 4 * i, w, 8) != 0)
           break;
-        ESP_LOGE(TAG,
-                 "sleeprec-ok %08" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
-                 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32,
-                 SLEEP_RECORD + 4 * i, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+        print_words("sleeprec-ok", SLEEP_RECORD + 4 * i, w);
       }
     }
   }
