@@ -176,6 +176,13 @@ void TuyaUART::loop_low_power_() {
     this->status_set_warning(LOG_STR("MCU status timeout"));
     this->lp_network_status_ = 0xFF;
   }
+  // A version-3 MCU sends its full status as several CMD07 frames (firmware 1.0.9: three), so it is complete once
+  // they have been quiet for QUIET_MS
+  if (this->lp_v3_report_pending_ && this->lp_session_.quiet(App.get_loop_component_start_time())) {
+    this->lp_v3_report_pending_ = false;
+    if (!this->lp_session_.synchronized())
+      this->lp_session_.mark_synchronized();
+  }
   // The state counts as known only once the command that asked for it (CMD02) has its ACK too
   if (this->lp_session_.synchronized() && !this->lp_wire_.active())
     this->finish_low_power_sync_();
@@ -282,8 +289,12 @@ void TuyaUART::handle_low_power_frame_(uint8_t command, uint8_t version, const u
   // A matching reply delivered after its deadline but before the periodic
   // timeout sweep must not complete an expired transaction.
   if (this->lp_wire_.overdue(App.get_loop_component_start_time()) && this->lp_wire_.accepts(command, len)) {
-    ESP_LOGW(LP_TAG, "Discarding overdue MCU ACK CMD 0x%02X; recovery required", command);
-    return;
+    // A late CMD07 still carries valid values: it confirms nothing, but its datapoints are taken
+    if (!this->lp_wire_.abandon_report(App.get_loop_component_start_time())) {
+      ESP_LOGW(LP_TAG, "Discarding overdue MCU ACK CMD 0x%02X; recovery required", command);
+      return;
+    }
+    this->expected_response_.reset();
   }
   // A malformed report confirms no write or status query
   if (command == 0x07 && !valid_datapoints(buffer, len)) {
@@ -1175,7 +1186,15 @@ void TuyaUART::process_low_power_queue_() {
   // physical in-flight transaction. It can time out after a reset or an
   // asynchronous recovery callback has already cleared expected_response_.
   const bool product_in_flight = this->lp_wire_.kind() == TuyaLowPowerWireTransactions::Kind::PRODUCT;
-  if (this->lp_wire_.expire(now)) {
+  const bool unconfirmed_write = this->lp_wire_.command() == 0x06;
+  if (this->lp_wire_.abandon_report(now)) {
+    // No quarantine: MCU firmware 1.0.9 applies writes without a CMD07 report. Ask for the state instead.
+    this->expected_response_.reset();
+    if (unconfirmed_write) {
+      ESP_LOGD(LP_TAG, "MCU did not report after the write; asking for its state");
+      this->command_queue_.insert(this->command_queue_.begin(), TuyaCommand{.cmd = TuyaCommandType(0x08)});
+    }
+  } else if (this->lp_wire_.expire(now)) {
     const bool product_query = product_in_flight;
     this->expected_response_.reset();
     this->lp_session_.command_timeout();
@@ -1367,6 +1386,7 @@ void TuyaUART::handle_low_power_command_(uint8_t command, uint8_t version, const
         this->lp_session_.reset_status();
         this->lp_network_status_ = 0xFF;
         this->lp_v3_mode_acked_ = false;  // A restarted version-3 MCU needs the working-mode handshake again
+        this->lp_v3_report_pending_ = false;
         this->update_low_power_sleep_lock_();
         this->send_low_power_network_();
         this->send_empty_command_(static_cast<TuyaCommandType>(0x13));
@@ -1396,6 +1416,7 @@ void TuyaUART::handle_low_power_command_(uint8_t command, uint8_t version, const
       const bool had_product = this->lp_session_.has_product();
       this->lp_product_ = incoming;
       this->lp_v3_mode_acked_ = false;
+      this->lp_v3_report_pending_ = false;
       this->lp_v3_pushes_ = false;
       if (this->lp_v3_ != (version == 3)) {
         this->lp_v3_ = version == 3;
@@ -1473,8 +1494,7 @@ void TuyaUART::handle_low_power_command_(uint8_t command, uint8_t version, const
         // A version-3 MCU sends no boot heartbeat; a complete report proves the link works again.
         this->lp_standby_.recovered();
         if (!this->lp_session_.synchronized())
-          this->lp_session_.mark_synchronized();
-        this->finish_low_power_sync_();
+          this->lp_v3_report_pending_ = true;  // Synchronized in loop_low_power_() once the frames are quiet
       }
       this->update_low_power_sleep_lock_();
       return;
