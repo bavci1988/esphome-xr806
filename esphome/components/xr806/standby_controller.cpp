@@ -157,9 +157,10 @@ void XR806StandbyController::dump_config() {
   ESP_LOGCONFIG(TAG, "  Trigger: explicit application request only");
   ESP_LOGCONFIG(TAG, "  Timer: %u ms; quiet: %u ms; min awake: %u ms", static_cast<unsigned>(this->wake_after_ms_),
                 static_cast<unsigned>(this->quiet_ms_), static_cast<unsigned>(this->min_awake_ms_));
-  if (this->boot_hold_ms_ != 0)
+  if (this->boot_hold_ms_ != 0) {
     ESP_LOGCONFIG(TAG, "  No standby before %u s after boot (safe_mode boot check)",
                   static_cast<unsigned>(this->boot_hold_ms_ / 1000));
+  }
   ESP_LOGCONFIG(TAG, "  Network during standby: %s",
                 this->stay_connected_ ? LOG_STR_LITERAL("stays connected") : LOG_STR_LITERAL("parked"));
   ESP_LOGCONFIG(TAG, "  External sync: %s; required UART participant: %s",

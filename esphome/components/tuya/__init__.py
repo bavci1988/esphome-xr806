@@ -105,6 +105,14 @@ def _validate_time_options(config: ConfigType) -> ConfigType:
             "auto_baud is only supported with protocol: low_power",
             path=[CONF_AUTO_BAUD],
         )
+    # Switching the baud rate needs UARTComponent::load_settings()
+    if config[CONF_AUTO_BAUD] and not (
+        CORE.is_esp8266 or CORE.is_esp32 or CORE.is_xr806
+    ):
+        raise cv.Invalid(
+            "auto_baud is only supported on ESP8266, ESP32 and XR806",
+            path=[CONF_AUTO_BAUD],
+        )
     return config
 
 

@@ -18,6 +18,7 @@ int __wrap_vsprintf(char *buf, const char *format, va_list args);
 int __wrap_sprintf(char *buf, const char *format, ...);
 }
 
+namespace esphome::xr806 {
 namespace {
 
 // Format strings longer than this are passed through unchanged; none in the image comes close.
@@ -61,10 +62,11 @@ const char *strip_size_modifiers(const char *format, char (&out)[MAX_FORMAT_LEN]
 }
 
 }  // namespace
+}  // namespace esphome::xr806
 
 extern "C" int __wrap_vsnprintf(char *buf, size_t size, const char *format, va_list args) {
-  char fixed[MAX_FORMAT_LEN];
-  const char *use = format == nullptr ? nullptr : strip_size_modifiers(format, fixed);
+  char fixed[esphome::xr806::MAX_FORMAT_LEN];
+  const char *use = format == nullptr ? nullptr : esphome::xr806::strip_size_modifiers(format, fixed);
   return __real_vsnprintf(buf, size, use != nullptr ? use : format, args);
 }
 

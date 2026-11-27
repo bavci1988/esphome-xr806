@@ -374,6 +374,12 @@ $(XR806_OUTPUT): $(XR806_OBJDIR)/xr_network_status.o
 
 $(eval $(call XR806_COMPILE_CPP,xr_network_status,$(XR806_SRC)/esphome/components/xr806/network_status.cpp))
 
+# Bridge from a Tuya hub with protocol low_power to power management; empty without it.
+XR806_ESPHOME_OBJECTS += $(XR806_OBJDIR)/xr_tuya_low_power_host.o
+$(XR806_OUTPUT): $(XR806_OBJDIR)/xr_tuya_low_power_host.o
+
+$(eval $(call XR806_COMPILE_CPP,xr_tuya_low_power_host,$(XR806_SRC)/esphome/components/xr806/tuya_low_power_host.cpp))
+
 
 
 

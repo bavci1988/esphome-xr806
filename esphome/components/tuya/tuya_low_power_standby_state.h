@@ -4,104 +4,116 @@
 
 namespace esphome::tuya {
 
-// Pure MCU-protocol state. The platform never interprets CMD12/38 or
-// the HC32's 'sm' product field. All transitions are host-testable.
+// The version-0 sleep request (CMD38) and the version-3 sleep handshake (0x91)
+static constexpr uint8_t LP_V0_SLEEP_CMD = 0x38;
+static constexpr uint8_t LP_V3_SLEEP_CMD = 0x91;
+// No sleep for this long after a wake or a new network state: the MCU reports first
+static constexpr uint32_t LP_WAKE_GUARD_MS = 5000;
+
+/// The MCU's consent to a standby of the module, testable on the host without a platform.
+///
+/// Version 0 (sm=1): the MCU asks with CMD38, the module grants it (38 00 00), tells the MCU with CMD12/01 that it
+/// sleeps now and with CMD12/00 that it woke. Version 3 (sm=2): the module offers sleep with 0x91 and the MCU's
+/// answer is the whole handshake.
 class TuyaLowPowerStandbyState {
  public:
-  enum class ResumeAction : uint8_t { NONE, SEND_CMD12_WAKE, REQUIRE_RESYNC, KEEP_CONSENT };
+  enum class ResumeAction : uint8_t {
+    RESUME_ACTION_NONE,
+    RESUME_ACTION_SEND_WAKE,
+    RESUME_ACTION_REQUIRE_RESYNC,
+    RESUME_ACTION_KEEP_CONSENT,
+  };
 
-  bool accept_request(bool standby_mode, bool mcu_idle, bool uart_healthy, bool other_owners_idle) {
-    if (requested_ || notified_ || recovery_required_ || !standby_mode || !mcu_idle || !uart_healthy ||
-        !other_owners_idle)
+  /// The caller has checked that the MCU link and the platform are idle.
+  bool accept_request() {
+    if (this->requested_ || this->notified_ || this->recovery_required_)
       return false;
-    requested_ = true;
+    this->requested_ = true;
     return true;
   }
 
-  // Version-3 MCUs (sm=2) agree to sleep with 0x91: their answer is the whole handshake, and the
-  // MCU sleeps right after it, so the consent counts as notified and the module may enter PM at once.
-  bool accept_offer(bool mcu_idle, bool uart_healthy, bool other_owners_idle) {
-    if (!this->accept_request(true, mcu_idle, uart_healthy, other_owners_idle))
+  /// A version-3 MCU sleeps right after its answer, so its consent counts as notified.
+  bool accept_offer() {
+    if (!this->accept_request())
       return false;
-    notified_ = true;
+    this->notified_ = true;
     return true;
   }
 
-  // A version-3 MCU sends no boot heartbeat. A fresh status report after a resync ends the recovery.
-  void recovered() { recovery_required_ = false; }
+  /// A fresh full status ends a recovery.
+  void recovered() { this->recovery_required_ = false; }
 
-  bool requested() const { return requested_; }
-  bool notified() const { return notified_; }
-  bool recovery_required() const { return recovery_required_; }
-  bool needs_notification() const { return requested_ && !notified_; }
-  bool ready_for_pm() const { return requested_ && notified_ && !deferred_ && !recovery_required_; }
+  bool requested() const { return this->requested_; }
+  bool recovery_required() const { return this->recovery_required_; }
+  bool needs_notification() const { return this->requested_ && !this->notified_; }
+  bool ready_for_pm() const {
+    return this->requested_ && this->notified_ && !this->deferred_ && !this->recovery_required_;
+  }
 
-  // The CMD12/01 frame is sent, fully drained, and the current preparation
-  // deliberately returns false so UART/scheduler idle must stabilize again.
+  /// CMD12/01 was sent. The standby attempt that sent it is declined on purpose, so the UART can drain first.
   void notification_sent() {
-    notified_ = true;
-    deferred_ = true;
+    this->notified_ = true;
+    this->deferred_ = true;
   }
 
-  // Called when an attempt is declined by the platform. The *first* decline
-  // after CMD12/01 is intentional. Any later veto must compensate CMD12/00.
+  /// The platform declined a standby attempt. The first decline after CMD12/01 is the intended one; true when a
+  /// later one needs CMD12/00 to tell the MCU that the module stays awake.
   bool cancelled() {
-    if (deferred_) {
-      deferred_ = false;
+    if (this->deferred_) {
+      this->deferred_ = false;
       return false;
     }
     return this->force_cancel();
   }
 
-  // Returns true if a compensating CMD12/00 is necessary. For a failed PM
-  // request this is an abort notification, not a GPIO wake notification.
+  /// Ends the consent; true when CMD12/00 must tell the MCU that the module stays awake.
   bool force_cancel() {
-    const bool compensate = notified_;
-    requested_ = false;
-    notified_ = false;
-    deferred_ = false;
+    const bool compensate = this->notified_;
+    this->requested_ = false;
+    this->notified_ = false;
+    this->deferred_ = false;
     return compensate;
   }
 
-  // keep_consent: the module itself woke (timer or received network data) while the MCU
-  // still sleeps. The MCU's consent and the sent CMD12/01 stay valid, so the module may sleep
-  // again without a new CMD38; any MCU traffic or a write ends the consent as before.
+  /// Only an expected wake by the MCU's own wake line proves the path where the MCU expects CMD12/00. Any other
+  /// wake after CMD12/01 leaves the MCU's state unknown until a full status.
+  /// keep_consent: the network stays connected during standby and the module woke on its own (timer or network
+  /// data) while the MCU still sleeps; the consent and the sent CMD12/01 stay valid, so the module may sleep again
+  /// without a new request.
   ResumeAction resumed(bool expected_wake, bool gpio_wake, bool keep_consent = false) {
-    if (notified_ && expected_wake && !gpio_wake && keep_consent && !recovery_required_) {
-      deferred_ = false;
-      return ResumeAction::KEEP_CONSENT;
+    if (keep_consent && this->notified_ && expected_wake && !gpio_wake && !this->recovery_required_) {
+      this->deferred_ = false;
+      return ResumeAction::RESUME_ACTION_KEEP_CONSENT;
     }
-    const bool had_notification = notified_;
-    requested_ = false;
-    notified_ = false;
-    deferred_ = false;
+    const bool had_notification = this->notified_;
+    this->requested_ = false;
+    this->notified_ = false;
+    this->deferred_ = false;
     if (!had_notification)
-      return ResumeAction::NONE;
+      return ResumeAction::RESUME_ACTION_NONE;
     if (expected_wake && gpio_wake)
-      return ResumeAction::SEND_CMD12_WAKE;
-    // Timer-only, unknown/aborted PM or an unexpected source does not prove
-    // the original WXU's conditional CMD12/00 GPIO-wake path occurred.
-    recovery_required_ = true;
-    return ResumeAction::REQUIRE_RESYNC;
+      return ResumeAction::RESUME_ACTION_SEND_WAKE;
+    this->recovery_required_ = true;
+    return ResumeAction::RESUME_ACTION_REQUIRE_RESYNC;
   }
 
+  /// A frame may not have left the UART: no consent until a full status.
   void transport_fault() {
-    recovery_required_ = true;
-    requested_ = false;
-    notified_ = false;
-    deferred_ = false;
+    this->recovery_required_ = true;
+    this->requested_ = false;
+    this->notified_ = false;
+    this->deferred_ = false;
   }
 
-  // An observed MCU reset invalidates the old sleep transaction. Higher
-  // layers must still re-run CMD01 and the full datapoint state sequence.
+  /// A restarted MCU ends the old handshake.
   void reset_on_mcu_boot() {
-    requested_ = false;
-    notified_ = false;
-    deferred_ = false;
-    recovery_required_ = false;
+    this->requested_ = false;
+    this->notified_ = false;
+    this->deferred_ = false;
+    this->recovery_required_ = false;
   }
 
- private:
+ protected:
   bool requested_{false};
   bool notified_{false};
   bool deferred_{false};

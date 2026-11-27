@@ -71,10 +71,31 @@ TEST(TuyaLowPowerWireTransactions, VersionThreeAnswers) {
   ASSERT_TRUE(t.begin(0x08, 250));
   EXPECT_FALSE(t.begin(0x06, 260));
   EXPECT_TRUE(t.complete(0x07, 5));
-  // An unanswered CMD06 times out like any other command.
+  // An unanswered CMD06 or CMD08 is dropped without quarantine: a report carries its own values.
   ASSERT_TRUE(t.begin(0x06, 300));
-  EXPECT_TRUE(t.expire(300 + State::ACK_TIMEOUT_MS));
+  EXPECT_EQ(t.command(), 0x06);
+  EXPECT_FALSE(t.abandon_report(300 + State::ACK_TIMEOUT_MS - 1));
+  EXPECT_TRUE(t.abandon_report(300 + State::ACK_TIMEOUT_MS));
+  EXPECT_TRUE(t.idle());
+  // Other commands still fault, and only they
+  ASSERT_TRUE(t.begin(0x09, 2000));
+  EXPECT_FALSE(t.abandon_report(2000 + State::ACK_TIMEOUT_MS));
+  EXPECT_TRUE(t.expire(2000 + State::ACK_TIMEOUT_MS));
   EXPECT_TRUE(t.faulted());
+}
+
+TEST(TuyaLowPowerWireTransactions, AbandonNetwork) {
+  TuyaLowPowerWireTransactions t;
+  EXPECT_FALSE(t.abandon_network());  // Nothing waits
+  ASSERT_TRUE(t.begin(0x09, 0));
+  EXPECT_FALSE(t.abandon_network());  // A write is no network state: its answer stays awaited
+  EXPECT_TRUE(t.complete(0x09, 0));
+  // A version-0 MCU that fell asleep before its CMD02 answer: the command is sent again, without a fault
+  ASSERT_TRUE(t.begin(0x02, 100));
+  EXPECT_TRUE(t.abandon_network());
+  EXPECT_TRUE(t.idle());
+  EXPECT_FALSE(t.complete(0x02, 0));  // A late answer completes nothing
+  EXPECT_TRUE(t.begin(0x02, 200));
 }
 
 }  // namespace esphome::tuya::testing

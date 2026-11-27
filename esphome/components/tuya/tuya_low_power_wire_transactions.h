@@ -31,6 +31,7 @@ class TuyaLowPowerWireTransactions {
       return false;  // Direct replies/notifications must not claim a queue slot.
     }
     active_ = true;
+    command_ = command;
     started_ms_ = now;
     ++generation_;
     return true;
@@ -77,6 +78,16 @@ class TuyaLowPowerWireTransactions {
     return true;
   }
 
+  /// A version-3 write or status query without a CMD07 report in time. MCU firmware 1.0.9 applies writes without
+  /// reporting them, and a late report carries its own values, so nothing is ambiguous: no quarantine.
+  bool abandon_report(uint32_t now) {
+    if (!this->overdue(now) || kind_ != Kind::REPORT)
+      return false;
+    active_ = false;
+    kind_ = Kind::NONE;
+    ++generation_;
+    return true;
+  }
   /// The waiting network-state command was not answered and will be sent again; it changes nothing on the MCU.
   bool abandon_network() {
     if (!active_ || kind_ != Kind::NETWORK)
@@ -106,12 +117,15 @@ class TuyaLowPowerWireTransactions {
   bool faulted() const { return faulted_; }
   bool idle() const { return !active_ && !faulted_; }
   Kind kind() const { return kind_; }
+  /// The waiting command, valid while active().
+  uint8_t command() const { return command_; }
   uint32_t generation() const { return generation_; }
 
  private:
   Kind kind_{Kind::NONE};
   uint32_t started_ms_{0};
   uint32_t generation_{0};
+  uint8_t command_{0};
   bool active_{false};
   bool faulted_{false};
 };

@@ -48,8 +48,8 @@
 #define ESPHOME_LOGGER_BOOT_LOG_LEVEL ESPHOME_LOG_LEVEL_WARN
 #define ESPHOME_LOGGER_BOOT_LOG_MAX_LEVEL ESPHOME_LOG_LEVEL_WARN
 
-// CANopenNode configuration: canopen sets these as build flags, not as USE_* defines
-#define CO_CONFIG_SDO_CLI 0x03
+// CANopenNode configuration: canopen sets these as build flags (enable_*()), not as USE_* defines
+#define CO_CONFIG_SDO_CLI 0x0B
 #define CO_CONFIG_FIFO 0x01
 #define CO_CONFIG_SDO_CLI_BUFFER_SIZE 7
 
@@ -77,6 +77,8 @@
 #define USE_CANBUS_FD
 #define USE_CANOPEN_EMCY
 #define USE_CANOPEN_HEARTBEAT
+#define USE_CANOPEN_NODE
+#define USE_CANOPEN_SDO_CLIENT
 #define USE_CC1101_LONG_PACKET
 #define USE_CLIMATE
 #define USE_CLIMATE_VISUAL_OVERRIDES
@@ -412,7 +414,6 @@
 #define USE_TOSHIBA_RAS_25J2KVSG_ND
 #define USE_TOUCHSCREEN
 #define USE_TUYA_DUMP_PUBLISHER
-#define USE_TUYA_LOW_POWER
 #define USE_UART_DEBUGGER
 #define USE_UART_HARDWARE
 #define USE_UART_TX_BREAK
@@ -517,6 +518,8 @@
 #define USE_WIFI_WPA2_EAP
 // Kept in the Arduino block so clang-tidy sees both scan storage paths
 #define USE_WIFI_MULTI_SSID
+// Likewise, so clang-tidy sees both the standard and the low_power Tuya protocol
+#define USE_TUYA_LOW_POWER
 #endif
 
 // Platforms with native 64-bit time sources (no rollover tracking needed)
@@ -635,6 +638,9 @@
 #define USE_I2C
 #define USE_IMPROV_BLE
 #define USE_MICROPHONE
+#define USE_MIPI_CSI_EXTERNAL_LDO
+#define USE_MIPI_CSI_IMAGE_CALLBACK
+#define USE_MIPI_CSI_STREAM_CALLBACK
 #define USE_PSRAM
 #define USE_SENDSPIN
 #define USE_SENDSPIN_ARTWORK
@@ -887,6 +893,7 @@
 #define USE_WEBSERVER_LOCAL
 #define USE_WEBSERVER_OTA
 #define USE_WEBSERVER_OTA_DISABLED
+#define WEB_SERVER_DEFAULT_HEADERS_COUNT 1
 #endif
 
 // USE_RP2 is the canonical platform define for the RP2 chip family. The
@@ -926,6 +933,7 @@
 #define USE_ETHERNET_IP_STATE_LISTENERS
 #define ESPHOME_ETHERNET_IP_STATE_LISTENERS 2
 #define ESPHOME_ETHERNET_CONNECT_STATE_LISTENERS 2
+#define WEB_SERVER_DEFAULT_HEADERS_COUNT 1
 #endif
 
 #ifdef USE_LIBRETINY
@@ -966,6 +974,7 @@
 #define USE_WEBSERVER_AUTH_DIGEST
 #define USE_WEBSERVER_CAPTIVE
 #define USE_WEBSERVER_PORT 80  // NOLINT
+#define WEB_SERVER_DEFAULT_HEADERS_COUNT 1
 #define USE_ESPHOME_TASK_LOG_BUFFER
 #define ESPHOME_TASK_LOG_BUFFER_SIZE 768
 #endif

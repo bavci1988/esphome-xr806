@@ -35,7 +35,7 @@ TEST(TuyaLowPowerAutoBaud, LocksOnlyOnProductInfo) {
   scan.probe_sent(0);
   auto report = make_frame(0x05, "x");
   EXPECT_FALSE(scan.accept_frame(report.data(), report.size(), 50));
-  auto product = make_frame(0x01, "{\"p\":\"x\"}");
+  auto product = make_frame(0x01, R"({"p":"x"})");
   product.back() ^= 0xFF;  // Bad checksum.
   EXPECT_FALSE(scan.accept_frame(product.data(), product.size(), 60));
   product.back() ^= 0xFF;
@@ -61,7 +61,7 @@ TEST(TuyaLowPowerAutoBaud, OtherValidFrameKeepsRateAndProbesAgain) {
   EXPECT_EQ(scan.baud(), 115200u);
   scan.probe_sent(900);
 
-  auto product = make_frame(0x01, "{\"p\":\"x\"}");
+  auto product = make_frame(0x01, R"({"p":"x"})");
   EXPECT_TRUE(scan.accept_frame(product.data(), product.size(), 950));
   EXPECT_EQ(scan.baud(), 115200u);
 }
