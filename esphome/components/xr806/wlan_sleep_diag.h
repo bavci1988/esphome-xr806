@@ -187,9 +187,11 @@ struct Region {
   uint32_t start;
   uint32_t words;
 };
+static constexpr uint32_t SLEEP_RECORD = 0x0900BEA8;
+static constexpr uint32_t SLEEP_RECORD_WORDS = 24;
 static constexpr Region REGIONS[] = {
-    {"sched", 0xFFF01C00, 40}, {"clock", 0xFFF05600, 16},     {"hostq", 0xFFF02AA0, 16},
-    {"rxcnt", 0xFFF02280, 32}, {"keepalive", 0x0900BB8C, 24}, {"sleeprec", 0x0900BEA8, 24},
+    {"sched", 0xFFF01C00, 40},   {"clock", 0xFFF05600, 16},     {"hostq", 0xFFF02AA0, 16},
+    {"rxcnt", 0xFFF02280, 32},   {"keepalive", 0x0900BB8C, 24}, {"sleeprec", SLEEP_RECORD, SLEEP_RECORD_WORDS},
     {"stack", 0xFFF0B000, 1024},
 };
 static constexpr uint32_t MEMORY_WORDS = 40 + 16 + 16 + 32 + 24 + 24 + 1024;
@@ -485,6 +487,16 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
         if (ok)
           print_wlan_side("ok", side);
         free(side);
+      }
+      // The sleep module's record of the core's last sleep, for the lead time and the waits of a good cycle.
+      for (uint32_t i = 0; i < SLEEP_RECORD_WORDS; i += 8) {
+        uint32_t w[8];
+        if (wlan_read_words(SLEEP_RECORD + 4 * i, w, 8) != 0)
+          break;
+        ESP_LOGE(TAG,
+                 "sleeprec-ok %08" PRIX32 ": %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32
+                 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32,
+                 SLEEP_RECORD + 4 * i, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
       }
     }
   }

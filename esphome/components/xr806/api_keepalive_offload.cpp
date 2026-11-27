@@ -112,6 +112,13 @@ static constexpr uint32_t PEER_PING_LIMIT_MS = 17000;
 static constexpr uint32_t PEER_IDLE_PING_MS = 20000;
 // The WLAN driver refused to suspend right after the host sent the held frames; wait this long after such a burst.
 static constexpr uint32_t SETTLE_MS = 2000;
+// The WLAN core's reasons to stay awake (ROM); this bit is set while its 802.11 power save has not reached doze.
+static constexpr uint32_t WLAN_AWAKE_WORD = 0xFFF01C10;
+static constexpr uint32_t WLAN_AWAKE_POWER_SAVE = 1U << 18;
+static constexpr uint32_t DOZE_POLL_MS = 50;
+static constexpr uint32_t DOZE_WAIT_MS = 500;
+// How long a "may sleep" answer holds, so that the quiet time before standby does not ask the core again.
+static constexpr uint32_t DOZE_VALID_MS = 2000;
 // lwIP holds the small ping back (Nagle) until the frames sent before it are acknowledged.
 static constexpr uint32_t PEER_ANSWER_WAIT_MS = 1000;
 
@@ -363,7 +370,7 @@ bool XR806APIKeepaliveOffload::ready_for_standby() {
   if (client == nullptr)
     return true;
   if (now - last_write_ms + this->period_s_ * 1000U <= PEER_PING_LIMIT_MS)
-    return true;
+    return this->wlan_dozing_(now);
   // Home Assistant would ping before the first firmware frame; restart its timer and try again shortly.
   ESP_LOGD(TAG, "Standby waits: %" PRIu32 " ms since the last write, sending a ping response first",
            now - last_write_ms);
@@ -371,6 +378,30 @@ bool XR806APIKeepaliveOffload::ready_for_standby() {
     return true;
   this->burst_ms_ = now;
   return false;
+}
+
+bool XR806APIKeepaliveOffload::wlan_dozing_(uint32_t now) {
+  if (now - this->doze_ok_ms_ < DOZE_VALID_MS)
+    return true;
+  if (now - this->doze_poll_ms_ < DOZE_POLL_MS)
+    return false;
+  this->doze_poll_ms_ = now;
+  uint32_t awake = 0;
+  // A failed read must not hold standby back.
+  if (!wlan_driver_failed() && wlan_read_words(WLAN_AWAKE_WORD, &awake, 1) == 0 &&
+      (awake & WLAN_AWAKE_POWER_SAVE) != 0) {
+    if (this->doze_wait_ms_ == 0)
+      this->doze_wait_ms_ = now | 1;  // 0 means "not waiting"
+    if (now - this->doze_wait_ms_ < DOZE_WAIT_MS)
+      return false;
+    ESP_LOGD(TAG, "WLAN core still awake after %" PRIu32 " ms (%08" PRIX32 "); standby goes ahead", DOZE_WAIT_MS,
+             awake);
+  } else if (this->doze_wait_ms_ != 0) {
+    ESP_LOGD(TAG, "Standby waited %" PRIu32 " ms for the WLAN core's power save", now - this->doze_wait_ms_);
+  }
+  this->doze_wait_ms_ = 0;
+  this->doze_ok_ms_ = now;
+  return true;
 }
 
 void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
