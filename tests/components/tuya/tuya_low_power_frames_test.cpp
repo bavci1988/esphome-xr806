@@ -44,6 +44,19 @@ std::vector<uint8_t> encode(const Frame &f) {
 
 std::vector<uint8_t> bytes(const std::string &s) { return {s.begin(), s.end()}; }
 
+// A version-0 full status: one report with every datapoint the session waits for, each acknowledged on its own.
+// The sleep window (DP102) and the heating program (DP107) are raw values of a fixed size.
+std::vector<uint8_t> full_status() {
+  std::vector<uint8_t> payload;
+  for (uint8_t id : TuyaLowPowerSession::FULL_STATUS_DPS) {
+    const uint8_t size = id == 102 ? 4 : id == 107 ? 32 : 1;
+    payload.insert(payload.end(), {id, static_cast<uint8_t>(size == 1 ? 0x01 : 0x00), 0x00, size});
+    payload.insert(payload.end(), size, 0x00);
+  }
+  return payload;
+}
+constexpr size_t FULL_STATUS_ACKS = TuyaLowPowerSession::FULL_STATUS_DPS.size();
+
 // Each frame as its command followed by its payload
 using Frames = std::vector<std::vector<uint8_t>>;
 
@@ -125,6 +138,15 @@ class TuyaLowPowerFrames : public ::testing::Test {
     EXPECT_EQ(sent[0].command, 0x01);
     this->receive_(100, {version, 0x01, bytes(product)});
     this->step_(110);
+  }
+
+  // A version-0 MCU with the sleep mode of the TRV16 (sm=1): network state, its ACK and the full status
+  void sync_version_zero_(const std::string &product) {
+    this->handshake_(0, product);
+    this->receive_(200, {0x00, 0x02, {}});
+    this->receive_(300, {0x00, 0x05, full_status()});
+    ASSERT_EQ(this->ready_count_, 1);
+    this->uart_.sent();
   }
 
   // A version-3 MCU: working mode, then the full status that its CMD08 asks for
@@ -243,11 +265,11 @@ class TuyaLowPowerSleep : public TuyaLowPowerFrames {
 
 TEST_F(TuyaLowPowerFrames, VersionZeroRecoversAfterAckTimeout) {
   this->handshake_(0);
-  // The host build is online but has no API client, so the module reports 0x03 (router, not cloud)
+  // The host build is online, so the module reports "connected to the cloud"
   auto sent = this->uart_.sent();
   ASSERT_EQ(sent.size(), 1u);
   EXPECT_EQ(sent[0].command, 0x02);
-  EXPECT_EQ(sent[0].payload, std::vector<uint8_t>{0x03});
+  EXPECT_EQ(sent[0].payload, std::vector<uint8_t>{0x04});
 
   // No ACK: after the timeout the module asks for the product info directly, 500 ms later
   this->step_(110 + 1500);
@@ -265,9 +287,14 @@ TEST_F(TuyaLowPowerFrames, VersionZeroRecoversAfterAckTimeout) {
   EXPECT_EQ(sent[0].command, 0x02);
   this->receive_(2300, {0x00, 0x02, {}});
   EXPECT_TRUE(this->uart_.sent().empty());
-  // Without status 0x04 the MCU does not send its full status, so the module does not become ready
-  this->step_(4000);
+
+  // The full status follows as CMD05 reports; the MCU is ready once every datapoint of it is in
+  this->receive_(2400, {0x00, 0x05, {0x01, 0x01, 0x00, 0x01, 0x01}});
+  EXPECT_EQ(this->uart_.sent().size(), 1u);  // its ACK
   EXPECT_EQ(this->ready_count_, 0);
+  this->receive_(2500, {0x00, 0x05, full_status()});
+  EXPECT_EQ(this->uart_.sent().size(), FULL_STATUS_ACKS);
+  EXPECT_EQ(this->ready_count_, 1);
 }
 
 TEST_F(TuyaLowPowerFrames, VersionZeroAcksOnlyValidReports) {
@@ -400,11 +427,8 @@ TEST_F(TuyaLowPowerFrames, VersionThreeStatusInSeveralFramesIsCompleteWhenQuiet)
   EXPECT_EQ(this->ready_count_, 1);
 }
 
-// The version-0 tests below stop before the full status: it needs CMD02 0x04, which this build without an API
-// client never sends, so the module stays unsynchronized and every grant is refused.
 TEST_F(TuyaLowPowerFrames, SleepRequestsWithoutHostAreBusy) {
-  this->handshake_(0, V0_SLEEP_PRODUCT);
-  this->sent_();
+  this->sync_version_zero_(V0_SLEEP_PRODUCT);
   this->receive_(6000, {0x00, 0x38, {0x00}});
   EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x01}}));
   // No later grant either
@@ -422,13 +446,133 @@ TEST_F(TuyaLowPowerFrames, VersionThreeSleepRequestsWithoutHostAreBusy) {
 
 TEST_F(TuyaLowPowerFrames, VersionZeroCrossedNetworkStateIsSentAgain) {
   this->handshake_(0);
-  EXPECT_EQ(this->sent_(), (Frames{{0x02, 0x03}}));
+  EXPECT_EQ(this->sent_(), (Frames{{0x02, 0x04}}));
   // The MCU asks to sleep instead of answering CMD02 and sleeps: no ACK timeout, no product query
   this->receive_(200, {0x00, 0x38, {0x00}});
   EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x01}}));
   this->step_(2500);
   EXPECT_TRUE(this->sent_().empty());
-  EXPECT_EQ(this->network_interval_(2600), (Frames{{0x02, 0x03}}));
+  EXPECT_EQ(this->network_interval_(2600), (Frames{{0x02, 0x04}}));
+}
+
+TEST_F(TuyaLowPowerSleep, VersionZeroGrantNotifyAndWake) {
+  this->sync_version_zero_(V0_SLEEP_PRODUCT);
+  EXPECT_FALSE(this->host_.synchronized);  // Wake guard after the network state
+  // Within the wake guard: busy, and granted later without a new request
+  this->receive_(1000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x01}}));
+  this->step_(5099);
+  EXPECT_TRUE(this->sent_().empty());
+  this->step_(5100);
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x00}}));
+  EXPECT_TRUE(this->host_.standby);
+  EXPECT_TRUE(this->host_.synchronized);
+
+  // The first standby attempt sends CMD12/01 and is declined; the next one may enter standby
+  EXPECT_FALSE(this->tuya_.low_power_prepare_for_standby());
+  EXPECT_EQ(this->sent_(), (Frames{{0x12, 0x01}}));
+  this->tuya_.low_power_standby_cancelled();
+  EXPECT_TRUE(this->sent_().empty());
+  EXPECT_TRUE(this->host_.standby);
+  EXPECT_TRUE(this->tuya_.low_power_prepare_for_standby());
+
+  // Woken by the MCU's wake line: CMD12/00, then a new wake guard
+  this->tuya_.low_power_standby_resumed(true, true);
+  EXPECT_EQ(this->sent_(), (Frames{{0x12, 0x00}}));
+  this->host_.standby = false;
+  this->receive_(6000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x01}}));
+  // The network was parked: the MCU gets the network state again
+  EXPECT_EQ(this->network_interval_(6100), (Frames{{0x02, 0x04}}));
+}
+
+TEST_F(TuyaLowPowerSleep, VersionZeroWakeWithTheNetworkKeptSendsNoNetworkState) {
+  this->host_.keeps_network = true;
+  this->sync_version_zero_(V0_SLEEP_PRODUCT);
+  this->receive_(6000, {0x00, 0x38, {0x00}});
+  EXPECT_FALSE(this->tuya_.low_power_prepare_for_standby());
+  this->tuya_.low_power_standby_cancelled();
+  EXPECT_TRUE(this->tuya_.low_power_prepare_for_standby());
+  this->sent_();
+  this->tuya_.low_power_standby_resumed(true, true);
+  EXPECT_EQ(this->sent_(), (Frames{{0x12, 0x00}}));
+  this->host_.standby = false;
+  EXPECT_TRUE(this->network_interval_(6100).empty());
+}
+
+TEST_F(TuyaLowPowerSleep, VersionZeroMcuTrafficEndsTheConsent) {
+  this->sync_version_zero_(V0_SLEEP_PRODUCT);
+  this->receive_(6000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x00}}));
+  // Before CMD12/01 a report only ends the consent
+  this->receive_(6100, {0x00, 0x05, {0x01, 0x01, 0x00, 0x01, 0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x05, 0x00, 0x01}}));
+  EXPECT_FALSE(this->host_.standby);
+  EXPECT_FALSE(this->tuya_.low_power_prepare_for_standby());
+
+  // After CMD12/01 the MCU is told that the module stays awake
+  this->receive_(7000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x00}}));
+  EXPECT_FALSE(this->tuya_.low_power_prepare_for_standby());
+  EXPECT_EQ(this->sent_(), (Frames{{0x12, 0x01}}));
+  this->receive_(7100, {0x00, 0x05, {0x01, 0x01, 0x00, 0x01, 0x01}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x12, 0x00}, {0x05, 0x00, 0x01}}));
+  EXPECT_FALSE(this->host_.standby);
+
+  // A write from the network ends it too
+  this->receive_(13000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x00}}));
+  this->tuya_.set_boolean_datapoint_value(1, false);
+  this->step_(13010);
+  EXPECT_FALSE(this->host_.standby);
+  EXPECT_FALSE(this->host_.synchronized);
+}
+
+TEST_F(TuyaLowPowerSleep, VersionZeroGrantWaitsForTheNetworkServices) {
+  this->host_.quiesced = false;
+  this->sync_version_zero_(V0_SLEEP_PRODUCT);
+  this->receive_(6000, {0x00, 0x38, {0x00}});
+  EXPECT_TRUE(this->sent_().empty());
+  EXPECT_TRUE(this->host_.preflight);
+  this->host_.quiesced = true;
+  this->step_(6100);
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x00}}));
+  EXPECT_FALSE(this->host_.preflight);
+  EXPECT_TRUE(this->host_.standby);
+
+  // Services that do not stop in time: busy
+  this->receive_(6200, {0x00, 0x05, {0x01, 0x01, 0x00, 0x01, 0x00}});
+  this->sent_();
+  this->host_.quiesced = false;
+  this->receive_(7000, {0x00, 0x38, {0x00}});
+  EXPECT_TRUE(this->sent_().empty());
+  this->step_(8799);
+  EXPECT_TRUE(this->sent_().empty());
+  this->step_(8800);
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x01}}));
+  EXPECT_FALSE(this->host_.preflight);
+  EXPECT_FALSE(this->host_.standby);
+}
+
+TEST_F(TuyaLowPowerSleep, VersionZeroUnexpectedWakeReadsTheStateAgain) {
+  this->sync_version_zero_(V0_SLEEP_PRODUCT);
+  this->receive_(6000, {0x00, 0x38, {0x00}});
+  EXPECT_FALSE(this->tuya_.low_power_prepare_for_standby());
+  this->tuya_.low_power_standby_cancelled();
+  EXPECT_TRUE(this->tuya_.low_power_prepare_for_standby());
+  this->sent_();
+  // A timer or another source woke the module: no CMD12/00, no sleep until the full status is in again
+  this->tuya_.low_power_standby_resumed(false, true);
+  EXPECT_TRUE(this->sent_().empty());
+  this->host_.standby = false;
+  this->receive_(12000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x01}}));
+  EXPECT_EQ(this->network_interval_(12100), (Frames{{0x02, 0x04}}));
+  this->receive_(12200, {0x00, 0x02, {}});
+  this->receive_(12300, {0x00, 0x05, full_status()});
+  EXPECT_EQ(this->sent_().size(), FULL_STATUS_ACKS);
+  this->receive_(18000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x00}}));
 }
 
 TEST_F(TuyaLowPowerSleep, VersionZeroWakesTheMcuForEachCommand) {
@@ -438,7 +582,7 @@ TEST_F(TuyaLowPowerSleep, VersionZeroWakesTheMcuForEachCommand) {
   // The wake line comes with the product info. The MCU may sleep right after its answer, so CMD02 needs a pulse
   EXPECT_TRUE(pin.level);
   EXPECT_TRUE(this->sent_().empty());
-  EXPECT_EQ(this->wait_for_frames_(120), (Frames{{0x02, 0x03}}));
+  EXPECT_EQ(this->wait_for_frames_(120), (Frames{{0x02, 0x04}}));
   EXPECT_FALSE(pin.level);
   EXPECT_EQ(pin.pulses, 1);
   // The MCU answered that pulse; a restart heartbeat right after it queues CMD02 again, which needs a new pulse
@@ -446,7 +590,7 @@ TEST_F(TuyaLowPowerSleep, VersionZeroWakesTheMcuForEachCommand) {
   this->receive_(300, {0x00, 0x00, {0x00}});
   EXPECT_TRUE(pin.level);
   EXPECT_TRUE(this->sent_().empty());
-  EXPECT_EQ(this->wait_for_frames_(310), (Frames{{0x02, 0x03}}));
+  EXPECT_EQ(this->wait_for_frames_(310), (Frames{{0x02, 0x04}}));
   EXPECT_EQ(pin.pulses, 2);
 }
 
@@ -551,6 +695,18 @@ TEST_F(TuyaLowPowerSleep, VersionThreeUnexpectedWakeReadsTheStateAgain) {
   EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x00}}));
 }
 
+TEST_F(TuyaLowPowerSleep, VersionZeroLaterDeclineTellsTheMcu) {
+  this->sync_version_zero_(V0_SLEEP_PRODUCT);
+  this->receive_(6000, {0x00, 0x38, {0x00}});
+  EXPECT_FALSE(this->tuya_.low_power_prepare_for_standby());
+  this->tuya_.low_power_standby_cancelled();
+  this->sent_();
+  // The platform declines again after the intended first decline: the MCU learns that the module stays awake
+  this->tuya_.low_power_standby_cancelled();
+  EXPECT_EQ(this->sent_(), (Frames{{0x12, 0x00}}));
+  EXPECT_FALSE(this->host_.standby);
+}
+
 TEST_F(TuyaLowPowerSleep, VersionThreeConsentWhileBlockedWakesTheMcu) {
   this->sync_version_three_(V3_SLEEP_PRODUCT);
   this->step_(5300);
@@ -587,6 +743,17 @@ TEST_F(TuyaLowPowerSleep, FlushFailureBlocksSleep) {
   this->receive_(7000, {0x03, 0x91, {0x02}});
   EXPECT_EQ(this->sent_(), (Frames{{0x91, 0x02, 0x00}}));
   EXPECT_TRUE(this->host_.standby);
+}
+
+TEST_F(TuyaLowPowerSleep, VersionZeroFlushFailureBlocksSleep) {
+  this->sync_version_zero_(V0_SLEEP_PRODUCT);
+  this->uart_.flush_result = uart::UARTFlushResult::UART_FLUSH_RESULT_TIMEOUT;
+  this->receive_(6000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x00}}));
+  EXPECT_FALSE(this->host_.standby);  // The grant may not have left the UART
+  this->uart_.flush_result = uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
+  this->receive_(12000, {0x00, 0x38, {0x00}});
+  EXPECT_EQ(this->sent_(), (Frames{{0x38, 0x00, 0x01}}));
 }
 
 TEST_F(TuyaLowPowerSleep, AssumedFlushCountsAsSent) {

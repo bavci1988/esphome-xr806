@@ -408,6 +408,9 @@ void TuyaUART::low_power_standby_resumed(bool expected_source, bool wake_gpio, b
     return;
   }
   this->lp_wake_guard_ms_ = App.get_loop_component_start_time();
+  // The HC32 expects CMD02 after its own wake; a parked network may come back without a state change
+  if (!this->lp_v3_ && !keep)
+    this->lp_network_status_ = 0xFF;
   if (action == TuyaLowPowerStandbyState::ResumeAction::RESUME_ACTION_SEND_WAKE) {
     this->send_low_power_awake_notification_();
   } else if (action == TuyaLowPowerStandbyState::ResumeAction::RESUME_ACTION_REQUIRE_RESYNC) {
