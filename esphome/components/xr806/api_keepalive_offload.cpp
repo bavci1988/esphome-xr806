@@ -22,6 +22,7 @@ extern "C" {
 #include "lwip/sockets.h"
 #include "lwip/netif.h"
 #include "kernel/os/os_thread.h"
+#include "kernel/os/os_timer.h"
 #include "driver/chip/hal_wakeup.h"
 }
 
@@ -112,13 +113,13 @@ static constexpr uint32_t PEER_PING_LIMIT_MS = 17000;
 static constexpr uint32_t PEER_IDLE_PING_MS = 20000;
 // The WLAN driver refused to suspend right after the host sent the held frames; wait this long after such a burst.
 static constexpr uint32_t SETTLE_MS = 2000;
-// The WLAN core's reasons to stay awake (ROM); this bit is set while its 802.11 power save has not reached doze.
-static constexpr uint32_t WLAN_AWAKE_WORD = 0xFFF01C10;
-static constexpr uint32_t WLAN_AWAKE_POWER_SAVE = 1U << 18;
-static constexpr uint32_t DOZE_POLL_MS = 50;
-static constexpr uint8_t DOZE_WAIT_POLLS = 10;  // half a second
-// A "may sleep" answer, or a wait, belongs to an earlier standby attempt when nothing asked for this long.
-static constexpr uint32_t DOZE_VALID_MS = 2000;
+// The driver refuses to suspend (xr_wlan_suspend, without naming a reason) while its stay-awake timer runs. The
+// firmware's report of buffered broadcast frames after a DTIM beacon starts it for the DTIM period times the beacon
+// interval plus 20 ms, about 350 ms here.
+static constexpr uint32_t DRIVER_STAY_AWAKE_TIMER = 0x1C0;
+static constexpr uint16_t STAY_AWAKE_WAIT_MS = 500;
+// A wait belongs to an earlier standby attempt when nothing asked for this long.
+static constexpr uint32_t STAY_AWAKE_ATTEMPT_GAP_MS = 2000;
 // lwIP holds the small ping back (Nagle) until the frames sent before it are acknowledged.
 static constexpr uint32_t PEER_ANSWER_WAIT_MS = 1000;
 
@@ -370,7 +371,7 @@ bool XR806APIKeepaliveOffload::ready_for_standby() {
   if (client == nullptr)
     return true;
   if (now - last_write_ms + this->period_s_ * 1000U <= PEER_PING_LIMIT_MS)
-    return this->wlan_dozing_(now);
+    return this->driver_may_suspend_(now);
   // Home Assistant would ping before the first firmware frame; restart its timer and try again shortly.
   ESP_LOGD(TAG, "Standby waits: %" PRIu32 " ms since the last write, sending a ping response first",
            now - last_write_ms);
@@ -380,36 +381,19 @@ bool XR806APIKeepaliveOffload::ready_for_standby() {
   return false;
 }
 
-bool XR806APIKeepaliveOffload::wlan_dozing_(uint32_t now) {
-  // An answer holds for as long as it keeps being asked for, so one standby attempt waits once, whatever the
-  // coordinator's quiet time is. disarm() ends it.
-  if (now - this->doze_ok_ms_ < DOZE_VALID_MS) {
-    this->doze_ok_ms_ = now;
+bool XR806APIKeepaliveOffload::driver_may_suspend_(uint32_t now) {
+  const uint32_t since_asked = now - this->stay_awake_asked_ms_;
+  this->stay_awake_asked_ms_ = now;
+  if (since_asked >= STAY_AWAKE_ATTEMPT_GAP_MS)
+    this->stay_awake_waited_ms_ = 0;
+  // One standby attempt waits STAY_AWAKE_WAIT_MS in all, whatever the coordinator's quiet time is: a network with
+  // broadcasts at every DTIM keeps the timer running. disarm() starts the next attempt.
+  if (this->stay_awake_waited_ms_ >= STAY_AWAKE_WAIT_MS || wlan_unusable() ||
+      !OS_TimerIsActive(reinterpret_cast<OS_Timer_t *>(xr_drv_common + DRIVER_STAY_AWAKE_TIMER)))
     return true;
-  }
-  const uint32_t since_poll = now - this->doze_poll_ms_;
-  if (since_poll >= DOZE_VALID_MS) {
-    this->doze_polls_ = 0;  // a wait that was given up belongs to an earlier attempt
-  } else if (since_poll < DOZE_POLL_MS) {
-    return false;
-  }
-  this->doze_poll_ms_ = now;
-  uint32_t awake = 0;
-  // A core that cannot be asked must not hold standby back.
-  if (!wlan_unusable() && wlan_read_words(WLAN_AWAKE_WORD, &awake, 1) == 0 && (awake & WLAN_AWAKE_POWER_SAVE) != 0) {
-    if (this->doze_polls_ < DOZE_WAIT_POLLS) {
-      ++this->doze_polls_;
-      return false;
-    }
-    ESP_LOGD(TAG, "WLAN core still awake after %" PRIu32 " ms (%08" PRIX32 "); standby goes ahead",
-             DOZE_WAIT_POLLS * DOZE_POLL_MS, awake);
-  } else if (this->doze_polls_ != 0) {
-    ESP_LOGD(TAG, "Standby waited about %" PRIu32 " ms for the WLAN core's power save",
-             this->doze_polls_ * DOZE_POLL_MS);
-  }
-  this->doze_polls_ = 0;
-  this->doze_ok_ms_ = now;
-  return true;
+  const uint32_t waited = this->stay_awake_waited_ms_ + (since_asked < STAY_AWAKE_ATTEMPT_GAP_MS ? since_asked : 0);
+  this->stay_awake_waited_ms_ = static_cast<uint16_t>(std::min<uint32_t>(waited, STAY_AWAKE_WAIT_MS));
+  return this->stay_awake_waited_ms_ >= STAY_AWAKE_WAIT_MS;
 }
 
 void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
@@ -443,6 +427,11 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   }
   this->client_ = client;
   this->armed_ms_ = millis();
+  if (this->stay_awake_waited_ms_ != 0) {
+    ESP_LOGD(
+        TAG, "Standby waited %u ms for the WLAN driver's stay-awake timer%s", this->stay_awake_waited_ms_,
+        this->stay_awake_waited_ms_ >= STAY_AWAKE_WAIT_MS ? LOG_STR_LITERAL(" and went ahead") : LOG_STR_LITERAL(""));
+  }
   this->wake_frames_ =
       static_cast<uint8_t>(std::min<uint32_t>(wake_frames, this->frame_count_ > 1 ? this->frame_count_ - 1 : 1));
   if (!this->configure_firmware_()) {
@@ -468,8 +457,7 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
 }
 
 void XR806APIKeepaliveOffload::disarm(const XR806StandbyResume *event) {
-  // The next standby attempt asks the WLAN core again.
-  this->doze_ok_ms_ = millis() - DOZE_VALID_MS;
+  this->stay_awake_waited_ms_ = 0;
   armed_instance = nullptr;
   if (this->client_ == nullptr)
     return;

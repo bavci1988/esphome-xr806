@@ -41,14 +41,14 @@ class XR806APIKeepaliveOffload {
   void disarm(const XR806StandbyResume *event);
   /// After a WLAN wake while armed: whether the firmware had sent its last frame, so this is the planned wake.
   bool planned_wake();
-  /// False while standby should wait: shortly after the host sent held frames, or when Home Assistant would ping
-  /// before the first firmware frame (then a ping response is sent first), or for up to half a second while the
-  /// WLAN core's power save has not reached doze. Called from the standby preflight on every loop while standby is
-  /// requested.
+  /// False while standby should wait: shortly after the host sent held frames, when Home Assistant would ping
+  /// before the first firmware frame (then a ping response is sent first), or for up to half a second per standby
+  /// attempt while the WLAN driver's stay-awake timer runs. Called from the standby preflight on every loop while
+  /// standby is requested.
   bool ready_for_standby();
 
  protected:
-  bool wlan_dozing_(uint32_t now);
+  bool driver_may_suspend_(uint32_t now);
   bool capture_frames_(api::APIConnection *client, uint32_t max_frames);
   bool configure_firmware_();
   void stop_firmware_();
@@ -60,15 +60,14 @@ class XR806APIKeepaliveOffload {
   int fd_{-1};
   uint32_t armed_ms_{0};
   uint32_t burst_ms_{0};
-  uint32_t doze_ok_ms_{0};
-  uint32_t doze_poll_ms_{0};
+  uint32_t stay_awake_asked_ms_{0};
   uint32_t snd_nxt_{0};
   uint32_t rcv_nxt_{0};
   uint16_t frame_len_{0};
+  uint16_t stay_awake_waited_ms_{0};
   uint8_t frame_count_{0};
   uint8_t wake_frames_{0};
   uint8_t period_s_{0};
-  uint8_t doze_polls_{0};
   bool host_sleep_{false};
 };
 

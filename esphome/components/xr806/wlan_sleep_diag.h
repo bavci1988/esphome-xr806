@@ -332,6 +332,7 @@ struct Cycle {
   uint32_t count{0};
   uint32_t start_ms{0};
   int rx{0}, tx{0};
+  bool stay_awake_before{false};
   Snapshot before;
   uint32_t power_before[POWER_LINE_WORDS]{};
   uint32_t monitor_first{0};
@@ -415,6 +416,8 @@ XR806_DIAG_FLASH inline void before_standby() {
   c.monitor_awake = monitor;
   monitor = MONITOR_ENABLE | MONITOR_CLEAR;
   monitor = MONITOR_ENABLE;
+  // Read last: this is the timer that makes the driver refuse the suspend.
+  c.stay_awake_before = OS_TimerIsActive(reinterpret_cast<OS_Timer_t *>(xr_drv_common + 0x1C0)) != 0;
   c.start_ms = millis();
 }
 
@@ -444,9 +447,9 @@ XR806_DIAG_FLASH inline void after_wake(int result, uint32_t event) {
   auto *timer = reinterpret_cast<OS_Timer_t *>(xr_drv_common + 0x1C0);
   ESP_LOGI(TAG,
            "#%" PRIu32 " PM return %d event %08" PRIX32 " slept %" PRIu32
-           " ms, driver rx +%d tx +%d, stay_awake %d bh_error %d",
-           c.count, result, event, slept, skb_rx_cnt - c.rx, skb_tx_cnt - c.tx, OS_TimerIsActive(timer) ? 1 : 0,
-           failed ? 1 : 0);
+           " ms, driver rx +%d tx +%d, stay_awake %d>%d bh_error %d",
+           c.count, result, event, slept, skb_rx_cnt - c.rx, skb_tx_cnt - c.tx, c.stay_awake_before ? 1 : 0,
+           OS_TimerIsActive(timer) ? 1 : 0, failed ? 1 : 0);
   // Heap: bytes in use, free bytes inside the claimed part (in pieces) and the part never claimed. "in use" that
   // keeps growing is a leak; a small "never claimed" with a large "free" is fragmentation.
   uint8_t *heap_start, *heap_end, *heap_current;
