@@ -117,6 +117,12 @@ def validate_wake_pin(value: object) -> int:
 # The only switch for everything that changes how the WLAN firmware behaves during standby. The API connection
 # is handed to the patched firmware's TCP keepalive, which sends a list of pre-encrypted PingResponses while the
 # CPU sleeps; after the wake the host takes the connection back where the firmware left it.
+# Frames the firmware can send in one sleep: its list holds 30 frames of an encrypted PingResponse (FRAME_BYTES in
+# api_keepalive_offload.cpp and keepalive.c), and one stays with the host to answer Home Assistant's ping.
+HA_KEEPALIVE_MAX_FRAMES = 29
+# The firmware stops this long before wake_after, so that Home Assistant's own ping wakes the host (two
+# PEER_IDLE_PING_MS in api_keepalive_offload.cpp).
+HA_PING_WAIT_S = 40
 HA_WIFI_FW_KEEPALIVE_SCHEMA = cv.Schema(
     {
         cv.Optional(CONF_ENABLED, default=False): cv.boolean,
@@ -213,14 +219,24 @@ def _update_core_data(config: ConfigType) -> ConfigType:
             )
         if not config[CONF_STANDBY][CONF_ENABLED]:
             raise cv.Invalid("Remove xr806.standby when disabled")
-    if (
-        _ha_wifi_fw_keepalive(config) is not None
-        and not config[CONF_WLAN][CONF_STAY_CONNECTED]
-    ):
-        raise cv.Invalid(
-            f"xr806.{CONF_HA_WIFI_FW_KEEPALIVE} requires xr806.wlan.stay_connected",
-            path=[CONF_HA_WIFI_FW_KEEPALIVE],
-        )
+    if (keepalive := _ha_wifi_fw_keepalive(config)) is not None:
+        if not config[CONF_WLAN][CONF_STAY_CONNECTED]:
+            raise cv.Invalid(
+                f"xr806.{CONF_HA_WIFI_FW_KEEPALIVE} requires xr806.wlan.stay_connected",
+                path=[CONF_HA_WIFI_FW_KEEPALIVE],
+            )
+        # The firmware sends a frame every ping_interval until HA_PING_WAIT_S before wake_after, and its frame list
+        # is limited. A longer sleep would silently end when the list is used up.
+        interval_s = keepalive[CONF_PING_INTERVAL].total_seconds
+        wake_after_ms = config[CONF_STANDBY][CONF_WAKE_AFTER].total_milliseconds
+        longest_s = HA_PING_WAIT_S + interval_s * HA_KEEPALIVE_MAX_FRAMES
+        if wake_after_ms > longest_s * 1000:
+            raise cv.Invalid(
+                f"xr806.standby.wake_after needs more than {HA_KEEPALIVE_MAX_FRAMES} "
+                f"keepalive frames at a ping_interval of {interval_s} s; the longest "
+                f"sleep is {longest_s} s",
+                path=[CONF_STANDBY, CONF_WAKE_AFTER],
+            )
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = DOMAIN
     CORE.data[KEY_CORE][KEY_TARGET_FRAMEWORK] = Framework.XRADIO
     # Version of the pinned XRadio SDK (include/version.h), for require_framework_version().

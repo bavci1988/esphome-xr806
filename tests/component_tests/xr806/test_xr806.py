@@ -694,6 +694,11 @@ def test_ha_wifi_fw_keepalive_disabled(
             "    ping_interval: 300s\n",
             "ping_interval",
         ),
+        (
+            "    wake_after: 60s\n",
+            "    wake_after: 273s\n",
+            "the longest sleep is 272 s",
+        ),
     ],
 )
 def test_ha_wifi_fw_keepalive_rejects_invalid_configs(
