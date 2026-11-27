@@ -1,5 +1,5 @@
 esphome:
-  name: xr806-wifi-fw-standby-patch
+  name: xr806-ha-wifi-fw-keepalive
 xr806:
   board: wxu
   wlan:
@@ -7,9 +7,9 @@ xr806:
   standby:
     enabled: true
     wake_after: 60s
-  experimental_wifi_fw_standby_patch:
+  ha_wifi_fw_keepalive:
     enabled: true
-    keepalive_period: 8s
+    ping_interval: 8s
 wifi:
   ssid: TEST-NETWORK-NO-HARDWARE
   password: TestOnlyPassword123

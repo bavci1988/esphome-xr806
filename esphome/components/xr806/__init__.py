@@ -57,8 +57,8 @@ CONF_WAKE_AFTER = "wake_after"
 BOOT_HOLD_MARGIN_MS = 2000
 CONF_WAKE_PIN = "wake_pin"
 CONF_WAKE_EDGE = "wake_edge"
-CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH = "experimental_wifi_fw_standby_patch"
-CONF_KEEPALIVE_PERIOD = "keepalive_period"
+CONF_HA_WIFI_FW_KEEPALIVE = "ha_wifi_fw_keepalive"
+CONF_PING_INTERVAL = "ping_interval"
 CONF_HOST_SLEEP = "host_sleep"
 CONF_LOAD_AT_BOOT = "load_at_boot"
 CONF_DIAGNOSE_WLAN_ROM_DUMP = "diagnose_wlan_rom_dump"
@@ -117,12 +117,12 @@ def validate_wake_pin(value: object) -> int:
 # The only switch for everything that changes how the WLAN firmware behaves during standby. The API connection
 # is handed to the patched firmware's TCP keepalive, which sends a list of pre-encrypted PingResponses while the
 # CPU sleeps; after the wake the host takes the connection back where the firmware left it.
-EXPERIMENTAL_WIFI_FW_STANDBY_PATCH_SCHEMA = cv.Schema(
+HA_WIFI_FW_KEEPALIVE_SCHEMA = cv.Schema(
     {
-        cv.Required(CONF_ENABLED): cv.boolean,
+        cv.Optional(CONF_ENABLED, default=False): cv.boolean,
         # Home Assistant pings after 20 s without a message from the device; the host also needs a few seconds
         # before standby (api_keepalive_offload.cpp, PEER_PING_LIMIT_MS).
-        cv.Optional(CONF_KEEPALIVE_PERIOD, default="8s"): cv.All(
+        cv.Optional(CONF_PING_INTERVAL, default="8s"): cv.All(
             cv.positive_time_period_seconds,
             cv.Range(min=cv.TimePeriod(seconds=1), max=cv.TimePeriod(seconds=12)),
         ),
@@ -133,6 +133,12 @@ EXPERIMENTAL_WIFI_FW_STANDBY_PATCH_SCHEMA = cv.Schema(
         cv.Optional(CONF_LOAD_AT_BOOT, default=False): cv.boolean,
     }
 )
+
+
+def _ha_wifi_fw_keepalive(config: ConfigType) -> ConfigType | None:
+    """Return the ha_wifi_fw_keepalive block when it is enabled."""
+    keepalive = config.get(CONF_HA_WIFI_FW_KEEPALIVE)
+    return keepalive if keepalive is not None and keepalive[CONF_ENABLED] else None
 
 
 # Production standby coordinator: deliberately does NOT implement any
@@ -207,19 +213,14 @@ def _update_core_data(config: ConfigType) -> ConfigType:
             )
         if not config[CONF_STANDBY][CONF_ENABLED]:
             raise cv.Invalid("Remove xr806.standby when disabled")
-    if (patch := config.get(CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH)) is not None:
-        path = [CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH]
-        if not patch[CONF_ENABLED]:
-            raise cv.Invalid(
-                f"Remove xr806.{CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH} when disabled",
-                path=path,
-            )
-        if not config[CONF_WLAN][CONF_STAY_CONNECTED]:
-            raise cv.Invalid(
-                f"xr806.{CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH} requires "
-                "xr806.wlan.stay_connected",
-                path=path,
-            )
+    if (
+        _ha_wifi_fw_keepalive(config) is not None
+        and not config[CONF_WLAN][CONF_STAY_CONNECTED]
+    ):
+        raise cv.Invalid(
+            f"xr806.{CONF_HA_WIFI_FW_KEEPALIVE} requires xr806.wlan.stay_connected",
+            path=[CONF_HA_WIFI_FW_KEEPALIVE],
+        )
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = DOMAIN
     CORE.data[KEY_CORE][KEY_TARGET_FRAMEWORK] = Framework.XRADIO
     # Version of the pinned XRadio SDK (include/version.h), for require_framework_version().
@@ -278,9 +279,7 @@ CONFIG_SCHEMA = cv.All(
                 STANDBY_SCHEMA,
             ),
             cv.Optional(CONF_OTA_DIAGNOSTIC_READONLY, default=False): cv.boolean,
-            cv.Optional(
-                CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH
-            ): EXPERIMENTAL_WIFI_FW_STANDBY_PATCH_SCHEMA,
+            cv.Optional(CONF_HA_WIFI_FW_KEEPALIVE): HA_WIFI_FW_KEEPALIVE_SCHEMA,
             # Diagnostics: print the WLAN core's ROM to the log, read through the stock firmware.
             cv.Optional(CONF_DIAGNOSE_WLAN_ROM_DUMP, default=False): cv.boolean,
             # Logs the WLAN core's timers, clock and the driver's frame counters around every standby.
@@ -354,22 +353,21 @@ def _final_validate_stay_connected(config: ConfigType) -> ConfigType:
     return config
 
 
-def _final_validate_wifi_fw_standby_patch(config: ConfigType) -> ConfigType:
-    if CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH not in config:
+def _final_validate_ha_wifi_fw_keepalive(config: ConfigType) -> ConfigType:
+    if _ha_wifi_fw_keepalive(config) is None:
         return config
     api_config = fv.full_config.get().get("api")
     if api_config is None or CONF_KEY not in api_config.get(CONF_ENCRYPTION, {}):
         raise cv.Invalid(
-            f"xr806.{CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH} requires api with an "
-            "encryption key",
-            path=[CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH],
+            f"xr806.{CONF_HA_WIFI_FW_KEEPALIVE} requires api with an encryption key",
+            path=[CONF_HA_WIFI_FW_KEEPALIVE],
         )
     return config
 
 
 FINAL_VALIDATE_SCHEMA = cv.All(
     _final_validate_uart,
-    _final_validate_wifi_fw_standby_patch,
+    _final_validate_ha_wifi_fw_keepalive,
     _final_validate_wake_pin_ownership,
     _final_validate_stay_connected,
 )
@@ -453,9 +451,7 @@ async def to_code(config: ConfigType) -> None:
             )
             api_standby = cg.new_Pvariable(cfg[CONF_API_STANDBY_ID])
             await cg.register_component(api_standby, {})
-            if (
-                patch := config.get(CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH)
-            ) is not None:
+            if (keepalive := _ha_wifi_fw_keepalive(config)) is not None:
                 # A build flag, not a define: the XR806 makefile links lwip_write wrappers only with it.
                 cg.add_build_flag("-DUSE_XR806_API_KEEPALIVE_OFFLOAD")
                 cg.add_global(
@@ -463,14 +459,14 @@ async def to_code(config: ConfigType) -> None:
                         '#include "esphome/components/xr806/wlan_fw_swap.h"'
                     )
                 )
-                if patch[CONF_LOAD_AT_BOOT]:
+                if keepalive[CONF_LOAD_AT_BOOT]:
                     cg.add_define("USE_XR806_WLAN_FW_LOAD_AT_BOOT")
                 fw_swap = cg.new_Pvariable(config[CONF_WLAN_FW_SWAP_ID])
                 await cg.register_component(fw_swap, {})
                 cg.add(
                     api_standby.set_keepalive_offload(
-                        patch[CONF_KEEPALIVE_PERIOD].total_seconds,
-                        patch[CONF_HOST_SLEEP],
+                        keepalive[CONF_PING_INTERVAL].total_seconds,
+                        keepalive[CONF_HOST_SLEEP],
                     )
                 )
         if "mqtt" in CORE.config:
@@ -676,7 +672,7 @@ def run_compile(args: object, config: ConfigType) -> bool:
     xr806_libraries.write_fragment(libraries, obj, libraries_mk)
     variables["XR806_LIBRARIES_MK"] = str(libraries_mk)
 
-    if CONF_EXPERIMENTAL_WIFI_FW_STANDBY_PATCH in CORE.config.get(DOMAIN, {}):
+    if _ha_wifi_fw_keepalive(CORE.config.get(DOMAIN, {})) is not None:
         # The keepalive frame list needs the WLAN firmware with the keepalive and sleep modules. It goes into the
         # application; the flash image keeps the stock one, and XR806WlanFirmwareSwap serves the changed one at boot
         # or a minute later.

@@ -620,11 +620,11 @@ def test_stay_connected_rejects_invalid_configs(
     assert message in capsys.readouterr().out
 
 
-def test_wifi_fw_standby_patch(
+def test_ha_wifi_fw_keepalive(
     generate_main: Callable[[str | Path], str],
     component_config_path: Callable[[str], Path],
 ) -> None:
-    generated = generate_main(component_config_path("wifi_fw_standby_patch.yaml"))
+    generated = generate_main(component_config_path("ha_wifi_fw_keepalive.yaml"))
 
     assert "-DUSE_XR806_API_KEEPALIVE_OFFLOAD" in CORE.build_flags
     assert "set_keepalive_offload(8, true)" in generated
@@ -632,17 +632,17 @@ def test_wifi_fw_standby_patch(
     assert not any(d.name == "USE_XR806_WLAN_FW_LOAD_AT_BOOT" for d in CORE.defines)
 
 
-def test_wifi_fw_standby_patch_load_at_boot(
+def test_ha_wifi_fw_keepalive_load_at_boot(
     generate_main: Callable[[str | Path], str],
     component_config_path: Callable[[str], Path],
     tmp_path: Path,
 ) -> None:
-    config = component_config_path("wifi_fw_standby_patch.yaml").read_text()
-    path = tmp_path / "wifi_fw_standby_patch.yaml"
+    config = component_config_path("ha_wifi_fw_keepalive.yaml").read_text()
+    path = tmp_path / "ha_wifi_fw_keepalive.yaml"
     path.write_text(
         config.replace(
-            "    keepalive_period: 8s\n",
-            "    keepalive_period: 8s\n    load_at_boot: true\n",
+            "    ping_interval: 8s\n",
+            "    ping_interval: 8s\n    load_at_boot: true\n",
         )
     )
 
@@ -652,31 +652,51 @@ def test_wifi_fw_standby_patch_load_at_boot(
 
 
 @pytest.mark.parametrize(
+    "enabled", ["    enabled: false\n", ""], ids=["disabled", "default"]
+)
+def test_ha_wifi_fw_keepalive_disabled(
+    generate_main: Callable[[str | Path], str],
+    component_config_path: Callable[[str], Path],
+    tmp_path: Path,
+    enabled: str,
+) -> None:
+    config = component_config_path("ha_wifi_fw_keepalive.yaml").read_text()
+    path = tmp_path / "ha_wifi_fw_keepalive.yaml"
+    # Without stay_connected the enabled block is rejected; a disabled one must not be.
+    path.write_text(
+        config.replace(
+            "    enabled: true\n    ping_interval", f"{enabled}    ping_interval"
+        ).replace("    stay_connected: true\n", "    stay_connected: false\n")
+    )
+
+    generated = generate_main(path)
+
+    assert "-DUSE_XR806_API_KEEPALIVE_OFFLOAD" not in CORE.build_flags
+    assert "set_keepalive_offload" not in generated
+    assert "XR806WlanFirmwareSwap" not in generated
+
+
+@pytest.mark.parametrize(
     ("old", "new", "message"),
     [
         (
             "    stay_connected: true\n",
             "    stay_connected: false\n",
-            "xr806.experimental_wifi_fw_standby_patch requires xr806.wlan.stay_connected",
+            "xr806.ha_wifi_fw_keepalive requires xr806.wlan.stay_connected",
         ),
         (
             '  encryption:\n    key: "pz9e6sCcYa7KLRn94ZBPVEnoRBrE6XrJtg3Lbb6pfpM="\n',
             "",
-            "xr806.experimental_wifi_fw_standby_patch requires api with an encryption key",
+            "xr806.ha_wifi_fw_keepalive requires api with an encryption key",
         ),
         (
-            "    keepalive_period: 8s\n",
-            "    keepalive_period: 300s\n",
-            "keepalive_period",
-        ),
-        (
-            "    enabled: true\n    keepalive_period",
-            "    enabled: false\n    keepalive_period",
-            "Remove xr806.experimental_wifi_fw_standby_patch when disabled",
+            "    ping_interval: 8s\n",
+            "    ping_interval: 300s\n",
+            "ping_interval",
         ),
     ],
 )
-def test_wifi_fw_standby_patch_rejects_invalid_configs(
+def test_ha_wifi_fw_keepalive_rejects_invalid_configs(
     component_config_path: Callable[[str], Path],
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -684,9 +704,9 @@ def test_wifi_fw_standby_patch_rejects_invalid_configs(
     new: str,
     message: str,
 ) -> None:
-    config = component_config_path("wifi_fw_standby_patch.yaml").read_text()
+    config = component_config_path("ha_wifi_fw_keepalive.yaml").read_text()
     assert old in config
-    CORE.config_path = tmp_path / "wifi_fw_standby_patch.yaml"
+    CORE.config_path = tmp_path / "ha_wifi_fw_keepalive.yaml"
     CORE.config_path.write_text(config.replace(old, new))
 
     assert read_config({}) is None

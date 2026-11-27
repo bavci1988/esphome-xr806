@@ -15,7 +15,7 @@ class APIConnection;
 
 namespace esphome::xr806 {
 
-/// Experiment with the patched WLAN firmware (experimental_wifi_fw_standby_patch): while the CPU sleeps, the WLAN
+/// Keepalive by the changed WLAN firmware (ha_wifi_fw_keepalive): while the CPU sleeps, the WLAN
 /// core sends pre-encrypted PingResponse frames on the API connection, so Home Assistant does not ping and wake it.
 ///
 /// Before standby the API encrypts a list of frames as usual; the socket write is caught (lwip_write is linked
