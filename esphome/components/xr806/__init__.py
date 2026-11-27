@@ -127,8 +127,9 @@ HA_WIFI_FW_KEEPALIVE_SCHEMA = cv.Schema(
     {
         cv.Optional(CONF_ENABLED, default=False): cv.boolean,
         # Home Assistant pings after 20 s without a message from the device; the host also needs a few seconds
-        # before standby (api_keepalive_offload.cpp, PEER_PING_LIMIT_MS).
-        cv.Optional(CONF_PING_INTERVAL, default="12s"): cv.All(
+        # before standby (api_keepalive_offload.cpp, PEER_PING_LIMIT_MS). With 12 s a host that is awake for 5 s
+        # has to send one more PingResponse and wait before every standby.
+        cv.Optional(CONF_PING_INTERVAL, default="10s"): cv.All(
             cv.positive_time_period_seconds,
             cv.Range(min=cv.TimePeriod(seconds=1), max=cv.TimePeriod(seconds=12)),
         ),

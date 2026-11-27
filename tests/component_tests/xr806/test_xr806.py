@@ -660,7 +660,7 @@ def test_ha_wifi_fw_keepalive_default_interval(
     path = tmp_path / "ha_wifi_fw_keepalive.yaml"
     path.write_text(config.replace("    ping_interval: 8s\n", ""))
 
-    assert "set_keepalive_offload(12, true)" in generate_main(path)
+    assert "set_keepalive_offload(10, true)" in generate_main(path)
 
 
 @pytest.mark.parametrize(
