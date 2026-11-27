@@ -640,7 +640,7 @@ void AsyncStreamResponse::begin(AsyncWebServerRequest *request, const char *stat
   }
   if (open >= MAX_STREAMS) {
     ESP_LOGD(TAG, "Closing the oldest event stream for a new one");
-    oldest->close();
+    oldest->abort_();
   }
   this->socket_ = std::move(socket);
   this->next_stream_ = first_stream;
@@ -701,13 +701,23 @@ bool AsyncStreamResponse::stall_or_close_(const LogString *reason) {
   if (!this->stall_.start_or_expired(now, SEND_STALL_TIMEOUT_MS))
     return false;
   ESP_LOGW(TAG, "Closing stuck stream after %" PRIu32 " ms %s", this->stall_.elapsed(now), LOG_STR_ARG(reason));
-  this->close();
+  this->abort_();
   return true;
 }
 
 void AsyncStreamResponse::close() {
   this->close_requested_ = true;
   this->socket_.reset();
+}
+
+// A graceful close would keep the FIN behind the unsent data, holding lwIP's fixed buffers and one of its few TCP
+// connections for minutes of retransmissions; a reset frees them at once.
+void AsyncStreamResponse::abort_() {
+  if (this->socket_ != nullptr) {
+    const struct linger reset_on_close = {.l_onoff = 1, .l_linger = 0};
+    this->socket_->setsockopt(SOL_SOCKET, SO_LINGER, &reset_on_close, sizeof(reset_on_close));
+  }
+  this->close();
 }
 
 }  // namespace esphome::web_server_xr806

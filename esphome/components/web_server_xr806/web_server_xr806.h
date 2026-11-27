@@ -230,6 +230,12 @@ class AsyncStreamResponse {
   ssize_t write(const void *data, size_t len);
   /// Closes the socket; safe to call more than once.
   void close();
+
+ protected:
+  /// Drops a stuck stream with a reset instead of a FIN behind its unsent data.
+  void abort_();
+
+ public:
   void loop() {}
 
   bool is_attached() const { return this->socket_ != nullptr; }
