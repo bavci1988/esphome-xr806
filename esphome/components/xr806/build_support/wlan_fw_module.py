@@ -12,7 +12,8 @@ when the firmware starts. The firmware is connected to the modules in a few plac
 
 - the receive hook and the MIB pre-handler of the function table: the keepalive;
 - the handler the firmware registers for the "nothing keeps the core awake" event, the idle hook and the timer
-  start of the function table, and the warm start address of the reset code: the sleep path;
+  start of the function table, the warm start address of the reset code and the wake timing function: the sleep
+  path;
 - the vendor keepalive's initialisation function becomes a jump to module_init;
 - the debug hooks of the function table go back to the ROM's empty functions, as in firmware 02.138.
 
@@ -36,6 +37,7 @@ DEFINES = {
     "PATCH_STATE": "0xFFF0AFD0U",
     "PATCH_BUSY_CHECK": "0xFFF0959DU",
     "PATCH_TIMER_START": "0xFFF09041U",
+    "PATCH_SET_TIMING": "0x0900B53DU",
 }
 CFLAGS = (
     "-mcpu=arm926ej-s",
@@ -92,6 +94,7 @@ HOOKS = (
     Hook(0xFFF00438, 0x00019223, "sleep_idle"),
     Hook(0xFFF00468, 0xFFF09041, "sleep_timer_start"),
     Hook(0xFFF000D4, 0x000054E7, "sleep_warm_start"),
+    Hook(0xFFF00448, 0x0900B53D, "sleep_set_timing"),
     # debug hooks: the ROM's empty functions
     Hook(0xFFF0041C, 0x0900B409, 0x00019215),
     Hook(0xFFF00420, 0x0900B40F, 0x00019217),

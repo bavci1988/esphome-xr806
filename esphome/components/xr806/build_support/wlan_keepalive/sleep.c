@@ -40,6 +40,10 @@
 #error "PATCH_TIMER_START: Thumb address of the firmware's timer start (02.132: 0xFFF09041, 02.138: 0xFFF09089)"
 #endif
 
+#ifndef PATCH_SET_TIMING
+#error "PATCH_SET_TIMING: Thumb address of the firmware's wake timing function (02.132: 0x0900B53D, 02.138: 0x0900AE41)"
+#endif
+
 #define REG(address) (*(volatile uint32_t *) (address))
 #define BYTE(address) (*(volatile uint8_t *) (address))
 #define HALF(address) (*(volatile uint16_t *) (address))
@@ -156,6 +160,40 @@ void sleep_idle(void) {
     STAY_AWAKE = 1;
 #endif
   ROM_FN(0x00019223, void (*)(void))();
+}
+
+/*
+ * For the firmware's function table instead of its wake timing function (slot 0xFFF00448).
+ *
+ * The power controller switches the domain on in steps and waits between them: first for the supply, then for the
+ * crystal oscillator and its PLL. Both waits come from the WLAN device data file (element 0xC3 of sys_sdd_*.bin:
+ * 125 us and 563 us), which the ROM stores as two halfwords; the vendor function turns them into ticks of the
+ * low-frequency clock for the power controller (0x0AC800B4, 0x0AC80004) and adds them to the lead time of the wake.
+ *
+ * On the device the core now and then does not come back from a sleep: the record shows that "go" was written and
+ * the reset code never ran again, with the domain's power switch off. Nothing in the core's software runs in
+ * between, so the waits are the only part of that path the firmware decides. They are raised here to see whether the
+ * vendor's values are too tight; the lead time follows by itself. Costs: the core is powered that much earlier
+ * before every wake.
+ */
+#ifndef SLEEP_SUPPLY_WAIT_US
+#define SLEEP_SUPPLY_WAIT_US 500U
+#endif
+#ifndef SLEEP_CLOCK_WAIT_US
+#define SLEEP_CLOCK_WAIT_US 2000U
+#endif
+#define WAKE_TIMING_MODE HALF(0xFFF01C0CU + 0x3A) /* 2: the two waits below are used */
+#define WAKE_SUPPLY_WAIT_US HALF(0xFFF01C0CU + 0x3C)
+#define WAKE_CLOCK_WAIT_US HALF(0xFFF01C0CU + 0x3E)
+
+void sleep_set_timing(uint32_t arg) {
+  if (WAKE_TIMING_MODE == 2) {
+    if (WAKE_SUPPLY_WAIT_US < SLEEP_SUPPLY_WAIT_US)
+      WAKE_SUPPLY_WAIT_US = SLEEP_SUPPLY_WAIT_US;
+    if (WAKE_CLOCK_WAIT_US < SLEEP_CLOCK_WAIT_US)
+      WAKE_CLOCK_WAIT_US = SLEEP_CLOCK_WAIT_US;
+  }
+  ROM_FN(PATCH_SET_TIMING, void (*)(uint32_t))(arg);
 }
 
 /* For the reset code instead of the ROM's warm start. */

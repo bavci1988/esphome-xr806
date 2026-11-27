@@ -28,6 +28,7 @@ extern const uint8_t xr806_wlan_fw_keepalive_end[];
 namespace {
 // Image section of wlan_fw.bin (project/image_cfg/image.cfg).
 constexpr uint32_t WLAN_FW_SECTION_ID = 0xA5F95A06;
+constexpr uint32_t OSCILLATOR_WAIT_TICKS = 48;  // about 1.5 ms; below the WLAN firmware's 2 ms
 // Initialised data, so it holds before the SDK loads the WLAN firmware at platform start, ahead of setup().
 #ifdef USE_XR806_WLAN_FW_LOAD_AT_BOOT
 volatile bool serve_patched = true;
@@ -59,6 +60,13 @@ uint32_t __wrap_image_rw(uint32_t id, image_seg_t seg, uint32_t offset, void *bu
     rc_measurement = rc_measurement & ~1U;
     // Bits 6-7: the calibration starts when the CPU and the WLAN core both sleep (SDK setting).
     power_config = (power_config & ~(3U << 6)) | (2U << 6);
+    // Time the power control waits for the crystal oscillator, in ticks of the 32 kHz clock (SDK: 16, about 0.5 ms).
+    // The WLAN core now and then does not come back from its sleep while the CPU sleeps; the waits of the power-up
+    // are the part of it that software sets, and the WLAN firmware's own wait is raised with it
+    // (build_support/wlan_keepalive/sleep.c, sleep_set_timing).
+    volatile uint32_t &oscillator_wait = *reinterpret_cast<volatile uint32_t *>(0x400400A8);
+    if ((oscillator_wait & 0x3FFU) < OSCILLATOR_WAIT_TICKS)
+      oscillator_wait = OSCILLATOR_WAIT_TICKS;
   }
   if (!serve_patched)
     return result;

@@ -189,10 +189,10 @@ struct Region {
 };
 static constexpr Region REGIONS[] = {
     {"sched", 0xFFF01C00, 40}, {"clock", 0xFFF05600, 16},     {"hostq", 0xFFF02AA0, 16},
-    {"rxcnt", 0xFFF02280, 32}, {"keepalive", 0x0900BB8C, 20}, {"sleeprec", 0x0900BEA8, 23},
+    {"rxcnt", 0xFFF02280, 32}, {"keepalive", 0x0900BB8C, 24}, {"sleeprec", 0x0900BEA8, 24},
     {"stack", 0xFFF0B000, 1024},
 };
-static constexpr uint32_t MEMORY_WORDS = 40 + 16 + 16 + 32 + 20 + 23 + 1024;
+static constexpr uint32_t MEMORY_WORDS = 40 + 16 + 16 + 32 + 24 + 24 + 1024;
 // Registers of the WLAN domain's own power control (its sleep-on-WFI register is 0x0AA800A0) and timer, read
 // one by one: only those the WLAN firmware itself reads. 0x0AA800C4 and up are hardware spinlocks, where a read
 // takes the lock, so a plain dump of the block leaves the core spinning. The CPU reaches them only through the
