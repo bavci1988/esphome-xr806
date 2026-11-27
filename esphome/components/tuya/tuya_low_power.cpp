@@ -74,6 +74,8 @@ static bool valid_datapoints(const uint8_t *data, size_t len) {
 }
 
 void TuyaUART::setup_low_power_() {
+  // Not nullptr, which means "offers running": the first check logs its outcome either way
+  this->lp_v3_sleep_blocked_ = LOG_STR("not checked yet");
   this->init_state_ = TuyaInitState::INIT_PRODUCT;
   this->lp_uart_rx_errors_.reset(this->low_power_uart_rx_error_count_());
   if (this->mcu_wake_pin_ == nullptr && this->lp_host_ != nullptr) {
