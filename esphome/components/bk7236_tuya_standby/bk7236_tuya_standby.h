@@ -75,6 +75,7 @@ class BK7236TuyaStandby final : public Component, public tuya::TuyaLowPowerHost 
   bool preflight_requested_{false};
   bool standby_requested_{false};
   bool sleeping_{false};
+  bool wake_held_logged_{false};
 };
 
 }  // namespace esphome::bk7236_tuya_standby

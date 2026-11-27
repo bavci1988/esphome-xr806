@@ -53,11 +53,17 @@ void BK7236TuyaStandby::loop() {
     return;
   // Right after agreeing to sleep the MCU may still hold its wake line: wait instead of refusing
   if (this->wake_input_ >= 0 && !this->wake_in_.digital_read()) {
+    if (!this->wake_held_logged_) {
+      this->wake_held_logged_ = true;
+      ESP_LOGD(TAG, "Standby waits: the MCU holds its wake line P%d low", this->wake_input_);
+    }
     this->next_attempt_ms_ = now + RETRY_MS;
     return;
   }
+  this->wake_held_logged_ = false;
   if (!this->tuya_->low_power_prepare_for_standby()) {
     // The hub may first send its own notice and agree on the next attempt
+    ESP_LOGV(TAG, "Tuya hub not ready for standby yet");
     this->tuya_->low_power_standby_cancelled();
     this->next_attempt_ms_ = now + RETRY_MS;
     return;
