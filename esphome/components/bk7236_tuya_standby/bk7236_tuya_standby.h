@@ -33,9 +33,7 @@ class BK7236TuyaStandby final : public Component, public tuya::TuyaLowPowerHost 
   void dump_config() override;
 
   // tuya::TuyaLowPowerHost
-  void require_external_mcu() override {}
   void set_mcu_synchronized(bool synchronized) override {}
-  uint32_t uart_rx_error_count() const override { return 0; }
   bool ota_busy() const override;
   bool standby_supported() const override { return this->wake_input_ >= 0; }
   int standby_wake_pin() const override { return this->wake_input_; }
