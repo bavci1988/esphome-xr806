@@ -22,7 +22,6 @@ extern "C" {
 #include "lwip/sockets.h"
 #include "lwip/netif.h"
 #include "kernel/os/os_thread.h"
-#include "kernel/os/os_timer.h"
 #include "driver/chip/hal_wakeup.h"
 }
 
@@ -113,10 +112,8 @@ static constexpr uint32_t PEER_PING_LIMIT_MS = 17000;
 static constexpr uint32_t PEER_IDLE_PING_MS = 20000;
 // The WLAN driver refused to suspend right after the host sent the held frames; wait this long after such a burst.
 static constexpr uint32_t SETTLE_MS = 2000;
-// The driver refuses to suspend (xr_wlan_suspend, without naming a reason) while its stay-awake timer runs. The
-// firmware's report of buffered broadcast frames after a DTIM beacon starts it for the DTIM period times the beacon
-// interval plus 20 ms, about 350 ms here.
-static constexpr uint32_t DRIVER_STAY_AWAKE_TIMER = 0x1C0;
+// How long one standby attempt waits for the driver's stay-awake timer (wlan_driver_stay_awake()), which runs for
+// about 350 ms here.
 static constexpr uint16_t STAY_AWAKE_WAIT_MS = 500;
 // A wait belongs to an earlier standby attempt when nothing asked for this long.
 static constexpr uint32_t STAY_AWAKE_ATTEMPT_GAP_MS = 2000;
@@ -348,6 +345,19 @@ bool XR806APIKeepaliveOffload::planned_wake() {
   return (word >> 24) == 0;
 }
 
+bool keepalive_offload_postpone_for_driver() {
+  // Limited, because a network with broadcasts at every DTIM beacon keeps the timer running.
+  static constexpr uint8_t MAX_POSTPONES = 3;
+  static uint8_t postpones = 0;
+  if (postpones >= MAX_POSTPONES || wlan_unusable() || !wlan_driver_stay_awake()) {
+    postpones = 0;
+    return false;
+  }
+  ++postpones;
+  ESP_LOGD(TAG, "Standby postponed: the WLAN driver's stay-awake timer runs (%u of %u)", postpones, MAX_POSTPONES);
+  return true;
+}
+
 bool keepalive_offload_planned_wake() { return armed_instance != nullptr && armed_instance->planned_wake(); }
 
 static api::APIConnection *single_client() {
@@ -388,8 +398,7 @@ bool XR806APIKeepaliveOffload::driver_may_suspend_(uint32_t now) {
     this->stay_awake_waited_ms_ = 0;
   // One standby attempt waits STAY_AWAKE_WAIT_MS in all, whatever the coordinator's quiet time is: a network with
   // broadcasts at every DTIM keeps the timer running. disarm() starts the next attempt.
-  if (this->stay_awake_waited_ms_ >= STAY_AWAKE_WAIT_MS || wlan_unusable() ||
-      !OS_TimerIsActive(reinterpret_cast<OS_Timer_t *>(xr_drv_common + DRIVER_STAY_AWAKE_TIMER)))
+  if (this->stay_awake_waited_ms_ >= STAY_AWAKE_WAIT_MS || wlan_unusable() || !wlan_driver_stay_awake())
     return true;
   const uint32_t waited = this->stay_awake_waited_ms_ + (since_asked < STAY_AWAKE_ATTEMPT_GAP_MS ? since_asked : 0);
   this->stay_awake_waited_ms_ = static_cast<uint16_t>(std::min<uint32_t>(waited, STAY_AWAKE_WAIT_MS));

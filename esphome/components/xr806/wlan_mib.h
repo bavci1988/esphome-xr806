@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "kernel/os/os_timer.h"
+
 extern "C" {
 // Vendor WLAN driver (libxrwireless.a). xr_drv_common is the driver's xradio_common instance.
 extern char xr_drv_common[];
@@ -15,6 +17,13 @@ namespace esphome::xr806 {
 /// True once the driver gave up on the WLAN core (bh_error, set with "fatal error occured"). Its requests then use
 /// state the recovery task is tearing down and can fault the CPU, so callers must leave the driver alone.
 inline bool wlan_driver_failed() { return *reinterpret_cast<volatile int *>(xr_drv_common + 0x1E4) != 0; }
+
+/// True while the driver's stay-awake timer runs. xr_wlan_suspend() then refuses the suspend without naming a reason.
+/// The firmware's report of buffered broadcast frames after a DTIM beacon starts the timer for the DTIM period times
+/// the beacon interval plus 20 ms.
+inline bool wlan_driver_stay_awake() {
+  return OS_TimerIsActive(reinterpret_cast<OS_Timer_t *>(xr_drv_common + 0x1C0)) != 0;
+}
 
 /// Reads up to 16 words of WLAN core memory through the stock firmware's register debug request (MIB 9, as used
 /// by DBG_BH_FW_RW_REGS): {u16 flag, u16 size, u32 address[16]}, flag bit 0 clear for a read; the firmware returns

@@ -322,6 +322,17 @@ void XR806StandbyController::attempt_standby_() {
   }
 #endif
 
+#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
+  // A suspend that the WLAN driver refuses counts as a failed attempt and costs seconds awake; another quiet interval
+  // does not.
+  if (keepalive_offload_postpone_for_driver()) {
+    this->cancel_prepared_(prepared);
+    this->state_.postpone();
+    this->busy_ = false;
+    return;
+  }
+#endif
+
   const int wake_io = this->has_wake_pin_ ? static_cast<int>(this->wake_pin_) - 10 : -1;
   GPIO_InitParam previous_gpio{};
   bool gpio_armed = false;
