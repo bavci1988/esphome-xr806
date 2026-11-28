@@ -26,9 +26,9 @@ namespace esphome::xr806 {
 /// True when the standby that just ended was the planned one: the patched firmware sent its last frame and Home
 /// Assistant's ping woke the host. The coordinator then treats it like its timer wake.
 bool keepalive_offload_planned_wake();
-/// Right before standby is committed: true while the WLAN driver's stay-awake timer runs, for a few attempts in a
-/// row. The attempt then waits another quiet interval instead of being refused by the driver.
-bool keepalive_offload_postpone_for_driver();
+/// Right before standby is committed: blocks for up to 400 ms while the WLAN driver's stay-awake timer runs, so
+/// that the driver does not refuse the suspend.
+void keepalive_offload_wait_for_driver();
 
 class XR806APIKeepaliveOffload {
  public:

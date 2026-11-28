@@ -345,17 +345,22 @@ bool XR806APIKeepaliveOffload::planned_wake() {
   return (word >> 24) == 0;
 }
 
-bool keepalive_offload_postpone_for_driver() {
-  // Limited, because a network with broadcasts at every DTIM beacon keeps the timer running.
-  static constexpr uint8_t MAX_POSTPONES = 3;
-  static uint8_t postpones = 0;
-  if (postpones >= MAX_POSTPONES || wlan_unusable() || !wlan_driver_stay_awake()) {
-    postpones = 0;
-    return false;
+// What keepalive_offload_wait_for_driver() waited in the current standby attempt.
+static uint16_t last_moment_wait_ms = 0;
+
+void keepalive_offload_wait_for_driver() {
+  // The timer runs for about 350 ms; a network with broadcasts at every DTIM beacon keeps it running.
+  static constexpr uint16_t MAX_WAIT_MS = 400;
+  static constexpr uint16_t STEP_MS = 10;
+  last_moment_wait_ms = 0;
+  if (wlan_unusable())
+    return;
+  // Logged by arm(): a line written here could still be leaving the log UART at the check that follows in the
+  // standby controller, and that check cancels the attempt.
+  while (last_moment_wait_ms < MAX_WAIT_MS && wlan_driver_stay_awake()) {
+    delay(STEP_MS);
+    last_moment_wait_ms += STEP_MS;
   }
-  ++postpones;
-  ESP_LOGD(TAG, "Standby postponed: the WLAN driver's stay-awake timer runs (%u of %u)", postpones, MAX_POSTPONES);
-  return true;
 }
 
 bool keepalive_offload_planned_wake() { return armed_instance != nullptr && armed_instance->planned_wake(); }
@@ -436,10 +441,12 @@ void XR806APIKeepaliveOffload::arm(uint32_t wake_after_ms) {
   }
   this->client_ = client;
   this->armed_ms_ = millis();
-  if (this->stay_awake_waited_ms_ != 0) {
+  if (this->stay_awake_waited_ms_ != 0 || last_moment_wait_ms != 0) {
     ESP_LOGD(
-        TAG, "Standby waited %u ms for the WLAN driver's stay-awake timer%s", this->stay_awake_waited_ms_,
-        this->stay_awake_waited_ms_ >= STAY_AWAKE_WAIT_MS ? LOG_STR_LITERAL(" and went ahead") : LOG_STR_LITERAL(""));
+        TAG, "Standby waited %u ms for the WLAN driver's stay-awake timer%s, %u ms at the last moment",
+        this->stay_awake_waited_ms_,
+        this->stay_awake_waited_ms_ >= STAY_AWAKE_WAIT_MS ? LOG_STR_LITERAL(" and went ahead") : LOG_STR_LITERAL(""),
+        last_moment_wait_ms);
   }
   this->wake_frames_ =
       static_cast<uint8_t>(std::min<uint32_t>(wake_frames, this->frame_count_ > 1 ? this->frame_count_ - 1 : 1));

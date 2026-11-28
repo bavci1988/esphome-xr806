@@ -303,6 +303,12 @@ void XR806StandbyController::attempt_standby_() {
     }
   }
 
+#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
+  // A suspend that the WLAN driver refuses costs seconds awake. Waiting here does not cancel the attempt: a
+  // cancelled one withdraws the MCU's sleep request, and the module then stays awake until the MCU asks again.
+  // Activity during the wait is caught by the check below.
+  keepalive_offload_wait_for_driver();
+#endif
   // If a client sent UART bytes or changed any PM vote while preparing,
   // give the buses another full quiet interval, rather than racing PM entry.
   if (before_clients != p.generation() || !p.standby_requested()) {
@@ -315,17 +321,6 @@ void XR806StandbyController::attempt_standby_() {
   // Before the wake sources are armed, so a log UART that is still sending postpones the attempt
   // instead of counting as a failed one.
   if (!drain_log_uart()) {
-    this->cancel_prepared_(prepared);
-    this->state_.postpone();
-    this->busy_ = false;
-    return;
-  }
-#endif
-
-#ifdef USE_XR806_API_KEEPALIVE_OFFLOAD
-  // A suspend that the WLAN driver refuses counts as a failed attempt and costs seconds awake; another quiet interval
-  // does not.
-  if (keepalive_offload_postpone_for_driver()) {
     this->cancel_prepared_(prepared);
     this->state_.postpone();
     this->busy_ = false;
